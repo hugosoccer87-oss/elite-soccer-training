@@ -1,11 +1,26 @@
 import Image from "next/image";
 import Link from "next/link";
-import { BallIcon, BoltIcon, ShieldIcon, TargetIcon } from "@/components/Icons";
+import { BallIcon, BoltIcon, ShieldIcon, StarIcon, TargetIcon } from "@/components/Icons";
 import { SectionHeader } from "@/components/SectionHeader";
 import { TrainingCard } from "@/components/TrainingCard";
 import { benefits, business, services } from "@/lib/site-data";
 
 const benefitIcons = [TargetIcon, ShieldIcon, BoltIcon, BallIcon, ShieldIcon];
+const testimonials = [
+  {
+    name: "Parent of 2012 Player",
+    review:
+      "The sessions are organized, intense, and focused. My son has already improved his confidence and speed of play."
+  },
+  {
+    name: "Parent of 2014 Player",
+    review: "Great small group environment. The training is detailed, competitive, and keeps players engaged."
+  },
+  {
+    name: "Parent of High School Player",
+    review: "Coach Hugo creates a professional training environment that pushes players while building confidence."
+  }
+];
 
 export default function HomePage() {
   return (
@@ -159,6 +174,37 @@ export default function HomePage() {
               );
             })}
           </div>
+        </div>
+      </section>
+
+      <section className="bg-mist py-16 sm:py-20">
+        <div className="section-shell">
+          <SectionHeader
+            eyebrow="Testimonials"
+            title="PARENT REVIEWS"
+            description="Hear from families who trust Elite Soccer Training."
+          />
+          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+            {testimonials.map((testimonial) => (
+              <article key={testimonial.name} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex gap-1 text-electric">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <StarIcon key={`${testimonial.name}-${index}`} className="h-4 w-4" />
+                  ))}
+                </div>
+                <p className="mt-5 text-base font-semibold leading-7 text-slate-700">"{testimonial.review}"</p>
+                <p className="mt-6 border-t border-slate-200 pt-4 text-sm font-black uppercase text-navy">
+                  {testimonial.name}
+                </p>
+              </article>
+            ))}
+          </div>
+          <Link
+            href="/booking"
+            className="mt-8 inline-flex w-full justify-center rounded-md bg-electric px-7 py-4 text-sm font-black uppercase text-white shadow-xl shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
+          >
+            Book Training
+          </Link>
         </div>
       </section>
 

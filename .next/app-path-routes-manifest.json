@@ -1,0 +1,12 @@
+{
+  "/api/bookings/route": "/api/bookings",
+  "/_not-found/page": "/_not-found",
+  "/page": "/",
+  "/payment/page": "/payment",
+  "/waiver/page": "/waiver",
+  "/admin/page": "/admin",
+  "/services/page": "/services",
+  "/about/page": "/about",
+  "/booking/page": "/booking",
+  "/contact/page": "/contact"
+}
