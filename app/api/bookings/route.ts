@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { bookingNotificationEmail, type BookingRecord } from "@/lib/booking-data";
+import { createBookingCalendarEvent } from "@/lib/google-calendar";
 
 const resendEndpoint = "https://api.resend.com/emails";
 
@@ -137,6 +138,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid booking payload" }, { status: 400 });
   }
 
+  const calendarResult = await createBookingCalendarEvent(booking);
+
+  if (calendarResult.status === "Unavailable") {
+    return NextResponse.json(
+      {
+        error: calendarResult.message ?? "That session is no longer available.",
+        notificationStatus: "Ready",
+        calendarStatus: calendarResult.status
+      },
+      { status: 409 }
+    );
+  }
+
   const ownerSent = await sendEmail({
     to: bookingNotificationEmail,
     subject: `New EST booking: ${booking.playerName} - ${booking.programName}`,
@@ -152,6 +166,9 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({
-    notificationStatus: ownerSent && parentSent ? "Sent" : "Email service not configured"
+    notificationStatus: ownerSent && parentSent ? "Sent" : "Email service not configured",
+    calendarStatus: calendarResult.status,
+    calendarEventId: calendarResult.eventId,
+    calendarEventUrl: calendarResult.eventUrl
   });
 }

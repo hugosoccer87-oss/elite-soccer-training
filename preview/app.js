@@ -340,6 +340,7 @@ function renderConfirmedPanel() {
       ${slot ? `<p>${slot.dateLabel} at ${slot.time} in Coachella Valley, CA</p>` : ""}
       <div class="confirmation-grid">
         <span>Payment successful<small>Complete</small></span>
+        <span>Google Calendar ready<small>Calendar Setup Needed</small></span>
         <span>${escapeHtml(parentStatus)}<small>${statusLabel}</small></span>
         <span>${escapeHtml(coachStatus)}<small>${statusLabel}</small></span>
       </div>
@@ -424,10 +425,14 @@ function confirmBooking() {
     programId: bookingState.selectedGroupId,
     programName: group.name,
     sessionId: slot.id,
+    sessionDateIso: latest.dateIso,
     sessionDate: latest.dateLabel,
     sessionTime: latest.time,
+    sessionDurationMinutes: 60,
+    sessionCalendarEventId: latest.calendarEventId,
     paymentStatus: "Paid",
-    notificationStatus: "Ready"
+    notificationStatus: "Ready",
+    calendarStatus: "Ready"
   };
   saveSlots(latestSlots.map((item) => (item.id === slot.id ? updatedSlot : item)));
   saveBooking(booking);
@@ -497,6 +502,7 @@ function renderAdmin(message = "") {
             <span><b>Notes:</b> ${escapeHtml(booking.notes || "None")}</span>
             <span><b>Medical:</b> ${escapeHtml(booking.medicalNotes || "None")}</span>
             <span><b>Email Status:</b> ${escapeHtml(booking.notificationStatus)}</span>
+            <span><b>Calendar:</b> ${escapeHtml(booking.calendarStatus || "Ready")}</span>
           </div>
         </article>
       `).join("") : `<p class="empty-state"><strong>No bookings yet.</strong></p>`}

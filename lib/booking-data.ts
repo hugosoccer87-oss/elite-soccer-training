@@ -22,7 +22,17 @@ export type TrainingSlot = {
   capacity: number;
   bookedPlayers: number;
   status: SlotStatus;
+  calendarEventId?: string;
+  calendarStatus?: CalendarSyncStatus;
 };
+
+export type CalendarSyncStatus =
+  | "Ready"
+  | "Created"
+  | "Synced"
+  | "Unavailable"
+  | "Google Calendar not configured"
+  | "Failed";
 
 export type BookingRecord = {
   id: string;
@@ -41,10 +51,16 @@ export type BookingRecord = {
   programId: TrainingGroupId;
   programName: string;
   sessionId: string;
+  sessionDateIso: string;
   sessionDate: string;
   sessionTime: string;
+  sessionDurationMinutes: number;
+  sessionCalendarEventId?: string;
   paymentStatus: "Paid" | "Pending" | "Failed";
   notificationStatus: "Ready" | "Sent" | "Email service not configured";
+  calendarStatus: CalendarSyncStatus;
+  calendarEventId?: string;
+  calendarEventUrl?: string;
 };
 
 export const availabilityStorageKey = "est-availability-v3";

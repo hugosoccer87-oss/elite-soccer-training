@@ -128,6 +128,42 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../app/api/google-calendar/auth/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/google-calendar/auth">> = Specific
+  const handler = {} as typeof import("../../app/api/google-calendar/auth/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/google-calendar/availability/[eventId]/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/google-calendar/availability/[eventId]">> = Specific
+  const handler = {} as typeof import("../../app/api/google-calendar/availability/[eventId]/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/google-calendar/availability/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/google-calendar/availability">> = Specific
+  const handler = {} as typeof import("../../app/api/google-calendar/availability/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/google-calendar/callback/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/google-calendar/callback">> = Specific
+  const handler = {} as typeof import("../../app/api/google-calendar/callback/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 
 
 

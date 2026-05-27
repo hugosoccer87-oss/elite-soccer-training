@@ -17,6 +17,7 @@ import {
   slotCapacity,
   trainingGroups,
   type BookingRecord,
+  type CalendarSyncStatus,
   type TrainingGroupId,
   type TrainingSlot
 } from "@/lib/booking-data";
@@ -67,6 +68,14 @@ const initialFields: BookingFields = {
   cardExpiry: "",
   cardCvc: "",
   postalCode: ""
+};
+
+type BookingSubmissionResult = {
+  notificationStatus: BookingRecord["notificationStatus"];
+  calendarStatus: CalendarSyncStatus;
+  calendarEventId?: string;
+  calendarEventUrl?: string;
+  error?: string;
 };
 
 function readSlots() {
@@ -136,16 +145,50 @@ async function sendBookingNotifications(booking: BookingRecord) {
       },
       body: JSON.stringify(booking)
     });
+    const result = (await response.json()) as Partial<BookingSubmissionResult>;
 
     if (!response.ok) {
-      return "Email service not configured" as const;
+      return {
+        notificationStatus: result.notificationStatus ?? "Ready",
+        calendarStatus: result.calendarStatus ?? "Failed",
+        error: result.error ?? "That session could not be confirmed."
+      } satisfies BookingSubmissionResult;
     }
 
-    const result = (await response.json()) as { notificationStatus?: BookingRecord["notificationStatus"] };
-    return result.notificationStatus ?? ("Ready" as const);
+    return {
+      notificationStatus: result.notificationStatus ?? "Ready",
+      calendarStatus: result.calendarStatus ?? "Google Calendar not configured",
+      calendarEventId: result.calendarEventId,
+      calendarEventUrl: result.calendarEventUrl
+    } satisfies BookingSubmissionResult;
   } catch {
-    return "Email service not configured" as const;
+    return {
+      notificationStatus: "Email service not configured",
+      calendarStatus: "Google Calendar not configured"
+    } satisfies BookingSubmissionResult;
   }
+}
+
+async function readSyncedSlots() {
+  try {
+    const response = await fetch("/api/google-calendar/availability", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const result = (await response.json()) as { status?: CalendarSyncStatus; slots?: TrainingSlot[] };
+
+    if (result.status === "Synced") {
+      return (result.slots ?? []).map(normalizeTrainingSlot);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 function spotsLabel(count: number) {
@@ -166,6 +209,8 @@ export function BookingForm() {
   const [bookingCode, setBookingCode] = useState("");
   const [notificationStatus, setNotificationStatus] = useState<BookingRecord["notificationStatus"]>("Ready");
   const [confirmedBooking, setConfirmedBooking] = useState<BookingRecord | null>(null);
+  const [calendarStatus, setCalendarStatus] = useState<CalendarSyncStatus>("Ready");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -175,9 +220,32 @@ export function BookingForm() {
       (slot) => slot.groupId === selectedGroupId && isSlotAvailable(slot, currentBlockedDays)
     );
 
+    let active = true;
+
     setSlots(currentSlots);
     setBlockedDays(currentBlockedDays);
     setSelectedDate(firstOpenSlot?.dateIso ?? "");
+
+    readSyncedSlots().then((syncedSlots) => {
+      if (!active || !syncedSlots) {
+        return;
+      }
+
+      const normalizedSlots = saveSlots(syncedSlots);
+      const nextBlockedDays = readBlockedDays();
+      const nextFirstOpenSlot = normalizedSlots.find(
+        (slot) => slot.groupId === selectedGroupId && isSlotAvailable(slot, nextBlockedDays)
+      );
+
+      setSlots(normalizedSlots);
+      setBlockedDays(nextBlockedDays);
+      setSelectedDate(nextFirstOpenSlot?.dateIso ?? "");
+      setSelectedSlotId("");
+    });
+
+    return () => {
+      active = false;
+    };
   }, [selectedGroupId]);
 
   const openSlots = useMemo(
@@ -202,6 +270,16 @@ export function BookingForm() {
   const activeStepIndex = ["program", "session", "details", "waiver", "payment", "confirmed"].findIndex((label) => label === step);
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
+  const calendarSummary =
+    calendarStatus === "Created"
+      ? "Google Calendar event created"
+      : calendarStatus === "Synced"
+        ? "Google Calendar availability updated"
+        : calendarStatus === "Failed"
+          ? "Google Calendar needs attention"
+          : calendarStatus === "Google Calendar not configured"
+            ? "Google Calendar ready to connect"
+            : "Google Calendar ready";
 
   function setField(field: keyof BookingFields, value: string | boolean) {
     setFields((current) => ({ ...current, [field]: value }));
@@ -310,28 +388,47 @@ export function BookingForm() {
       programId: selectedGroupId,
       programName: selectedGroup.name,
       sessionId: selectedSlot.id,
+      sessionDateIso: latestSlot.dateIso,
       sessionDate: latestSlot.dateLabel,
       sessionTime: latestSlot.time,
+      sessionDurationMinutes: 60,
+      sessionCalendarEventId: latestSlot.calendarEventId,
       paymentStatus: "Paid",
-      notificationStatus: "Ready"
+      notificationStatus: "Ready",
+      calendarStatus: "Ready"
+    };
+
+    setIsSubmitting(true);
+    setError("");
+
+    const submission = await sendBookingNotifications(booking);
+
+    setIsSubmitting(false);
+
+    if (submission.calendarStatus === "Unavailable") {
+      setSlots(readSlots());
+      setStep("session");
+      setError(submission.error ?? "That session no longer has enough spots. Please choose another available time.");
+      return;
+    }
+
+    const updatedBooking: BookingRecord = {
+      ...booking,
+      notificationStatus: submission.notificationStatus,
+      calendarStatus: submission.calendarStatus,
+      calendarEventId: submission.calendarEventId,
+      calendarEventUrl: submission.calendarEventUrl
     };
 
     setSlots(nextSlots);
     setBlockedDays(latestBlockedDays);
     setConfirmedSlot(updatedSlot);
-    saveBooking(booking);
-    setConfirmedBooking(booking);
-    setNotificationStatus("Ready");
+    saveBooking(updatedBooking);
+    setConfirmedBooking(updatedBooking);
+    setNotificationStatus(updatedBooking.notificationStatus);
+    setCalendarStatus(updatedBooking.calendarStatus);
     setBookingCode(booking.id);
     setStep("confirmed");
-    setError("");
-
-    const status = await sendBookingNotifications(booking);
-    const updatedBooking = { ...booking, notificationStatus: status };
-    const nextBookings = readBookings().map((item) => (item.id === booking.id ? updatedBooking : item));
-    window.localStorage.setItem(bookingsStorageKey, JSON.stringify(nextBookings));
-    setConfirmedBooking(updatedBooking);
-    setNotificationStatus(status);
   }
 
   return (
@@ -691,9 +788,10 @@ export function BookingForm() {
                 <button
                   type="button"
                   onClick={confirmPayment}
-                  className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25"
+                  disabled={isSubmitting}
+                  className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-wait disabled:opacity-70"
                 >
-                  Pay And Confirm Session
+                  {isSubmitting ? "Confirming..." : "Pay And Confirm Session"}
                 </button>
               </div>
             </div>
@@ -714,9 +812,10 @@ export function BookingForm() {
                 </p>
               ) : null}
             </div>
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               {[
                 "Payment successful",
+                calendarSummary,
                 notificationStatus === "Sent"
                   ? `Parent confirmation sent to ${fields.email || "parent email"}`
                   : `Parent confirmation ready for ${fields.email || "parent email"}`,
@@ -727,7 +826,13 @@ export function BookingForm() {
                 <div key={item} className="rounded-lg border border-slate-200 bg-white p-5">
                   <p className="text-sm font-black text-navy">{item}</p>
                   <p className="mt-2 text-xs font-bold uppercase text-field">
-                    {notificationStatus === "Email service not configured" && item !== "Payment successful" ? "Email Setup Needed" : "Complete"}
+                    {item.includes("Google Calendar") && calendarStatus === "Google Calendar not configured"
+                      ? "Calendar Setup Needed"
+                      : item.includes("Google Calendar") && calendarStatus === "Failed"
+                        ? "Check Calendar"
+                      : notificationStatus === "Email service not configured" && item !== "Payment successful" && !item.includes("Google Calendar")
+                        ? "Email Setup Needed"
+                        : "Complete"}
                   </p>
                 </div>
               ))}
@@ -740,6 +845,11 @@ export function BookingForm() {
                   {fields.parentName || "Parent"}, your {confirmedBooking.programName} session for {fields.playerName || "player"} is confirmed for{" "}
                   {confirmedBooking.sessionDate} at {confirmedBooking.sessionTime}. Payment status: {confirmedBooking.paymentStatus}.
                 </p>
+                {confirmedBooking.calendarEventUrl ? (
+                  <a className="text-sm font-black text-electric underline" href={confirmedBooking.calendarEventUrl}>
+                    View Google Calendar event
+                  </a>
+                ) : null}
                 <p className="text-sm font-bold text-slate-600">Reminder notification scheduled.</p>
               </div>
             ) : null}
@@ -751,6 +861,7 @@ export function BookingForm() {
                 setConfirmedSlot(null);
                 setConfirmedBooking(null);
                 setNotificationStatus("Ready");
+                setCalendarStatus("Ready");
                 setBookingCode("");
                 setStep("program");
               }}

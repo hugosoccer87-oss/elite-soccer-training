@@ -14,6 +14,7 @@ import {
   slotCapacity,
   trainingGroups,
   type BookingRecord,
+  type CalendarSyncStatus,
   type TrainingGroupId,
   type SlotStatus,
   type TrainingSlot
@@ -59,6 +60,77 @@ function readBookings() {
   }
 }
 
+async function readSyncedSlots() {
+  try {
+    const response = await fetch("/api/google-calendar/availability", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const result = (await response.json()) as { status?: CalendarSyncStatus; slots?: TrainingSlot[] };
+
+    if (result.status === "Synced") {
+      return (result.slots ?? []).map(normalizeTrainingSlot);
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function createSyncedSlot(slot: TrainingSlot) {
+  try {
+    const response = await fetch("/api/google-calendar/availability", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(slot)
+    });
+    return (await response.json()) as { status?: CalendarSyncStatus; slot?: TrainingSlot; message?: string };
+  } catch {
+    return { status: "Failed" as const };
+  }
+}
+
+async function updateSyncedSlot(slot: TrainingSlot, updates: Partial<Pick<TrainingSlot, "status" | "bookedPlayers" | "capacity">>) {
+  if (!slot.calendarEventId) {
+    return { status: "Ready" as const };
+  }
+
+  try {
+    const response = await fetch(`/api/google-calendar/availability/${encodeURIComponent(slot.calendarEventId)}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(updates)
+    });
+    return (await response.json()) as { status?: CalendarSyncStatus; slot?: TrainingSlot; message?: string };
+  } catch {
+    return { status: "Failed" as const };
+  }
+}
+
+async function deleteSyncedSlot(slot: TrainingSlot) {
+  if (!slot.calendarEventId) {
+    return { status: "Ready" as const };
+  }
+
+  try {
+    const response = await fetch(`/api/google-calendar/availability/${encodeURIComponent(slot.calendarEventId)}`, {
+      method: "DELETE"
+    });
+    return (await response.json()) as { status?: CalendarSyncStatus; message?: string };
+  } catch {
+    return { status: "Failed" as const };
+  }
+}
+
 function formatDateParts(dateIso: string) {
   const date = new Date(`${dateIso}T00:00:00`);
   return {
@@ -93,6 +165,22 @@ export function AdminAvailability() {
     setBlockedDays(loadedBlockedDays);
     setBookings(readBookings());
     window.localStorage.setItem(availabilityStorageKey, JSON.stringify(loadedSlots));
+
+    let active = true;
+
+    readSyncedSlots().then((syncedSlots) => {
+      if (!active || !syncedSlots) {
+        return;
+      }
+
+      const normalizedSlots = syncedSlots.map(normalizeTrainingSlot);
+      setSlots(normalizedSlots);
+      window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
+    });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const counts = useMemo(
@@ -116,7 +204,7 @@ export function AdminAvailability() {
     window.localStorage.setItem(blockedDaysStorageKey, JSON.stringify(nextBlockedDays));
   }
 
-  function addSlot() {
+  async function addSlot() {
     const normalizedTime = newTime.replace(":", "");
     const id = `${newGroupId}-${newDate}-${normalizedTime}`;
 
@@ -128,29 +216,45 @@ export function AdminAvailability() {
     const labels = formatDateParts(newDate);
     const capacity = Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity));
     const duration = 60;
+    const newSlot: TrainingSlot = {
+      id,
+      groupId: newGroupId,
+      dateIso: newDate,
+      dateLabel: labels.dateLabel,
+      dayLabel: labels.dayLabel,
+      time: formatTime(newTime),
+      duration: `${duration} min`,
+      capacity,
+      bookedPlayers: 0,
+      status: "open" as SlotStatus,
+      calendarStatus: "Ready"
+    };
     const nextSlots = [
       ...slots,
-      {
-        id,
-        groupId: newGroupId,
-        dateIso: newDate,
-        dateLabel: labels.dateLabel,
-        dayLabel: labels.dayLabel,
-        time: formatTime(newTime),
-        duration: `${duration} min`,
-        capacity,
-        bookedPlayers: 0,
-        status: "open" as SlotStatus
-      }
+      newSlot
     ].sort((a, b) => `${a.dateIso} ${a.time}`.localeCompare(`${b.dateIso} ${b.time}`));
 
     saveSlots(nextSlots);
-    setNotice("Availability added and visible on the booking calendar.");
+    setNotice("Availability added locally.");
+
+    const syncResult = await createSyncedSlot(newSlot);
+
+    if (syncResult.slot) {
+      saveSlots(
+        nextSlots.map((slot) => (slot.id === newSlot.id ? normalizeTrainingSlot(syncResult.slot as TrainingSlot) : slot))
+      );
+    }
+
+    setNotice(
+      syncResult.status === "Synced"
+        ? "Availability added and synced to Google Calendar."
+        : "Availability added locally. Connect Google Calendar to sync it online."
+    );
   }
 
-  function setSlotStatus(slotId: string, status: SlotStatus) {
-    saveSlots(
-      slots.map((slot) => {
+  async function setSlotStatus(slotId: string, status: SlotStatus) {
+    const currentSlot = slots.find((slot) => slot.id === slotId);
+    const nextSlots = slots.map((slot) => {
         if (slot.id !== slotId) {
           return slot;
         }
@@ -160,41 +264,84 @@ export function AdminAvailability() {
         }
 
         return { ...slot, status };
-      })
-    );
+      });
+
+    saveSlots(nextSlots);
+
+    if (currentSlot) {
+      const nextSlot = nextSlots.find((slot) => slot.id === slotId);
+      const syncResult = await updateSyncedSlot(currentSlot, {
+        status,
+        ...(nextSlot && status === "open" ? { bookedPlayers: nextSlot.bookedPlayers } : {})
+      });
+      setNotice(
+        syncResult.status === "Synced"
+          ? status === "open"
+            ? "Slot reopened and synced to Google Calendar."
+            : `Slot marked ${status} and synced to Google Calendar.`
+          : status === "open"
+            ? "Slot reopened locally."
+            : `Slot marked ${status} locally.`
+      );
+      return;
+    }
+
     setNotice(status === "open" ? "Slot reopened." : `Slot marked ${status}.`);
   }
 
-  function removeSlot(slotId: string) {
+  async function removeSlot(slotId: string) {
+    const currentSlot = slots.find((slot) => slot.id === slotId);
     saveSlots(slots.filter((slot) => slot.id !== slotId));
+
+    if (currentSlot) {
+      const syncResult = await deleteSyncedSlot(currentSlot);
+      setNotice(
+        syncResult.status === "Synced"
+          ? "Slot removed from availability and Google Calendar."
+          : "Slot removed locally."
+      );
+      return;
+    }
+
     setNotice("Slot removed from availability.");
   }
 
-  function blockDay() {
+  async function blockDay() {
     const nextBlockedDays = Array.from(new Set([...blockedDays, blockDate]));
+    const affectedSlots = slots.filter((slot) => slot.dateIso === blockDate);
     saveBlockedDays(nextBlockedDays);
     saveSlots(slots.map((slot) => (slot.dateIso === blockDate ? { ...slot, status: "blocked" } : slot)));
+    await Promise.all(affectedSlots.map((slot) => updateSyncedSlot(slot, { status: "blocked" })));
     setNotice("Unavailable day blocked and hidden from parent booking.");
   }
 
-  function unblockDay(day: string) {
+  async function unblockDay(day: string) {
+    const affectedSlots = slots.filter((slot) => slot.dateIso === day);
     saveBlockedDays(blockedDays.filter((blockedDay) => blockedDay !== day));
     saveSlots(
       slots.map((slot) =>
         slot.dateIso === day && slot.status === "blocked"
           ? { ...slot, status: getRemainingSpots(slot) === 0 ? "booked" : "open" }
-          : slot
+        : slot
+      )
+    );
+    await Promise.all(
+      affectedSlots.map((slot) =>
+        updateSyncedSlot(slot, { status: getRemainingSpots(slot) === 0 ? "booked" : "open" })
       )
     );
     setNotice("Day reopened.");
   }
 
-  function removeBookedSlots() {
+  async function removeBookedSlots() {
+    const fullSlots = slots.filter((slot) => slot.status === "booked" || getRemainingSpots(slot) === 0);
     saveSlots(slots.filter((slot) => slot.status !== "booked" && getRemainingSpots(slot) > 0));
+    await Promise.all(fullSlots.map(deleteSyncedSlot));
     setNotice("Full sessions removed from the admin list.");
   }
 
-  function resetSchedule() {
+  async function resetSchedule() {
+    await Promise.all(slots.map(deleteSyncedSlot));
     saveSlots(defaultTrainingSlots);
     saveBlockedDays([]);
     setNotice("Schedule cleared. Add new time blocks to publish availability.");
@@ -346,6 +493,9 @@ export function AdminAvailability() {
                   <p className="mt-1 text-sm text-slate-600">
                     {slot.duration} - {slot.bookedPlayers}/{slot.capacity} players booked - {statusLabel}
                   </p>
+                  <p className="mt-1 text-xs font-bold uppercase text-slate-500">
+                    {slot.calendarEventId ? "Google Calendar synced" : "Local availability"}
+                  </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setSlotStatus(slot.id, "open")} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
@@ -394,6 +544,14 @@ export function AdminAvailability() {
                   <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
                   <p><span className="font-black text-navy">Medical:</span> {booking.medicalNotes || "None"}</p>
                   <p><span className="font-black text-navy">Email Status:</span> {booking.notificationStatus}</p>
+                  <p><span className="font-black text-navy">Calendar:</span> {booking.calendarStatus ?? "Ready"}</p>
+                  {booking.calendarEventUrl ? (
+                    <p>
+                      <a className="font-black text-electric underline" href={booking.calendarEventUrl}>
+                        View Google Calendar event
+                      </a>
+                    </p>
+                  ) : null}
                 </div>
               </article>
             ))}
