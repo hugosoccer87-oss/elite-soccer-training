@@ -1,0 +1,187 @@
+import Image from "next/image";
+import Link from "next/link";
+import { BallIcon, BoltIcon, ShieldIcon, TargetIcon } from "@/components/Icons";
+import { SectionHeader } from "@/components/SectionHeader";
+import { TrainingCard } from "@/components/TrainingCard";
+import { benefits, business, services } from "@/lib/site-data";
+
+const benefitIcons = [TargetIcon, ShieldIcon, BoltIcon, BallIcon, ShieldIcon];
+
+export default function HomePage() {
+  return (
+    <>
+      <section className="relative isolate flex min-h-[calc(100svh-6rem)] items-center overflow-hidden bg-navy text-white">
+        <Image
+          src="/images/training-hero.png"
+          alt="Coach and youth soccer player training on a field"
+          fill
+          className="object-cover"
+          priority
+          sizes="100vw"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-navy via-navy/75 to-navy/20" />
+        <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-navy to-transparent" />
+
+        <div className="section-shell relative z-10 py-16">
+          <div className="max-w-3xl">
+            <Image
+              src="/images/est-logo.png"
+              alt="Elite Soccer Training logo"
+              width={138}
+              height={127}
+              className="mb-7 h-24 w-28 object-contain"
+            />
+            <p className="text-sm font-black uppercase text-electric">Coachella Valley</p>
+            <h1 className="mt-4 text-5xl font-black leading-none text-balance sm:text-6xl lg:text-7xl">
+              {business.tagline}
+            </h1>
+            <p className="mt-6 max-w-[20rem] text-lg leading-8 text-slate-100 sm:max-w-2xl sm:text-xl">
+              {business.subheadline}
+            </p>
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/booking"
+                className="inline-flex justify-center rounded-md bg-electric px-7 py-4 text-sm font-black uppercase text-white shadow-xl shadow-electric/25 transition hover:bg-blue-500"
+              >
+                Book Training
+              </Link>
+              <Link
+                href="/services"
+                className="inline-flex justify-center rounded-md border border-white/30 bg-white/10 px-7 py-4 text-sm font-black uppercase text-white transition hover:bg-white/20"
+              >
+                View Training
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-navy py-14 text-white sm:py-16">
+        <div className="section-shell">
+          <div className="max-w-3xl">
+            <p className="text-sm font-black uppercase text-electric">Trusted Training</p>
+            <h2 className="mt-3 text-3xl font-black leading-tight text-white sm:text-4xl">
+              Organized, professional, high-energy sessions built for player development.
+            </h2>
+          </div>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {[
+              ["Professional Standards", "Clear session structure, simple communication, and a serious training environment."],
+              ["Competitive Energy", "Players train with tempo, pressure, and accountability in every small group."],
+              ["Development Focus", "Every activity is selected to improve confidence, technique, and game performance."]
+            ].map(([title, copy]) => (
+              <article key={title} className="rounded-lg border border-white/15 bg-white/10 p-5">
+                <p className="text-sm font-black uppercase text-electric">{title}</p>
+                <p className="mt-3 text-sm leading-6 text-slate-300">{copy}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white py-16 sm:py-20">
+        <div className="section-shell grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div className="relative overflow-hidden rounded-lg">
+            <Image
+              src="/images/training-hero.png"
+              alt="Soccer training cones and player development session"
+              width={900}
+              height={610}
+              className="aspect-[4/3] w-full object-cover"
+            />
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-navy/90 to-transparent p-6 text-white">
+              <p className="text-sm font-black uppercase text-electric">Coach Hugo Chaparro</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-slate-100">
+                Player-first coaching with a premium, structured training environment.
+              </p>
+            </div>
+          </div>
+          <div>
+            <SectionHeader
+              eyebrow="The Elite Soccer Training Difference"
+              title="REAL DEVELOPMENT. REAL CONFIDENCE."
+              description="Elite Soccer Training uses technical repetition, game-realistic training, confidence building, speed of play, competitive standards, and small group attention to help youth players develop with purpose."
+            />
+            <div className="mt-8 grid gap-4 sm:grid-cols-2">
+              {benefits.map((benefit, index) => {
+                const Icon = benefitIcons[index];
+                return (
+                  <div key={benefit.title} className="rounded-lg border border-slate-200 p-5">
+                    <Icon className="h-8 w-8 text-field" />
+                    <h3 className="mt-4 text-lg font-black text-navy">{benefit.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{benefit.description}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <Link
+              href="/about"
+              className="mt-8 inline-flex rounded-md border border-navy px-6 py-3 text-sm font-black text-navy transition hover:border-electric hover:text-electric"
+            >
+              Meet Coach Hugo
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-mist py-16 sm:py-20">
+        <div className="section-shell">
+          <SectionHeader
+            eyebrow="Training Programs"
+            title="Age-based soccer development groups."
+            description="Future Elite builds foundation for ages 9-12. Elite Performance pushes ages 13-18 with speed, intensity, finishing, and game-realistic repetition."
+          />
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            {services.map((service, index) => (
+              <TrainingCard key={service.title} index={index} {...service} />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-white py-16 sm:py-20">
+        <div className="section-shell grid gap-10 lg:grid-cols-[1fr_0.8fr] lg:items-center">
+          <SectionHeader
+            eyebrow="Why Train With Us"
+            title="A premium group training environment parents can trust."
+            description="Sessions are structured, purposeful, and built around measurable player growth, competitive energy, and game-realistic repetition."
+          />
+          <div className="grid gap-4">
+            {benefits.map((benefit, index) => {
+              const Icon = benefitIcons[index];
+
+              return (
+                <article key={benefit.title} className="rounded-lg border border-slate-200 bg-white p-5">
+                  <Icon className="h-8 w-8 text-electric" />
+                  <h3 className="mt-4 text-lg font-black text-navy">{benefit.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{benefit.description}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-navy py-16 text-white sm:py-20">
+        <div className="section-shell grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div>
+            <p className="text-sm font-black uppercase text-electric">Ready To Train</p>
+            <h2 className="mt-3 max-w-3xl text-3xl font-black leading-tight text-balance sm:text-5xl">
+              Reserve a small group training session online.
+            </h2>
+            <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300">
+              Choose the right age group, select an available 60-minute session, sign the waiver, and complete payment
+              in one clean flow.
+            </p>
+          </div>
+          <Link
+            href="/booking"
+            className="inline-flex justify-center rounded-md bg-electric px-8 py-4 text-sm font-black uppercase text-white shadow-xl shadow-electric/25 transition hover:bg-blue-500"
+          >
+            Book A Session
+          </Link>
+        </div>
+      </section>
+    </>
+  );
+}
