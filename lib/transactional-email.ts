@@ -135,6 +135,18 @@ function detailsRows(rows: Array<[string, string]>) {
     .join("");
 }
 
+function formatWaiverAcceptedAt(booking: BookingRecord) {
+  if (!booking.waiverAcceptedAt) {
+    return "Not recorded";
+  }
+
+  return new Date(booking.waiverAcceptedAt).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Los_Angeles"
+  });
+}
+
 function brandedEmailShell({ title, intro, body }: { title: string; intro: string; body: string }) {
   return `
     <!doctype html>
@@ -166,6 +178,8 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     ["Player", booking.playerName],
     ["Player Count", booking.players],
     ["Location", business.location],
+    ["Waiver", `${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}${booking.waiverAcceptedAt ? ` on ${formatWaiverAcceptedAt(booking)}` : ""}`],
+    ["Media Consent", booking.mediaConsent || "Not recorded"],
     ["Booking ID", booking.id]
   ];
   const text = [
@@ -177,6 +191,8 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     `Program: ${booking.programName}`,
     `Player count: ${booking.players}`,
     `Location: ${business.location}`,
+    `Waiver: ${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}`,
+    `Media consent: ${booking.mediaConsent || "Not recorded"}`,
     "",
     `Questions? Email ${business.email} or call ${business.phone}.`,
     "",
@@ -224,7 +240,12 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     ["Notes", booking.notes || "None"],
     ["Medical Notes/Injuries", booking.medicalNotes || "None"],
     ["Emergency Contact", `${booking.emergencyName} - ${booking.emergencyPhone}`],
-    ["Payment Status", booking.paymentStatus]
+    ["Payment Status", booking.paymentStatus],
+    ["Waiver Accepted", booking.waiverAccepted ? "Yes" : "Not recorded"],
+    ["Waiver Accepted At", formatWaiverAcceptedAt(booking)],
+    ["Waiver Version", booking.waiverVersion || "Not recorded"],
+    ["Media Consent", booking.mediaConsent || "Not recorded"],
+    ["Digital Signature", booking.guardianSignature || "Not recorded"]
   ];
   const text = rows.map(([label, value]) => `${label}: ${value}`).join("\n");
   const html = brandedEmailShell({

@@ -27,6 +27,7 @@ const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
 const stepLabels = ["Program", "Session", "Details", "Waiver", "Payment", "Confirmed"];
+const waiverVersion = "EST-CA-2026-05";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment" | "confirmed";
 
@@ -42,6 +43,7 @@ type BookingFields = {
   emergencyName: string;
   emergencyPhone: string;
   waiverAgreement: boolean;
+  mediaConsent: "" | "yes" | "no";
   guardianSignature: string;
   cardName: string;
   cardNumber: string;
@@ -62,6 +64,7 @@ const initialFields: BookingFields = {
   emergencyName: "",
   emergencyPhone: "",
   waiverAgreement: false,
+  mediaConsent: "",
   guardianSignature: "",
   cardName: "",
   cardNumber: "",
@@ -199,6 +202,53 @@ function spotsLabel(count: number) {
   return `${count} ${count === 1 ? "spot" : "spots"} remaining`;
 }
 
+const waiverSections = [
+  {
+    title: "Assumption of Risk",
+    copy:
+      "I understand that Elite Soccer Training activities include small group soccer training, camps, clinics, conditioning, and related soccer activities. Participation involves inherent risks, including falls, collisions, physical contact, weather conditions, field conditions, equipment-related injuries, sprains, fractures, concussions, serious injury, or death."
+  },
+  {
+    title: "Release of Liability",
+    copy:
+      "On behalf of myself, the participant, and our family or representatives, I release and hold harmless Elite Soccer Training, its coaches, trainers, staff, contractors, affiliates, and facility partners from claims, demands, damages, or losses related to participation, except to the extent caused by gross negligence or intentional misconduct."
+  },
+  {
+    title: "Medical Authorization",
+    copy:
+      "I confirm the participant is physically able to take part in soccer training. If illness or injury occurs and I cannot be reached, I authorize reasonable emergency medical care and understand I am responsible for medical costs connected to that care."
+  },
+  {
+    title: "Photo and Media Release",
+    copy:
+      "I may allow Elite Soccer Training to use photos or videos from training for its website, social media, marketing, and promotional materials. I can decline media consent below while still completing registration."
+  },
+  {
+    title: "Weather and Scheduling Policy",
+    copy:
+      "Sessions may continue during normal weather. Elite Soccer Training may cancel, delay, or reschedule training when weather, heat, air quality, lightning, or field conditions make participation unsafe."
+  },
+  {
+    title: "Refund and Cancellation Policy",
+    copy:
+      "Payments are generally non-refundable. Missed sessions, no-shows, or late cancellations may not qualify for makeup sessions, credits, or refunds."
+  },
+  {
+    title: "Parent/Guardian Responsibility",
+    copy:
+      "For participants under 18, a parent or legal guardian must complete this waiver. The parent or guardian remains responsible for the participant before drop-off, after the session ends, and during any time outside active coach supervision."
+  },
+  {
+    title: "Governing Law",
+    copy: "This agreement is governed by the laws of the State of California."
+  },
+  {
+    title: "Electronic Signature Consent",
+    copy:
+      "By checking the agreement box and typing my name, I consent to complete this waiver electronically and agree that my electronic signature has the same effect as a handwritten signature for this registration."
+  }
+];
+
 export function BookingForm() {
   const [step, setStep] = useState<BookingStep>("program");
   const [slots, setSlots] = useState<TrainingSlot[]>(defaultTrainingSlots);
@@ -333,10 +383,10 @@ export function BookingForm() {
   }
 
   function requireWaiver() {
-    const needed = [fields.emergencyName, fields.emergencyPhone, fields.guardianSignature];
+    const needed = [fields.emergencyName, fields.emergencyPhone, fields.medicalNotes, fields.guardianSignature];
 
-    if (needed.some((value) => value.trim() === "") || !fields.waiverAgreement) {
-      setError("Complete the waiver agreement, emergency contact, and parent signature before payment.");
+    if (needed.some((value) => value.trim() === "") || !fields.mediaConsent || !fields.waiverAgreement) {
+      setError("Complete the waiver, media consent, emergency contact, medical information, and parent signature before payment.");
       return false;
     }
 
@@ -376,9 +426,10 @@ export function BookingForm() {
       status: latestSlot.bookedPlayers + requestedPlayers >= latestSlot.capacity ? "booked" : "open"
     };
     const nextSlots = latestSlots.map((slot) => (slot.id === selectedSlot.id ? updatedSlot : slot));
+    const bookingTimestamp = new Date().toISOString();
     const booking: BookingRecord = {
       id: `EST-${selectedSlot.id.replaceAll("-", "").slice(-8).toUpperCase()}-${Date.now().toString().slice(-5)}`,
-      createdAt: new Date().toISOString(),
+      createdAt: bookingTimestamp,
       parentName: fields.parentName,
       playerName: fields.playerName,
       playerAge: fields.playerAge,
@@ -390,6 +441,10 @@ export function BookingForm() {
       emergencyName: fields.emergencyName,
       emergencyPhone: fields.emergencyPhone,
       guardianSignature: fields.guardianSignature,
+      waiverAccepted: fields.waiverAgreement,
+      waiverAcceptedAt: bookingTimestamp,
+      waiverVersion,
+      mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined",
       programId: selectedGroupId,
       programName: selectedGroup.name,
       sessionId: selectedSlot.id,
@@ -698,10 +753,29 @@ export function BookingForm() {
           <section className="grid gap-5 p-5 sm:p-8">
             <div className="rounded-lg border border-slate-200 bg-mist p-5">
               <p className="text-sm font-black uppercase text-electric">Waiver Required</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Elite Soccer Training participation waiver</h3>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Parent/guardian agreement and emergency contact information are required before payment.
+                Review the waiver, choose media consent, and sign electronically before payment.
               </p>
             </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-5">
+              <p className="text-sm font-black uppercase text-electric">Participant Information</p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {[
+                  ["Participant Name", fields.playerName || "Complete player details"],
+                  ["Parent/Guardian Name", fields.parentName || "Complete parent details"],
+                  ["Phone Number", fields.phone || "Complete phone number"],
+                  ["Email", fields.email || "Complete email address"]
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-md border border-slate-200 bg-mist p-4">
+                    <p className="text-xs font-black uppercase text-slate-500">{label}</p>
+                    <p className="mt-1 text-sm font-black text-navy">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="grid gap-5 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-bold text-navy">
                 Emergency Contact Name
@@ -712,6 +786,54 @@ export function BookingForm() {
                 <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
               </label>
             </div>
+
+            <label className="grid gap-2 text-sm font-bold text-navy">
+              Medical Conditions / Allergies
+              <textarea
+                className={`${inputClass} min-h-24 resize-y`}
+                value={fields.medicalNotes}
+                onChange={(event) => setField("medicalNotes", event.target.value)}
+                placeholder="List medical conditions, allergies, injuries, or type None"
+              />
+            </label>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              {waiverSections.map((section) => (
+                <article key={section.title} className="rounded-lg border border-slate-200 bg-white p-5">
+                  <h4 className="text-base font-black text-navy">{section.title}</h4>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{section.copy}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-5">
+              <p className="text-sm font-black uppercase text-electric">Media Consent</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {[
+                  ["yes", "Yes, media use is approved"],
+                  ["no", "No, media consent is declined"]
+                ].map(([value, label]) => (
+                  <label
+                    key={value}
+                    className={`flex items-center gap-3 rounded-md border p-4 text-sm font-black transition ${
+                      fields.mediaConsent === value
+                        ? "border-electric bg-electric text-white"
+                        : "border-slate-200 bg-mist text-navy"
+                    }`}
+                  >
+                    <input
+                      className="h-4 w-4 border-slate-300"
+                      type="radio"
+                      name="mediaConsent"
+                      checked={fields.mediaConsent === value}
+                      onChange={() => setField("mediaConsent", value)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
             <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold leading-6 text-slate-700">
               <input
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
@@ -720,8 +842,9 @@ export function BookingForm() {
                 onChange={(event) => setField("waiverAgreement", event.target.checked)}
               />
               <span>
-                I agree to the Elite Soccer Training waiver terms and understand participation includes physical activity,
-                soccer movements, equipment, and risk of injury.
+                I have read and understand the Elite Soccer Training waiver, including assumption of risk, release of
+                liability, medical authorization, media consent selection, cancellation policy, parent/guardian
+                responsibility, California governing law, and electronic signature consent.
               </span>
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
@@ -733,8 +856,11 @@ export function BookingForm() {
                 placeholder="Type parent/guardian full legal name"
               />
             </label>
+            <p className="rounded-md bg-mist px-4 py-3 text-xs font-bold uppercase text-slate-500">
+              Waiver version {waiverVersion}. Date and timestamp are saved when payment is submitted.
+            </p>
             <div className="grid gap-2 text-sm font-bold text-navy">
-              Draw Signature
+              Optional Drawn Signature
               <SignaturePad />
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -848,7 +974,7 @@ export function BookingForm() {
                       ? "Calendar Setup Needed"
                       : item.includes("Google Calendar") && calendarStatus === "Failed"
                         ? "Check Calendar"
-                      : notificationStatus === "Email service not configured" && item !== "Payment successful" && !item.includes("Google Calendar")
+                      : notificationStatus !== "Sent" && item !== "Payment successful" && !item.includes("Google Calendar")
                         ? "Email Setup Needed"
                         : "Complete"}
                   </p>
@@ -862,6 +988,10 @@ export function BookingForm() {
                 <p className="text-sm leading-6 text-slate-600">
                   {fields.parentName || "Parent"}, your {confirmedBooking.programName} session for {fields.playerName || "player"} is confirmed for{" "}
                   {confirmedBooking.sessionDate} at {confirmedBooking.sessionTime}. Payment status: {confirmedBooking.paymentStatus}.
+                </p>
+                <p className="text-sm leading-6 text-slate-600">
+                  Waiver accepted electronically on {new Date(confirmedBooking.waiverAcceptedAt).toLocaleString("en-US")}. Media consent:{" "}
+                  {confirmedBooking.mediaConsent}.
                 </p>
                 {confirmedBooking.calendarEventUrl ? (
                   <a className="text-sm font-black text-electric underline" href={confirmedBooking.calendarEventUrl}>

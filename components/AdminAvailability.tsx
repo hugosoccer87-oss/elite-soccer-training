@@ -543,6 +543,13 @@ export function AdminAvailability() {
                   <p><span className="font-black text-navy">Emergency:</span> {booking.emergencyName} - {booking.emergencyPhone}</p>
                   <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
                   <p><span className="font-black text-navy">Medical:</span> {booking.medicalNotes || "None"}</p>
+                  <p>
+                    <span className="font-black text-navy">Waiver:</span>{" "}
+                    {booking.waiverAccepted ? "Accepted" : "Not recorded"}
+                    {booking.waiverAcceptedAt ? ` on ${new Date(booking.waiverAcceptedAt).toLocaleString("en-US")}` : ""}
+                  </p>
+                  <p><span className="font-black text-navy">Media Consent:</span> {booking.mediaConsent || "Not recorded"}</p>
+                  <p><span className="font-black text-navy">Signature:</span> {booking.guardianSignature || "Not recorded"}</p>
                   <p><span className="font-black text-navy">Email Status:</span> {booking.notificationStatus}</p>
                   <p><span className="font-black text-navy">Calendar:</span> {booking.calendarStatus ?? "Ready"}</p>
                   {booking.calendarEventUrl ? (

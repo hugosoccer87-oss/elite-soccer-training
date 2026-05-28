@@ -305,6 +305,11 @@ function bookingDescription(booking: BookingRecord) {
     `Medical notes/injuries: ${booking.medicalNotes || "None"}`,
     `Emergency contact: ${booking.emergencyName} - ${booking.emergencyPhone}`,
     `Payment status: ${booking.paymentStatus}`,
+    `Waiver accepted: ${booking.waiverAccepted ? "Yes" : "Not recorded"}`,
+    `Waiver accepted at: ${booking.waiverAcceptedAt || "Not recorded"}`,
+    `Waiver version: ${booking.waiverVersion || "Not recorded"}`,
+    `Media consent: ${booking.mediaConsent || "Not recorded"}`,
+    `Digital signature: ${booking.guardianSignature || "Not recorded"}`,
     `Booking ID: ${booking.id}`
   ].join("\n");
 }

@@ -48,6 +48,10 @@ export type BookingRecord = {
   emergencyName: string;
   emergencyPhone: string;
   guardianSignature: string;
+  waiverAccepted: boolean;
+  waiverAcceptedAt: string;
+  waiverVersion: string;
+  mediaConsent: "Granted" | "Declined";
   programId: TrainingGroupId;
   programName: string;
   sessionId: string;
@@ -57,7 +61,7 @@ export type BookingRecord = {
   sessionDurationMinutes: number;
   sessionCalendarEventId?: string;
   paymentStatus: "Paid" | "Pending" | "Failed";
-  notificationStatus: "Ready" | "Sent" | "Email service not configured";
+  notificationStatus: "Ready" | "Sent" | "Email service not configured" | "Email delivery needs attention";
   calendarStatus: CalendarSyncStatus;
   calendarMessage?: string;
   calendarEventId?: string;
