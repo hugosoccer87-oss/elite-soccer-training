@@ -23,11 +23,11 @@ export default function AboutPage() {
         <div className="section-shell grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
           <div className="relative overflow-hidden rounded-lg">
             <Image
-              src="/images/training-hero.png"
-              alt="Coach-led youth soccer training session"
+              src="/images/coach-hugo.jpg"
+              alt="Coach Hugo Chaparro, Elite Soccer Training"
               width={920}
               height={680}
-              className="aspect-[4/3] w-full object-cover"
+              className="aspect-[4/3] w-full object-cover object-[50%_24%]"
             />
           </div>
           <div>

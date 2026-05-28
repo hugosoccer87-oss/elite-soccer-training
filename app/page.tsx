@@ -27,10 +27,10 @@ export default function HomePage() {
     <>
       <section className="relative isolate flex min-h-[calc(100svh-6rem)] items-center overflow-hidden bg-navy text-white">
         <Image
-          src="/images/hero-elite-training.png"
+          src="/images/home-hero-athletes.png"
           alt="Coach and youth soccer player training on a field"
           fill
-          className="object-cover object-[72%_center]"
+          className="object-cover object-[74%_center] sm:object-[72%_center]"
           priority
           sizes="100vw"
         />
@@ -98,11 +98,11 @@ export default function HomePage() {
         <div className="section-shell grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
           <div className="relative overflow-hidden rounded-lg">
             <Image
-              src="/images/training-hero.png"
-              alt="Soccer training cones and player development session"
+              src="/images/coach-hugo.jpg"
+              alt="Coach Hugo Chaparro, Elite Soccer Training"
               width={900}
               height={610}
-              className="aspect-[4/3] w-full object-cover"
+              className="aspect-[4/3] w-full object-cover object-[50%_24%]"
             />
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-navy/90 to-transparent p-6 text-white">
               <p className="text-sm font-black uppercase text-electric">Coach Hugo Chaparro</p>
