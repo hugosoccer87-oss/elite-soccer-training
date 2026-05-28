@@ -219,19 +219,14 @@ const waiverSections = [
       "I confirm the participant is physically able to take part in soccer training. If illness or injury occurs and I cannot be reached, I authorize reasonable emergency medical care and understand I am responsible for medical costs connected to that care."
   },
   {
-    title: "Photo and Media Release",
+    title: "Photo & Media Consent",
     copy:
       "I may allow Elite Soccer Training to use photos or videos from training for its website, social media, marketing, and promotional materials. I can decline media consent below while still completing registration."
   },
   {
-    title: "Weather and Scheduling Policy",
+    title: "Weather, Scheduling, Refunds & Cancellations",
     copy:
-      "Sessions may continue during normal weather. Elite Soccer Training may cancel, delay, or reschedule training when weather, heat, air quality, lightning, or field conditions make participation unsafe."
-  },
-  {
-    title: "Refund and Cancellation Policy",
-    copy:
-      "Payments are generally non-refundable. Missed sessions, no-shows, or late cancellations may not qualify for makeup sessions, credits, or refunds."
+      "Sessions may continue during normal weather. Elite Soccer Training may cancel, delay, or reschedule training when weather, heat, air quality, lightning, or field conditions make participation unsafe. Payments are generally non-refundable. Missed sessions, no-shows, or late cancellations may not qualify for makeup sessions, credits, or refunds."
   },
   {
     title: "Parent/Guardian Responsibility",
@@ -751,118 +746,132 @@ export function BookingForm() {
 
         {step === "waiver" ? (
           <section className="grid gap-5 p-5 sm:p-8">
-            <div className="rounded-lg border border-slate-200 bg-mist p-5">
-              <p className="text-sm font-black uppercase text-electric">Waiver Required</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Elite Soccer Training participation waiver</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Review the waiver, choose media consent, and sign electronically before payment.
-              </p>
-            </div>
+            <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+              <header className="border-b border-slate-200 bg-mist px-5 py-6 sm:px-8">
+                <p className="text-sm font-black uppercase text-electric">Waiver Required</p>
+                <h3 className="mt-2 text-2xl font-black leading-tight text-navy sm:text-3xl">
+                  Elite Soccer Training Participation Waiver & Release of Liability
+                </h3>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                  Review this document, choose media consent, and sign electronically before payment.
+                </p>
+              </header>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
-              <p className="text-sm font-black uppercase text-electric">Participant Information</p>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {[
-                  ["Participant Name", fields.playerName || "Complete player details"],
-                  ["Parent/Guardian Name", fields.parentName || "Complete parent details"],
-                  ["Phone Number", fields.phone || "Complete phone number"],
-                  ["Email", fields.email || "Complete email address"]
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-md border border-slate-200 bg-mist p-4">
-                    <p className="text-xs font-black uppercase text-slate-500">{label}</p>
-                    <p className="mt-1 text-sm font-black text-navy">{value}</p>
+              <div className="divide-y divide-slate-200 px-5 py-2 sm:px-8">
+                <section className="py-6">
+                  <h4 className="text-lg font-black text-navy">1. Participant Information</h4>
+                  <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                    {[
+                      ["Participant Name", fields.playerName || "Complete player details"],
+                      ["Parent/Guardian Name", fields.parentName || "Complete parent details"],
+                      ["Phone Number", fields.phone || "Complete phone number"],
+                      ["Email", fields.email || "Complete email address"]
+                    ].map(([label, value]) => (
+                      <div key={label} className="border-b border-slate-200 pb-3">
+                        <dt className="text-xs font-black uppercase text-slate-500">{label}</dt>
+                        <dd className="mt-1 text-sm font-bold text-navy">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+
+                  <div className="mt-5 grid gap-5 sm:grid-cols-2">
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Emergency Contact Name
+                      <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Emergency Contact Phone
+                      <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
+                    </label>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              <label className="grid gap-2 text-sm font-bold text-navy">
-                Emergency Contact Name
-                <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
-              </label>
-              <label className="grid gap-2 text-sm font-bold text-navy">
-                Emergency Contact Phone
-                <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
-              </label>
-            </div>
-
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Medical Conditions / Allergies
-              <textarea
-                className={`${inputClass} min-h-24 resize-y`}
-                value={fields.medicalNotes}
-                onChange={(event) => setField("medicalNotes", event.target.value)}
-                placeholder="List medical conditions, allergies, injuries, or type None"
-              />
-            </label>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              {waiverSections.map((section) => (
-                <article key={section.title} className="rounded-lg border border-slate-200 bg-white p-5">
-                  <h4 className="text-base font-black text-navy">{section.title}</h4>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{section.copy}</p>
-                </article>
-              ))}
-            </div>
-
-            <div className="rounded-lg border border-slate-200 bg-white p-5">
-              <p className="text-sm font-black uppercase text-electric">Media Consent</p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                {[
-                  ["yes", "Yes, media use is approved"],
-                  ["no", "No, media consent is declined"]
-                ].map(([value, label]) => (
-                  <label
-                    key={value}
-                    className={`flex items-center gap-3 rounded-md border p-4 text-sm font-black transition ${
-                      fields.mediaConsent === value
-                        ? "border-electric bg-electric text-white"
-                        : "border-slate-200 bg-mist text-navy"
-                    }`}
-                  >
-                    <input
-                      className="h-4 w-4 border-slate-300"
-                      type="radio"
-                      name="mediaConsent"
-                      checked={fields.mediaConsent === value}
-                      onChange={() => setField("mediaConsent", value)}
+                  <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
+                    Medical Conditions / Allergies
+                    <textarea
+                      className={`${inputClass} min-h-24 resize-y`}
+                      value={fields.medicalNotes}
+                      onChange={(event) => setField("medicalNotes", event.target.value)}
+                      placeholder="List medical conditions, allergies, injuries, or type None"
                     />
-                    {label}
                   </label>
-                ))}
-              </div>
-            </div>
+                </section>
 
-            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold leading-6 text-slate-700">
-              <input
-                className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
-                checked={fields.waiverAgreement}
-                type="checkbox"
-                onChange={(event) => setField("waiverAgreement", event.target.checked)}
-              />
-              <span>
-                I have read and understand the Elite Soccer Training waiver, including assumption of risk, release of
-                liability, medical authorization, media consent selection, cancellation policy, parent/guardian
-                responsibility, California governing law, and electronic signature consent.
-              </span>
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Parent/Guardian Digital Signature
-              <input
-                className={inputClass}
-                value={fields.guardianSignature}
-                onChange={(event) => setField("guardianSignature", event.target.value)}
-                placeholder="Type parent/guardian full legal name"
-              />
-            </label>
-            <p className="rounded-md bg-mist px-4 py-3 text-xs font-bold uppercase text-slate-500">
-              Waiver version {waiverVersion}. Date and timestamp are saved when payment is submitted.
-            </p>
-            <div className="grid gap-2 text-sm font-bold text-navy">
-              Optional Drawn Signature
-              <SignaturePad />
-            </div>
+                {waiverSections.map((section, index) => (
+                  <section key={section.title} className="py-6">
+                    <h4 className="text-lg font-black text-navy">
+                      {index + 2}. {section.title}
+                    </h4>
+                    <p className="mt-3 text-sm leading-7 text-slate-700">{section.copy}</p>
+                  </section>
+                ))}
+
+                <section className="py-6">
+                  <h4 className="text-lg font-black text-navy">Media Consent Selection</h4>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {[
+                      ["yes", "Yes, media use is approved"],
+                      ["no", "No, media consent is declined"]
+                    ].map(([value, label]) => (
+                      <label
+                        key={value}
+                        className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-black transition ${
+                          fields.mediaConsent === value
+                            ? "border-electric bg-electric text-white"
+                            : "border-slate-300 bg-white text-navy"
+                        }`}
+                      >
+                        <input
+                          className="h-4 w-4 border-slate-300"
+                          type="radio"
+                          name="mediaConsent"
+                          checked={fields.mediaConsent === value}
+                          onChange={() => setField("mediaConsent", value)}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="py-6">
+                  <h4 className="text-lg font-black text-navy">Electronic Agreement & Signature</h4>
+                  <label className="mt-4 flex items-start gap-3 rounded-md border border-slate-300 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700">
+                    <input
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                      checked={fields.waiverAgreement}
+                      type="checkbox"
+                      onChange={(event) => setField("waiverAgreement", event.target.checked)}
+                    />
+                    <span>
+                      I have read and understand the Elite Soccer Training waiver, including assumption of risk, release
+                      of liability, medical authorization, media consent selection, cancellation policy,
+                      parent/guardian responsibility, California governing law, and electronic signature consent.
+                    </span>
+                  </label>
+
+                  <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
+                    Parent/Guardian Digital Signature
+                    <input
+                      className={inputClass}
+                      value={fields.guardianSignature}
+                      onChange={(event) => setField("guardianSignature", event.target.value)}
+                      placeholder="Type parent/guardian full legal name"
+                    />
+                  </label>
+
+                  <div className="mt-5 grid gap-2 text-sm font-bold text-navy">
+                    Optional Drawn Signature
+                    <SignaturePad />
+                  </div>
+
+                  <div className="mt-5 grid gap-2 border-t border-slate-200 pt-4 text-xs font-bold uppercase text-slate-500 sm:grid-cols-2">
+                    <p>Waiver version {waiverVersion}</p>
+                    <p>Date / Timestamp: saved automatically when payment is submitted</p>
+                  </div>
+                </section>
+              </div>
+            </article>
+
             <div className="flex flex-col gap-3 sm:flex-row">
               <button type="button" onClick={() => setStep("details")} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
                 Back
