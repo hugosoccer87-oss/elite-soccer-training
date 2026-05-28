@@ -1,18 +1,18 @@
 {
-  "/api/admin/login/route": "app/api/admin/login/route.js",
   "/_not-found/page": "app/_not-found/page.js",
+  "/api/bookings/route": "app/api/bookings/route.js",
+  "/api/admin/login/route": "app/api/admin/login/route.js",
   "/api/admin/session/route": "app/api/admin/session/route.js",
   "/api/google-calendar/auth/route": "app/api/google-calendar/auth/route.js",
-  "/api/bookings/route": "app/api/bookings/route.js",
-  "/api/google-calendar/availability/route": "app/api/google-calendar/availability/route.js",
   "/api/google-calendar/availability/[eventId]/route": "app/api/google-calendar/availability/[eventId]/route.js",
   "/api/google-calendar/callback/route": "app/api/google-calendar/callback/route.js",
+  "/api/google-calendar/availability/route": "app/api/google-calendar/availability/route.js",
   "/payment/page": "app/payment/page.js",
   "/waiver/page": "app/waiver/page.js",
   "/page": "app/page.js",
-  "/admin/page": "app/admin/page.js",
   "/booking/page": "app/booking/page.js",
-  "/contact/page": "app/contact/page.js",
+  "/admin/page": "app/admin/page.js",
   "/about/page": "app/about/page.js",
+  "/contact/page": "app/contact/page.js",
   "/services/page": "app/services/page.js"
 }

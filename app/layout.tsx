@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: `${business.name} | Small Group Soccer Training`,
     description: business.subheadline,
-    images: ["/images/training-hero.png"]
+    images: ["/images/hero-elite-training.png"]
   }
 };
 

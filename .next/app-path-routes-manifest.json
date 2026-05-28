@@ -1,18 +1,18 @@
 {
-  "/api/admin/login/route": "/api/admin/login",
   "/_not-found/page": "/_not-found",
+  "/api/bookings/route": "/api/bookings",
+  "/api/admin/login/route": "/api/admin/login",
   "/api/admin/session/route": "/api/admin/session",
   "/api/google-calendar/auth/route": "/api/google-calendar/auth",
-  "/api/bookings/route": "/api/bookings",
-  "/api/google-calendar/availability/route": "/api/google-calendar/availability",
   "/api/google-calendar/availability/[eventId]/route": "/api/google-calendar/availability/[eventId]",
   "/api/google-calendar/callback/route": "/api/google-calendar/callback",
+  "/api/google-calendar/availability/route": "/api/google-calendar/availability",
   "/payment/page": "/payment",
   "/waiver/page": "/waiver",
   "/page": "/",
-  "/admin/page": "/admin",
   "/booking/page": "/booking",
-  "/contact/page": "/contact",
+  "/admin/page": "/admin",
   "/about/page": "/about",
+  "/contact/page": "/contact",
   "/services/page": "/services"
 }

@@ -27,14 +27,14 @@ export default function HomePage() {
     <>
       <section className="relative isolate flex min-h-[calc(100svh-6rem)] items-center overflow-hidden bg-navy text-white">
         <Image
-          src="/images/training-hero.png"
+          src="/images/hero-elite-training.png"
           alt="Coach and youth soccer player training on a field"
           fill
-          className="object-cover"
+          className="object-cover object-[72%_center]"
           priority
           sizes="100vw"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-navy via-navy/75 to-navy/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-navy via-navy/80 to-navy/15" />
         <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-navy to-transparent" />
 
         <div className="section-shell relative z-10 py-16">

@@ -745,47 +745,47 @@ export function BookingForm() {
         ) : null}
 
         {step === "waiver" ? (
-          <section className="grid gap-5 bg-slate-100/70 p-4 sm:p-8">
-            <article className="mx-auto w-full max-w-4xl overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
-              <header className="border-b border-slate-300 bg-[#f8fafc] px-5 py-7 sm:px-9">
-                <p className="text-sm font-black uppercase text-electric">Waiver Required</p>
-                <h3 className="mt-2 text-2xl font-black leading-tight text-navy sm:text-3xl">
+          <section className="grid gap-5 bg-[#f4f6f8] px-4 py-6 sm:px-8 sm:py-8">
+            <article className="mx-auto w-full max-w-3xl border border-slate-300 bg-[#fffdf8] px-5 py-7 shadow-sm sm:px-10 sm:py-10">
+              <header className="border-b border-slate-300 pb-5">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Waiver Required</p>
+                <h3 className="mt-2 text-xl font-black leading-tight text-navy sm:text-2xl">
                   Elite Soccer Training Participation Waiver & Release of Liability
                 </h3>
-                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+                <p className="mt-3 text-sm leading-6 text-slate-700">
                   Review this document, choose media consent, and sign electronically before payment.
                 </p>
               </header>
 
-              <div className="divide-y divide-slate-300 px-5 py-2 sm:px-9">
-                <section className="py-7">
-                  <h4 className="text-lg font-black text-navy">1. Participant Information</h4>
-                  <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              <div className="text-sm leading-6 text-slate-700">
+                <section className="border-b border-slate-300 py-5">
+                  <h4 className="text-sm font-black uppercase tracking-wide text-navy">Participant Information</h4>
+                  <dl className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
                     {[
                       ["Participant Name", fields.playerName || "Complete player details"],
                       ["Parent/Guardian Name", fields.parentName || "Complete parent details"],
                       ["Phone Number", fields.phone || "Complete phone number"],
                       ["Email", fields.email || "Complete email address"]
                     ].map(([label, value]) => (
-                      <div key={label} className="border-b border-slate-300 pb-3">
-                        <dt className="text-xs font-black uppercase text-slate-500">{label}</dt>
-                        <dd className="mt-1 text-sm font-bold text-navy">{value}</dd>
+                      <div key={label} className="border-b border-slate-300 pb-2">
+                        <dt className="text-[11px] font-bold uppercase text-slate-500">{label}</dt>
+                        <dd className="mt-0.5 font-semibold text-navy">{value}</dd>
                       </div>
                     ))}
                   </dl>
 
-                  <div className="mt-5 grid gap-5 sm:grid-cols-2">
-                    <label className="grid gap-2 text-sm font-bold text-navy">
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    <label className="grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                       Emergency Contact Name
                       <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
                     </label>
-                    <label className="grid gap-2 text-sm font-bold text-navy">
+                    <label className="grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                       Emergency Contact Phone
                       <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
                     </label>
                   </div>
 
-                  <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
+                  <label className="mt-4 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                     Medical Conditions / Allergies
                     <textarea
                       className={`${inputClass} min-h-24 resize-y`}
@@ -796,38 +796,27 @@ export function BookingForm() {
                   </label>
                 </section>
 
-                {waiverSections.map((section, index) => (
-                  <section key={section.title} className="py-7">
-                    <h4 className="text-lg font-black text-navy">
-                      {index + 2}. {section.title}
-                    </h4>
-                    <p className="mt-3 text-sm leading-7 text-slate-700">{section.copy}</p>
+                {waiverSections.map((section) => (
+                  <section key={section.title} className="border-b border-slate-300 py-4">
+                    <h4 className="text-sm font-black uppercase tracking-wide text-navy">{section.title}</h4>
+                    <p className="mt-2 leading-6 text-slate-700">{section.copy}</p>
                   </section>
                 ))}
 
-                <section className="my-7 rounded-lg border border-slate-300 bg-[#f8fafc] p-5 shadow-sm sm:p-6">
-                  <div className="border-b border-slate-300 pb-4">
-                    <p className="text-xs font-black uppercase tracking-wide text-electric">Signature Required</p>
-                    <h4 className="mt-2 text-xl font-black text-navy">Electronic Agreement & Signature</h4>
+                <section className="pt-5">
+                  <div className="border-b-2 border-navy/30 pb-3">
+                    <h4 className="text-sm font-black uppercase tracking-wide text-navy">Media Consent</h4>
                   </div>
 
-                  <div className="border-b border-slate-300 py-5">
-                    <h5 className="text-base font-black text-navy">Media Consent Selection</h5>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="border-b border-slate-300 py-4">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       {[
                         ["yes", "Yes, media use is approved"],
                         ["no", "No, media consent is declined"]
                       ].map(([value, label]) => (
-                        <label
-                          key={value}
-                          className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-black transition ${
-                            fields.mediaConsent === value
-                              ? "border-electric bg-electric text-white shadow-md shadow-electric/15"
-                              : "border-slate-300 bg-white text-navy"
-                          }`}
-                        >
+                        <label key={value} className="flex items-center gap-3 text-sm font-semibold text-navy">
                           <input
-                            className="h-4 w-4 border-slate-300"
+                            className="h-4 w-4 border-slate-400 text-electric"
                             type="radio"
                             name="mediaConsent"
                             checked={fields.mediaConsent === value}
@@ -839,7 +828,8 @@ export function BookingForm() {
                     </div>
                   </div>
 
-                  <label className="mt-5 flex items-start gap-3 rounded-md border border-slate-300 bg-white p-4 text-sm font-semibold leading-6 text-slate-700 shadow-sm">
+                  <h4 className="mt-5 text-sm font-black uppercase tracking-wide text-navy">Electronic Agreement & Signature</h4>
+                  <label className="mt-3 flex items-start gap-3 text-sm font-semibold leading-6 text-slate-700">
                     <input
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
                       checked={fields.waiverAgreement}
@@ -853,22 +843,22 @@ export function BookingForm() {
                     </span>
                   </label>
 
-                  <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
+                  <label className="mt-5 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                     Parent/Guardian Digital Signature
                     <input
-                      className={inputClass}
+                      className="field-focus w-full border-0 border-b border-slate-400 bg-transparent px-0 py-3 text-base font-semibold text-slate-900 placeholder:text-slate-400"
                       value={fields.guardianSignature}
                       onChange={(event) => setField("guardianSignature", event.target.value)}
                       placeholder="Type parent/guardian full legal name"
                     />
                   </label>
 
-                  <div className="mt-5 grid gap-2 text-sm font-bold text-navy">
+                  <div className="mt-5 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                     Optional Drawn Signature
                     <SignaturePad />
                   </div>
 
-                  <div className="mt-6 grid gap-3 border-t border-slate-300 pt-4 text-xs font-bold uppercase text-slate-500 sm:grid-cols-2">
+                  <div className="mt-5 grid gap-2 border-t border-slate-300 pt-3 text-[11px] font-bold uppercase text-slate-500 sm:grid-cols-2">
                     <p>Waiver version {waiverVersion}</p>
                     <p>Date / Timestamp: saved automatically when payment is submitted</p>
                   </div>
@@ -876,7 +866,7 @@ export function BookingForm() {
               </div>
             </article>
 
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 sm:flex-row">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 sm:flex-row">
               <button type="button" onClick={() => setStep("details")} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
                 Back
               </button>
