@@ -10,7 +10,6 @@ The site includes Google Calendar API routes for Elite Soccer Training bookings 
 
 Optional:
 
-- `GOOGLE_CALENDAR_ID` defaults to `primary`
 - `GOOGLE_CALENDAR_TIME_ZONE` defaults to `America/Los_Angeles`
 - `GOOGLE_REDIRECT_URI` defaults to `https://your-domain.com/api/google-calendar/callback`
 
@@ -27,4 +26,4 @@ Optional:
 7. Add it to Vercel as `GOOGLE_REFRESH_TOKEN`.
 8. Redeploy.
 
-After that, admin-created availability can sync to Google Calendar, full sessions are hidden from booking, and confirmed bookings create 60-minute calendar events.
+After that, admin-created availability can sync to Google Calendar, full sessions are hidden from booking, and confirmed bookings create 60-minute events on your primary Google Calendar.

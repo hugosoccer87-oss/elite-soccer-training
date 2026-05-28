@@ -138,16 +138,52 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid booking payload" }, { status: 400 });
   }
 
+  console.info("[EST Booking] Booking confirmation started", {
+    bookingId: booking.id,
+    programName: booking.programName,
+    playerName: booking.playerName,
+    sessionDateIso: booking.sessionDateIso,
+    sessionDate: booking.sessionDate,
+    sessionTime: booking.sessionTime
+  });
+
   const calendarResult = await createBookingCalendarEvent(booking);
 
   if (calendarResult.status === "Unavailable") {
+    console.warn("[EST Booking] Google Calendar availability prevented booking confirmation", {
+      bookingId: booking.id,
+      calendarStatus: calendarResult.status,
+      calendarMessage: calendarResult.message
+    });
+
     return NextResponse.json(
       {
         error: calendarResult.message ?? "That session is no longer available.",
         notificationStatus: "Ready",
-        calendarStatus: calendarResult.status
+        calendarStatus: calendarResult.status,
+        calendarMessage: calendarResult.message
       },
       { status: 409 }
+    );
+  }
+
+  if (calendarResult.status !== "Created") {
+    console.error("[EST Booking] Google Calendar event creation failed", {
+      bookingId: booking.id,
+      calendarStatus: calendarResult.status,
+      calendarMessage: calendarResult.message
+    });
+
+    return NextResponse.json(
+      {
+        error:
+          calendarResult.message ??
+          "Google Calendar event could not be created. The booking was not confirmed.",
+        notificationStatus: "Ready",
+        calendarStatus: calendarResult.status,
+        calendarMessage: calendarResult.message
+      },
+      { status: 502 }
     );
   }
 
@@ -168,6 +204,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     notificationStatus: ownerSent && parentSent ? "Sent" : "Email service not configured",
     calendarStatus: calendarResult.status,
+    calendarMessage: calendarResult.message,
     calendarEventId: calendarResult.eventId,
     calendarEventUrl: calendarResult.eventUrl
   });

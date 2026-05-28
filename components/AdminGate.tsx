@@ -2,27 +2,78 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
-const adminAccessKey = "est-admin-access";
-const adminPasscode = "EST-ADMIN";
-
 export function AdminGate({ children }: { children: ReactNode }) {
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [passcode, setPasscode] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setIsUnlocked(window.localStorage.getItem(adminAccessKey) === "unlocked");
+    let active = true;
+
+    fetch("/api/admin/session", {
+      cache: "no-store"
+    })
+      .then(async (response) => {
+        const result = (await response.json()) as { authenticated?: boolean; error?: string };
+
+        if (!active) {
+          return;
+        }
+
+        setIsUnlocked(Boolean(result.authenticated));
+
+        if (!response.ok && result.error) {
+          setError(result.error);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setError("Admin access could not be verified.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setIsChecking(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  function unlock() {
-    if (passcode.trim().toUpperCase() !== adminPasscode) {
+  async function unlock() {
+    if (!passcode.trim()) {
       setError("Enter the owner passcode to manage availability.");
       return;
     }
 
-    window.localStorage.setItem(adminAccessKey, "unlocked");
-    setIsUnlocked(true);
+    setIsSubmitting(true);
     setError("");
+
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ passcode })
+      });
+      const result = (await response.json()) as { authenticated?: boolean; error?: string };
+
+      if (!response.ok || !result.authenticated) {
+        setError(result.error ?? "Enter the correct owner passcode.");
+        return;
+      }
+
+      setIsUnlocked(true);
+    } catch {
+      setError("Admin access could not be verified.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   if (isUnlocked) {
@@ -38,6 +89,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
           <p className="mt-3 text-sm leading-6 text-slate-600">
             This page is hidden from public navigation. Enter the owner passcode to continue.
           </p>
+          {isChecking ? <p className="mt-4 text-sm font-bold text-slate-600">Checking owner access...</p> : null}
           <label className="mt-6 grid gap-2 text-sm font-bold text-navy">
             Passcode
             <input
@@ -50,7 +102,7 @@ export function AdminGate({ children }: { children: ReactNode }) {
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
-                  unlock();
+                  void unlock();
                 }
               }}
             />
@@ -58,10 +110,11 @@ export function AdminGate({ children }: { children: ReactNode }) {
           {error ? <p className="mt-3 text-sm font-bold text-red-700">{error}</p> : null}
           <button
             type="button"
-            onClick={unlock}
-            className="mt-5 rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25"
+            onClick={() => void unlock()}
+            disabled={isChecking || isSubmitting}
+            className="mt-5 rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-wait disabled:opacity-70"
           >
-            Unlock Admin
+            {isSubmitting ? "Checking..." : "Unlock Admin"}
           </button>
         </div>
       </div>

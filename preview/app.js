@@ -2,7 +2,6 @@ const availabilityKey = "est-availability-v3";
 const blockedDaysKey = "est-blocked-days-v3";
 const bookingsKey = "est-bookings-v1";
 const adminAccessKey = "est-admin-access";
-const adminPasscode = "EST-ADMIN";
 const bookingNotificationEmail = "hugo.soccer87@gmail.com";
 const slotCapacity = 6;
 const trainingGroups = [
@@ -532,14 +531,8 @@ function renderAdminGate() {
   const input = gate.querySelector("[data-admin-passcode]");
   const error = gate.querySelector(".admin-login-error");
   const unlock = () => {
-    if ((input.value || "").trim().toUpperCase() !== adminPasscode) {
-      error.hidden = false;
-      error.textContent = "Enter the owner passcode to manage availability.";
-      return;
-    }
-
-    localStorage.setItem(adminAccessKey, "unlocked");
-    renderAdminGate();
+    error.hidden = false;
+    error.textContent = "Admin access is checked by ADMIN_PASSCODE on the deployed Next.js site.";
   };
   gate.querySelector("[data-admin-unlock]")?.addEventListener("click", unlock);
   input?.addEventListener("keydown", (event) => {

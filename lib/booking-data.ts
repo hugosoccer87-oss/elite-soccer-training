@@ -59,6 +59,7 @@ export type BookingRecord = {
   paymentStatus: "Paid" | "Pending" | "Failed";
   notificationStatus: "Ready" | "Sent" | "Email service not configured";
   calendarStatus: CalendarSyncStatus;
+  calendarMessage?: string;
   calendarEventId?: string;
   calendarEventUrl?: string;
 };

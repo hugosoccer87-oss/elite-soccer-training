@@ -73,6 +73,7 @@ const initialFields: BookingFields = {
 type BookingSubmissionResult = {
   notificationStatus: BookingRecord["notificationStatus"];
   calendarStatus: CalendarSyncStatus;
+  calendarMessage?: string;
   calendarEventId?: string;
   calendarEventUrl?: string;
   error?: string;
@@ -151,6 +152,7 @@ async function sendBookingNotifications(booking: BookingRecord) {
       return {
         notificationStatus: result.notificationStatus ?? "Ready",
         calendarStatus: result.calendarStatus ?? "Failed",
+        calendarMessage: result.calendarMessage,
         error: result.error ?? "That session could not be confirmed."
       } satisfies BookingSubmissionResult;
     }
@@ -158,13 +160,15 @@ async function sendBookingNotifications(booking: BookingRecord) {
     return {
       notificationStatus: result.notificationStatus ?? "Ready",
       calendarStatus: result.calendarStatus ?? "Google Calendar not configured",
+      calendarMessage: result.calendarMessage,
       calendarEventId: result.calendarEventId,
       calendarEventUrl: result.calendarEventUrl
     } satisfies BookingSubmissionResult;
   } catch {
     return {
       notificationStatus: "Email service not configured",
-      calendarStatus: "Google Calendar not configured"
+      calendarStatus: "Failed",
+      calendarMessage: "The booking server could not be reached. Please try again."
     } satisfies BookingSubmissionResult;
   }
 }
@@ -210,6 +214,7 @@ export function BookingForm() {
   const [notificationStatus, setNotificationStatus] = useState<BookingRecord["notificationStatus"]>("Ready");
   const [confirmedBooking, setConfirmedBooking] = useState<BookingRecord | null>(null);
   const [calendarStatus, setCalendarStatus] = useState<CalendarSyncStatus>("Ready");
+  const [calendarMessage, setCalendarMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -370,7 +375,7 @@ export function BookingForm() {
       bookedPlayers: latestSlot.bookedPlayers + requestedPlayers,
       status: latestSlot.bookedPlayers + requestedPlayers >= latestSlot.capacity ? "booked" : "open"
     };
-    const nextSlots = saveSlots(latestSlots.map((slot) => (slot.id === selectedSlot.id ? updatedSlot : slot)));
+    const nextSlots = latestSlots.map((slot) => (slot.id === selectedSlot.id ? updatedSlot : slot));
     const booking: BookingRecord = {
       id: `EST-${selectedSlot.id.replaceAll("-", "").slice(-8).toUpperCase()}-${Date.now().toString().slice(-5)}`,
       createdAt: new Date().toISOString(),
@@ -412,21 +417,34 @@ export function BookingForm() {
       return;
     }
 
+    if (submission.calendarStatus === "Failed" || submission.calendarStatus === "Google Calendar not configured") {
+      setSlots(readSlots());
+      setError(
+        submission.error ??
+          submission.calendarMessage ??
+          "Google Calendar event could not be created. The booking was not confirmed."
+      );
+      return;
+    }
+
     const updatedBooking: BookingRecord = {
       ...booking,
       notificationStatus: submission.notificationStatus,
       calendarStatus: submission.calendarStatus,
+      calendarMessage: submission.calendarMessage,
       calendarEventId: submission.calendarEventId,
       calendarEventUrl: submission.calendarEventUrl
     };
 
-    setSlots(nextSlots);
+    const savedSlots = saveSlots(nextSlots);
+    setSlots(savedSlots);
     setBlockedDays(latestBlockedDays);
     setConfirmedSlot(updatedSlot);
     saveBooking(updatedBooking);
     setConfirmedBooking(updatedBooking);
     setNotificationStatus(updatedBooking.notificationStatus);
     setCalendarStatus(updatedBooking.calendarStatus);
+    setCalendarMessage(updatedBooking.calendarMessage ?? "");
     setBookingCode(booking.id);
     setStep("confirmed");
   }

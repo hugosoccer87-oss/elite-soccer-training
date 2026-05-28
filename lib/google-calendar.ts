@@ -14,7 +14,7 @@ const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleTokenEndpoint = "https://oauth2.googleapis.com/token";
 const googleCalendarEndpoint = "https://www.googleapis.com/calendar/v3";
 const calendarTimeZone = process.env.GOOGLE_CALENDAR_TIME_ZONE ?? "America/Los_Angeles";
-const calendarId = process.env.GOOGLE_CALENDAR_ID ?? "primary";
+const calendarId = "primary";
 
 type GoogleCalendarEvent = {
   id?: string;
@@ -56,9 +56,41 @@ function getGoogleClientConfig() {
   };
 }
 
+function logCalendarInfo(message: string, details?: Record<string, unknown>) {
+  console.info(`[EST Google Calendar] ${message}`, details ?? {});
+}
+
+function logCalendarError(message: string, details?: Record<string, unknown>) {
+  console.error(`[EST Google Calendar] ${message}`, details ?? {});
+}
+
+function getCalendarEnvDiagnostics() {
+  const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+
+  return {
+    hasGoogleClientId: Boolean(clientId),
+    hasGoogleClientSecret: Boolean(clientSecret),
+    hasGoogleRefreshToken: Boolean(refreshToken),
+    calendarId,
+    calendarTimeZone
+  };
+}
+
 function isGoogleCalendarConfigured() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
   return Boolean(clientId && clientSecret && refreshToken);
+}
+
+async function googleErrorMessage(response: Response, context: string) {
+  const body = await response.text().catch(() => "");
+
+  logCalendarError(context, {
+    status: response.status,
+    statusText: response.statusText,
+    body: body.slice(0, 1000)
+  });
+
+  return `${context}. Google returned ${response.status} ${response.statusText}. Check Vercel server logs for [EST Google Calendar].`;
 }
 
 export function getGoogleRedirectUri(request: Request) {
@@ -113,7 +145,8 @@ export async function exchangeGoogleCodeForTokens(code: string, request: Request
   });
 
   if (!response.ok) {
-    throw new Error("Google OAuth token exchange failed.");
+    const message = await googleErrorMessage(response, "Google OAuth token exchange failed");
+    throw new Error(message);
   }
 
   return (await response.json()) as {
@@ -129,8 +162,14 @@ async function getGoogleAccessToken() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
 
   if (!clientId || !clientSecret || !refreshToken) {
-    return null;
+    logCalendarError("Google Calendar environment variables are missing", getCalendarEnvDiagnostics());
+    return {
+      accessToken: null,
+      error: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
   }
+
+  logCalendarInfo("Requesting Google access token", getCalendarEnvDiagnostics());
 
   const response = await fetch(googleTokenEndpoint, {
     method: "POST",
@@ -146,11 +185,27 @@ async function getGoogleAccessToken() {
   });
 
   if (!response.ok) {
-    return null;
+    const message = await googleErrorMessage(response, "Google access token refresh failed");
+    return {
+      accessToken: null,
+      error: message
+    };
   }
 
   const token = (await response.json()) as { access_token?: string };
-  return token.access_token ?? null;
+
+  if (!token.access_token) {
+    logCalendarError("Google token response did not include an access token");
+    return {
+      accessToken: null,
+      error: "Google did not return an access token. Reconnect Google Calendar."
+    };
+  }
+
+  return {
+    accessToken: token.access_token,
+    error: null
+  };
 }
 
 function calendarHeaders(accessToken: string, extraHeaders?: Record<string, string>) {
@@ -198,6 +253,14 @@ function getCalendarDateRange(dateIso: string, time: string, durationMinutes = 6
     start: formatLocalDateTime(dateIso, startMinutes),
     end: formatLocalDateTime(dateIso, endMinutes)
   };
+}
+
+function resolveBookingDateIso(booking: BookingRecord) {
+  if (booking.sessionDateIso) {
+    return booking.sessionDateIso;
+  }
+
+  return booking.sessionId.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
 }
 
 function formatDateParts(dateIso: string) {
@@ -282,13 +345,18 @@ function eventToTrainingSlot(event: GoogleCalendarEvent): TrainingSlot | null {
 
 export async function listCalendarAvailabilitySlots(): Promise<CalendarAvailabilityResult> {
   if (!isGoogleCalendarConfigured()) {
-    return { status: "Google Calendar not configured", slots: [] };
+    logCalendarError("Availability sync skipped because Google Calendar is not configured", getCalendarEnvDiagnostics());
+    return {
+      status: "Google Calendar not configured",
+      slots: [],
+      message: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
   }
 
-  const accessToken = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken();
 
-  if (!accessToken) {
-    return { status: "Failed", slots: [], message: "Could not connect to Google Calendar." };
+  if (!token.accessToken) {
+    return { status: "Failed", slots: [], message: token.error ?? "Could not connect to Google Calendar." };
   }
 
   const params = new URLSearchParams({
@@ -301,12 +369,12 @@ export async function listCalendarAvailabilitySlots(): Promise<CalendarAvailabil
   const response = await fetch(
     `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
     {
-      headers: calendarHeaders(accessToken)
+      headers: calendarHeaders(token.accessToken)
     }
   );
 
   if (!response.ok) {
-    return { status: "Failed", slots: [], message: "Could not load Google Calendar availability." };
+    return { status: "Failed", slots: [], message: await googleErrorMessage(response, "Could not load Google Calendar availability") };
   }
 
   const data = (await response.json()) as GoogleCalendarListResponse;
@@ -317,21 +385,33 @@ export async function listCalendarAvailabilitySlots(): Promise<CalendarAvailabil
 
 export async function createCalendarAvailabilitySlot(slot: TrainingSlot): Promise<CalendarAvailabilityResult> {
   if (!isGoogleCalendarConfigured()) {
-    return { status: "Google Calendar not configured", slot };
+    logCalendarError("Availability creation skipped because Google Calendar is not configured", getCalendarEnvDiagnostics());
+    return {
+      status: "Google Calendar not configured",
+      slot,
+      message: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
   }
 
-  const accessToken = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken();
 
-  if (!accessToken) {
-    return { status: "Failed", slot, message: "Could not connect to Google Calendar." };
+  if (!token.accessToken) {
+    return { status: "Failed", slot, message: token.error ?? "Could not connect to Google Calendar." };
   }
 
   const durationMinutes = Number.parseInt(slot.duration, 10) || 60;
   const range = getCalendarDateRange(slot.dateIso, slot.time, durationMinutes);
   const group = getTrainingGroup(slot.groupId);
+  logCalendarInfo("Creating Google Calendar availability event", {
+    slotId: slot.id,
+    group: group.name,
+    start: range.start,
+    end: range.end,
+    calendarId
+  });
   const response = await fetch(`${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`, {
     method: "POST",
-    headers: calendarHeaders(accessToken),
+    headers: calendarHeaders(token.accessToken),
     body: JSON.stringify({
       summary: `EST Availability: ${group.name}`,
       description: `Available Elite Soccer Training session for ${group.name}.`,
@@ -359,10 +439,15 @@ export async function createCalendarAvailabilitySlot(slot: TrainingSlot): Promis
   });
 
   if (!response.ok) {
-    return { status: "Failed", slot, message: "Could not create Google Calendar availability." };
+    return { status: "Failed", slot, message: await googleErrorMessage(response, "Could not create Google Calendar availability") };
   }
 
   const event = (await response.json()) as GoogleCalendarEvent;
+  logCalendarInfo("Google Calendar availability event created", {
+    slotId: slot.id,
+    eventId: event.id,
+    eventUrl: event.htmlLink
+  });
   const syncedSlot = eventToTrainingSlot(event) ?? { ...slot, calendarEventId: event.id, calendarStatus: "Synced" };
 
   return { status: "Synced", slot: syncedSlot, eventId: event.id };
@@ -373,24 +458,31 @@ export async function updateCalendarAvailabilitySlot(
   updates: Partial<Pick<TrainingSlot, "status" | "bookedPlayers" | "capacity">>
 ): Promise<CalendarAvailabilityResult> {
   if (!isGoogleCalendarConfigured()) {
-    return { status: "Google Calendar not configured" };
+    logCalendarError("Availability update skipped because Google Calendar is not configured", getCalendarEnvDiagnostics());
+    return {
+      status: "Google Calendar not configured",
+      message: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
   }
 
-  const accessToken = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken();
 
-  if (!accessToken) {
-    return { status: "Failed", message: "Could not connect to Google Calendar." };
+  if (!token.accessToken) {
+    return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
   }
 
   const currentResponse = await fetch(
     `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     {
-      headers: calendarHeaders(accessToken)
+      headers: calendarHeaders(token.accessToken)
     }
   );
 
   if (!currentResponse.ok) {
-    return { status: "Failed", message: "Could not load the Google Calendar availability event." };
+    return {
+      status: "Failed",
+      message: await googleErrorMessage(currentResponse, "Could not load the Google Calendar availability event")
+    };
   }
 
   const currentEvent = (await currentResponse.json()) as GoogleCalendarEvent;
@@ -406,7 +498,7 @@ export async function updateCalendarAvailabilitySlot(
     `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     {
       method: "PATCH",
-      headers: calendarHeaders(accessToken, currentEvent.etag ? { "If-Match": currentEvent.etag } : undefined),
+      headers: calendarHeaders(token.accessToken, currentEvent.etag ? { "If-Match": currentEvent.etag } : undefined),
       body: JSON.stringify({
         extendedProperties: {
           private: nextProperties
@@ -416,7 +508,7 @@ export async function updateCalendarAvailabilitySlot(
   );
 
   if (!response.ok) {
-    return { status: "Failed", message: "Could not update Google Calendar availability." };
+    return { status: "Failed", message: await googleErrorMessage(response, "Could not update Google Calendar availability") };
   }
 
   const event = (await response.json()) as GoogleCalendarEvent;
@@ -426,25 +518,29 @@ export async function updateCalendarAvailabilitySlot(
 
 export async function deleteCalendarAvailabilitySlot(eventId: string): Promise<CalendarAvailabilityResult> {
   if (!isGoogleCalendarConfigured()) {
-    return { status: "Google Calendar not configured" };
+    logCalendarError("Availability deletion skipped because Google Calendar is not configured", getCalendarEnvDiagnostics());
+    return {
+      status: "Google Calendar not configured",
+      message: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
   }
 
-  const accessToken = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken();
 
-  if (!accessToken) {
-    return { status: "Failed", message: "Could not connect to Google Calendar." };
+  if (!token.accessToken) {
+    return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
   }
 
   const response = await fetch(
     `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
     {
       method: "DELETE",
-      headers: calendarHeaders(accessToken)
+      headers: calendarHeaders(token.accessToken)
     }
   );
 
   if (!response.ok && response.status !== 410 && response.status !== 404) {
-    return { status: "Failed", message: "Could not remove Google Calendar availability." };
+    return { status: "Failed", message: await googleErrorMessage(response, "Could not remove Google Calendar availability") };
   }
 
   return { status: "Synced", eventId };
@@ -465,7 +561,7 @@ async function reserveAvailabilityForBooking(booking: BookingRecord, accessToken
   );
 
   if (!response.ok) {
-    return { status: "Failed", message: "Could not verify Google Calendar availability." };
+    return { status: "Failed", message: await googleErrorMessage(response, "Could not verify Google Calendar availability") };
   }
 
   const event = (await response.json()) as GoogleCalendarEvent;
@@ -511,7 +607,7 @@ async function reserveAvailabilityForBooking(booking: BookingRecord, accessToken
   }
 
   if (!patchResponse.ok) {
-    return { status: "Failed", message: "Could not reserve the Google Calendar availability slot." };
+    return { status: "Failed", message: await googleErrorMessage(patchResponse, "Could not reserve the Google Calendar availability slot") };
   }
 
   return { status: "Synced" };
@@ -519,26 +615,57 @@ async function reserveAvailabilityForBooking(booking: BookingRecord, accessToken
 
 export async function createBookingCalendarEvent(booking: BookingRecord): Promise<CalendarBookingResult> {
   if (!isGoogleCalendarConfigured()) {
-    return { status: "Google Calendar not configured" };
+    logCalendarError("Booking event creation skipped because Google Calendar is not configured", {
+      ...getCalendarEnvDiagnostics(),
+      bookingId: booking.id
+    });
+    return {
+      status: "Google Calendar not configured",
+      message: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
   }
 
-  const accessToken = await getGoogleAccessToken();
+  const token = await getGoogleAccessToken();
 
-  if (!accessToken) {
-    return { status: "Failed", message: "Could not connect to Google Calendar." };
+  if (!token.accessToken) {
+    return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
   }
 
-  const reservation = await reserveAvailabilityForBooking(booking, accessToken);
+  const reservation = await reserveAvailabilityForBooking(booking, token.accessToken);
 
   if (reservation.status === "Unavailable" || reservation.status === "Failed") {
     return reservation;
   }
 
   const durationMinutes = booking.sessionDurationMinutes || 60;
-  const range = getCalendarDateRange(booking.sessionDateIso, booking.sessionTime, durationMinutes);
+  const dateIso = resolveBookingDateIso(booking);
+
+  if (!dateIso) {
+    logCalendarError("Booking event creation failed because sessionDateIso is missing", {
+      bookingId: booking.id,
+      sessionId: booking.sessionId,
+      sessionDate: booking.sessionDate,
+      sessionTime: booking.sessionTime
+    });
+
+    return {
+      status: "Failed",
+      message: "Google Calendar event could not be created because the booking is missing a session date."
+    };
+  }
+
+  const range = getCalendarDateRange(dateIso, booking.sessionTime, durationMinutes);
+  logCalendarInfo("Creating Google Calendar booking event", {
+    bookingId: booking.id,
+    programName: booking.programName,
+    playerName: booking.playerName,
+    start: range.start,
+    end: range.end,
+    calendarId
+  });
   const response = await fetch(`${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`, {
     method: "POST",
-    headers: calendarHeaders(accessToken),
+    headers: calendarHeaders(token.accessToken),
     body: JSON.stringify({
       summary: `EST Booking: ${booking.programName} - ${booking.playerName}`,
       description: bookingDescription(booking),
@@ -563,10 +690,15 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   });
 
   if (!response.ok) {
-    return { status: "Failed", message: "Could not create the Google Calendar booking event." };
+    return { status: "Failed", message: await googleErrorMessage(response, "Could not create the Google Calendar booking event") };
   }
 
   const event = (await response.json()) as GoogleCalendarEvent;
+  logCalendarInfo("Google Calendar booking event created", {
+    bookingId: booking.id,
+    eventId: event.id,
+    eventUrl: event.htmlLink
+  });
 
   return {
     status: "Created",
