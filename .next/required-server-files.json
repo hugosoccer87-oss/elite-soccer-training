@@ -289,6 +289,14 @@
     "htmlLimitedBots": "[\\w-]+-Google|Google-[\\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight",
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.mjs",
+    "serverExternalPackages": [
+      "nodemailer"
+    ],
+    "outputFileTracingIncludes": {
+      "/api/bookings": [
+        "./node_modules/nodemailer/**/*"
+      ]
+    },
     "turbopack": {
       "root": "/Users/hugochaparro/Documents/Codex/2026-05-26/files-mentioned-by-the-user-chatgpt"
     }
