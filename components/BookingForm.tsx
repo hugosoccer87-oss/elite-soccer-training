@@ -745,9 +745,9 @@ export function BookingForm() {
         ) : null}
 
         {step === "waiver" ? (
-          <section className="grid gap-5 p-5 sm:p-8">
-            <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-              <header className="border-b border-slate-200 bg-mist px-5 py-6 sm:px-8">
+          <section className="grid gap-5 bg-slate-100/70 p-4 sm:p-8">
+            <article className="mx-auto w-full max-w-4xl overflow-hidden rounded-lg border border-slate-300 bg-white shadow-sm">
+              <header className="border-b border-slate-300 bg-[#f8fafc] px-5 py-7 sm:px-9">
                 <p className="text-sm font-black uppercase text-electric">Waiver Required</p>
                 <h3 className="mt-2 text-2xl font-black leading-tight text-navy sm:text-3xl">
                   Elite Soccer Training Participation Waiver & Release of Liability
@@ -757,8 +757,8 @@ export function BookingForm() {
                 </p>
               </header>
 
-              <div className="divide-y divide-slate-200 px-5 py-2 sm:px-8">
-                <section className="py-6">
+              <div className="divide-y divide-slate-300 px-5 py-2 sm:px-9">
+                <section className="py-7">
                   <h4 className="text-lg font-black text-navy">1. Participant Information</h4>
                   <dl className="mt-4 grid gap-x-6 gap-y-4 sm:grid-cols-2">
                     {[
@@ -767,7 +767,7 @@ export function BookingForm() {
                       ["Phone Number", fields.phone || "Complete phone number"],
                       ["Email", fields.email || "Complete email address"]
                     ].map(([label, value]) => (
-                      <div key={label} className="border-b border-slate-200 pb-3">
+                      <div key={label} className="border-b border-slate-300 pb-3">
                         <dt className="text-xs font-black uppercase text-slate-500">{label}</dt>
                         <dd className="mt-1 text-sm font-bold text-navy">{value}</dd>
                       </div>
@@ -797,7 +797,7 @@ export function BookingForm() {
                 </section>
 
                 {waiverSections.map((section, index) => (
-                  <section key={section.title} className="py-6">
+                  <section key={section.title} className="py-7">
                     <h4 className="text-lg font-black text-navy">
                       {index + 2}. {section.title}
                     </h4>
@@ -805,37 +805,41 @@ export function BookingForm() {
                   </section>
                 ))}
 
-                <section className="py-6">
-                  <h4 className="text-lg font-black text-navy">Media Consent Selection</h4>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {[
-                      ["yes", "Yes, media use is approved"],
-                      ["no", "No, media consent is declined"]
-                    ].map(([value, label]) => (
-                      <label
-                        key={value}
-                        className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-black transition ${
-                          fields.mediaConsent === value
-                            ? "border-electric bg-electric text-white"
-                            : "border-slate-300 bg-white text-navy"
-                        }`}
-                      >
-                        <input
-                          className="h-4 w-4 border-slate-300"
-                          type="radio"
-                          name="mediaConsent"
-                          checked={fields.mediaConsent === value}
-                          onChange={() => setField("mediaConsent", value)}
-                        />
-                        {label}
-                      </label>
-                    ))}
+                <section className="my-7 rounded-lg border border-slate-300 bg-[#f8fafc] p-5 shadow-sm sm:p-6">
+                  <div className="border-b border-slate-300 pb-4">
+                    <p className="text-xs font-black uppercase tracking-wide text-electric">Signature Required</p>
+                    <h4 className="mt-2 text-xl font-black text-navy">Electronic Agreement & Signature</h4>
                   </div>
-                </section>
 
-                <section className="py-6">
-                  <h4 className="text-lg font-black text-navy">Electronic Agreement & Signature</h4>
-                  <label className="mt-4 flex items-start gap-3 rounded-md border border-slate-300 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700">
+                  <div className="border-b border-slate-300 py-5">
+                    <h5 className="text-base font-black text-navy">Media Consent Selection</h5>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {[
+                        ["yes", "Yes, media use is approved"],
+                        ["no", "No, media consent is declined"]
+                      ].map(([value, label]) => (
+                        <label
+                          key={value}
+                          className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-black transition ${
+                            fields.mediaConsent === value
+                              ? "border-electric bg-electric text-white shadow-md shadow-electric/15"
+                              : "border-slate-300 bg-white text-navy"
+                          }`}
+                        >
+                          <input
+                            className="h-4 w-4 border-slate-300"
+                            type="radio"
+                            name="mediaConsent"
+                            checked={fields.mediaConsent === value}
+                            onChange={() => setField("mediaConsent", value)}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="mt-5 flex items-start gap-3 rounded-md border border-slate-300 bg-white p-4 text-sm font-semibold leading-6 text-slate-700 shadow-sm">
                     <input
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
                       checked={fields.waiverAgreement}
@@ -864,7 +868,7 @@ export function BookingForm() {
                     <SignaturePad />
                   </div>
 
-                  <div className="mt-5 grid gap-2 border-t border-slate-200 pt-4 text-xs font-bold uppercase text-slate-500 sm:grid-cols-2">
+                  <div className="mt-6 grid gap-3 border-t border-slate-300 pt-4 text-xs font-bold uppercase text-slate-500 sm:grid-cols-2">
                     <p>Waiver version {waiverVersion}</p>
                     <p>Date / Timestamp: saved automatically when payment is submitted</p>
                   </div>
@@ -872,7 +876,7 @@ export function BookingForm() {
               </div>
             </article>
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 sm:flex-row">
               <button type="button" onClick={() => setStep("details")} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
                 Back
               </button>
