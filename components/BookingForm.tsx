@@ -5,8 +5,6 @@ import { CalendarIcon, ShieldIcon } from "./Icons";
 import { SignaturePad } from "./SignaturePad";
 import {
   availabilityStorageKey,
-  bookingNotificationEmail,
-  bookingsStorageKey,
   blockedDaysStorageKey,
   defaultTrainingSlots,
   getRemainingSpots,
@@ -27,10 +25,10 @@ import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
-const stepLabels = ["Program", "Session", "Details", "Waiver", "Payment", "Confirmed"];
+const stepLabels = ["Program", "Session", "Details", "Waiver", "Payment"];
 const waiverVersion = "EST-CA-2026-05";
 
-type BookingStep = "program" | "session" | "details" | "waiver" | "payment" | "confirmed";
+type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
 
 type BookingFields = {
   parentName: string;
@@ -108,24 +106,6 @@ function saveSlots(nextSlots: TrainingSlot[]) {
   const normalizedSlots = nextSlots.map(normalizeTrainingSlot);
   window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
   return normalizedSlots;
-}
-
-function readBookings() {
-  if (typeof window === "undefined") {
-    return [] as BookingRecord[];
-  }
-
-  try {
-    return JSON.parse(window.localStorage.getItem(bookingsStorageKey) ?? "[]") as BookingRecord[];
-  } catch {
-    return [];
-  }
-}
-
-function saveBooking(booking: BookingRecord) {
-  const nextBookings = [booking, ...readBookings()];
-  window.localStorage.setItem(bookingsStorageKey, JSON.stringify(nextBookings));
-  return nextBookings;
 }
 
 async function createStripeCheckout(booking: BookingRecord) {
@@ -230,13 +210,7 @@ export function BookingForm() {
     defaultTrainingSlots.find((slot) => slot.groupId === trainingGroups[0].id)?.dateIso ?? ""
   );
   const [selectedSlotId, setSelectedSlotId] = useState("");
-  const [confirmedSlot, setConfirmedSlot] = useState<TrainingSlot | null>(null);
   const [fields, setFields] = useState<BookingFields>(initialFields);
-  const [bookingCode, setBookingCode] = useState("");
-  const [notificationStatus, setNotificationStatus] = useState<BookingRecord["notificationStatus"]>("Ready");
-  const [confirmedBooking, setConfirmedBooking] = useState<BookingRecord | null>(null);
-  const [calendarStatus, setCalendarStatus] = useState<CalendarSyncStatus>("Ready");
-  const [calendarMessage, setCalendarMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -292,22 +266,12 @@ export function BookingForm() {
 
   const selectedSlot = openSlots.find((slot) => slot.id === selectedSlotId);
   const selectedGroup = getTrainingGroup(selectedGroupId);
-  const displaySlot = step === "confirmed" ? confirmedSlot : selectedSlot;
+  const displaySlot = selectedSlot;
   const dateSlots = openSlots.filter((slot) => slot.dateIso === selectedDate);
-  const activeStepIndex = ["program", "session", "details", "waiver", "payment", "confirmed"].findIndex((label) => label === step);
+  const activeStepIndex = ["program", "session", "details", "waiver", "payment"].findIndex((label) => label === step);
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
-  const calendarSummary =
-    calendarStatus === "Created"
-      ? "Google Calendar event created"
-      : calendarStatus === "Synced"
-        ? "Google Calendar availability updated"
-        : calendarStatus === "Failed"
-          ? "Google Calendar needs attention"
-          : calendarStatus === "Google Calendar not configured"
-            ? "Google Calendar ready to connect"
-            : "Google Calendar ready";
 
   function setField(field: keyof BookingFields, value: string | boolean) {
     setFields((current) => ({ ...current, [field]: value }));
@@ -420,7 +384,7 @@ export function BookingForm() {
       sessionTime: latestSlot.time,
       sessionDurationMinutes: 60,
       sessionCalendarEventId: latestSlot.calendarEventId,
-      paymentStatus: "Pending",
+      paymentStatus: "pending_payment",
       notificationStatus: "Ready",
       calendarStatus: "Ready"
     };
@@ -886,83 +850,6 @@ export function BookingForm() {
           </section>
         ) : null}
 
-        {step === "confirmed" ? (
-          <section className="grid gap-6 p-5 sm:p-8">
-            <div className="rounded-lg border border-field/30 bg-field/10 p-6">
-              <p className="text-sm font-black uppercase text-field">Session Confirmed</p>
-              <h3 className="mt-2 text-3xl font-black text-navy">Your small group session is confirmed.</h3>
-              <p className="mt-3 text-sm leading-6 text-slate-700">
-                Confirmation code: <span className="font-black">{bookingCode}</span>
-              </p>
-              {confirmedSlot ? (
-                <p className="mt-1 text-sm leading-6 text-slate-700">
-                  {confirmedSlot.dateLabel} at {confirmedSlot.time} in {business.location}
-                </p>
-              ) : null}
-            </div>
-            <div className="grid gap-4 md:grid-cols-4">
-              {[
-                "Payment successful",
-                calendarSummary,
-                notificationStatus === "Sent"
-                  ? `Parent confirmation sent to ${fields.email || "parent email"}`
-                  : `Parent confirmation ready for ${fields.email || "parent email"}`,
-                notificationStatus === "Sent"
-                  ? `Coach notification sent to ${bookingNotificationEmail}`
-                  : `Coach notification ready for ${bookingNotificationEmail}`
-              ].map((item) => (
-                <div key={item} className="rounded-lg border border-slate-200 bg-white p-5">
-                  <p className="text-sm font-black text-navy">{item}</p>
-                  <p className="mt-2 text-xs font-bold uppercase text-field">
-                    {item.includes("Google Calendar") && calendarStatus === "Google Calendar not configured"
-                      ? "Calendar Setup Needed"
-                      : item.includes("Google Calendar") && calendarStatus === "Failed"
-                        ? "Check Calendar"
-                      : notificationStatus !== "Sent" && item !== "Payment successful" && !item.includes("Google Calendar")
-                        ? "Email Setup Needed"
-                        : "Complete"}
-                  </p>
-                </div>
-              ))}
-            </div>
-            {confirmedBooking ? (
-              <div className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5">
-                <p className="text-sm font-black uppercase text-electric">Confirmation Email UI</p>
-                <h4 className="text-2xl font-black text-navy">Session Confirmed</h4>
-                <p className="text-sm leading-6 text-slate-600">
-                  {fields.parentName || "Parent"}, your {confirmedBooking.programName} session for {fields.playerName || "player"} is confirmed for{" "}
-                  {confirmedBooking.sessionDate} at {confirmedBooking.sessionTime}. Payment status: {confirmedBooking.paymentStatus}.
-                </p>
-                <p className="text-sm leading-6 text-slate-600">
-                  Waiver accepted electronically on {new Date(confirmedBooking.waiverAcceptedAt).toLocaleString("en-US")}. Media consent:{" "}
-                  {confirmedBooking.mediaConsent}.
-                </p>
-                {confirmedBooking.calendarEventUrl ? (
-                  <a className="text-sm font-black text-electric underline" href={confirmedBooking.calendarEventUrl}>
-                    View Google Calendar event
-                  </a>
-                ) : null}
-                <p className="text-sm font-bold text-slate-600">Reminder notification scheduled.</p>
-              </div>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => {
-                setFields(initialFields);
-                setSelectedSlotId("");
-                setConfirmedSlot(null);
-                setConfirmedBooking(null);
-                setNotificationStatus("Ready");
-                setCalendarStatus("Ready");
-                setBookingCode("");
-                setStep("program");
-              }}
-              className="w-fit rounded-md border border-navy px-6 py-3 text-sm font-black text-navy"
-            >
-              Book Another Session
-            </button>
-          </section>
-        ) : null}
       </div>
     </div>
   );

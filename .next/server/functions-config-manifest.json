@@ -1,6 +1,7 @@
 {
   "version": 1,
   "functions": {
+    "/api/stripe/verify-session": {},
     "/api/stripe/webhook": {}
   }
 }

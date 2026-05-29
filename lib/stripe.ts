@@ -30,6 +30,24 @@ function getStripeSecretKey() {
   return process.env.STRIPE_SECRET_KEY;
 }
 
+export function getStripeKeyMode() {
+  const key = getStripeSecretKey() || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
+
+  if (key.startsWith("sk_live_") || key.startsWith("pk_live_")) {
+    return "live";
+  }
+
+  if (key.startsWith("sk_test_") || key.startsWith("pk_test_")) {
+    return "test";
+  }
+
+  return key ? "unknown" : "missing";
+}
+
+export function hasStripeWebhookSecret() {
+  return Boolean(process.env.STRIPE_WEBHOOK_SECRET?.trim());
+}
+
 export function getSiteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || defaultSiteUrl).replace(/\/$/, "");
 }
@@ -92,7 +110,7 @@ export async function createStripeCheckoutSession(booking: BookingRecord) {
   const siteUrl = getSiteUrl();
   const params = new URLSearchParams({
     mode: "payment",
-    success_url: `${siteUrl}/booking/success`,
+    success_url: `${siteUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${siteUrl}/booking/cancel`,
     client_reference_id: booking.id,
     customer_email: booking.email,
@@ -125,6 +143,41 @@ export async function createStripeCheckoutSession(booking: BookingRecord) {
   }
 
   return result;
+}
+
+export async function retrieveStripeCheckoutSession(sessionId: string) {
+  const secretKey = getStripeSecretKey();
+
+  if (!secretKey) {
+    throw new Error("Stripe is not configured. Add STRIPE_SECRET_KEY in Vercel.");
+  }
+
+  const cleanSessionId = sessionId.trim();
+
+  if (!cleanSessionId) {
+    throw new Error("Stripe Checkout session ID is missing.");
+  }
+
+  const response = await fetch(
+    `${stripeApiBase}/checkout/sessions/${encodeURIComponent(cleanSessionId)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${secretKey}`
+      },
+      cache: "no-store"
+    }
+  );
+  const result = (await response.json()) as StripeCheckoutSession & { error?: { message?: string } };
+
+  if (!response.ok) {
+    throw new Error(result.error?.message ?? "Stripe Checkout session could not be verified.");
+  }
+
+  return result;
+}
+
+export function isStripePaymentVerified(session: StripeCheckoutSession) {
+  return session.payment_status === "paid" && session.status === "complete";
 }
 
 export function bookingFromStripeMetadata(metadata: Record<string, string> | undefined): BookingRecord | null {

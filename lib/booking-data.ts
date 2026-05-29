@@ -60,7 +60,7 @@ export type BookingRecord = {
   sessionTime: string;
   sessionDurationMinutes: number;
   sessionCalendarEventId?: string;
-  paymentStatus: "Paid" | "Pending" | "Failed";
+  paymentStatus: "Paid" | "pending_payment" | "Pending" | "Failed";
   notificationStatus: "Ready" | "Sent" | "Email service not configured" | "Email delivery needs attention";
   calendarStatus: CalendarSyncStatus;
   calendarMessage?: string;

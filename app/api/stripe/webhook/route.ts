@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { confirmPaidBooking } from "@/lib/booking-confirmation";
-import { bookingFromStripeMetadata, verifyStripeWebhookSignature } from "@/lib/stripe";
+import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
+import { bookingFromStripeMetadata, isStripePaymentVerified, verifyStripeWebhookSignature } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 
@@ -11,16 +12,34 @@ export async function POST(request: Request) {
   try {
     const event = verifyStripeWebhookSignature(payload, signature);
 
-    console.info("[EST Stripe] Webhook event received", {
+    console.info("[EST Stripe] Webhook received", {
       eventId: event.id,
       eventType: event.type
     });
 
     if (event.type === "checkout.session.completed") {
+      console.info("[EST Stripe] checkout.session.completed received", {
+        eventId: event.id,
+        sessionId: event.data.object.id
+      });
+
       const session = event.data.object;
       const booking = bookingFromStripeMetadata(session.metadata);
 
       if (!booking) {
+        console.warn("[EST Stripe] Payment not verified", {
+          eventId: event.id,
+          sessionId: session.id,
+          reason: "Missing booking metadata"
+        });
+        setLastPaymentVerificationResult({
+          source: "webhook",
+          verified: false,
+          sessionId: session.id,
+          sessionStatus: session.status,
+          paymentStatus: session.payment_status,
+          message: "Missing booking metadata"
+        });
         console.error("[EST Stripe] Checkout completed without booking metadata", {
           eventId: event.id,
           sessionId: session.id
@@ -28,15 +47,39 @@ export async function POST(request: Request) {
         return NextResponse.json({ received: true });
       }
 
-      if (session.payment_status !== "paid") {
-        console.warn("[EST Stripe] Checkout completed without paid status", {
+      if (!isStripePaymentVerified(session)) {
+        console.warn("[EST Stripe] Payment not verified", {
           eventId: event.id,
           sessionId: session.id,
           bookingId: booking.id,
+          sessionStatus: session.status,
           paymentStatus: session.payment_status
+        });
+        setLastPaymentVerificationResult({
+          source: "webhook",
+          verified: false,
+          sessionId: session.id,
+          bookingId: booking.id,
+          sessionStatus: session.status,
+          paymentStatus: session.payment_status,
+          message: "Checkout session was not paid and complete."
         });
         return NextResponse.json({ received: true });
       }
+
+      console.info("[EST Stripe] Payment verified", {
+        eventId: event.id,
+        sessionId: session.id,
+        bookingId: booking.id
+      });
+      setLastPaymentVerificationResult({
+        source: "webhook",
+        verified: true,
+        sessionId: session.id,
+        bookingId: booking.id,
+        sessionStatus: session.status,
+        paymentStatus: session.payment_status
+      });
 
       const result = await confirmPaidBooking(booking);
 
@@ -51,6 +94,21 @@ export async function POST(request: Request) {
     }
 
     if (event.type === "checkout.session.expired") {
+      console.warn("[EST Stripe] Payment not verified", {
+        eventId: event.id,
+        sessionId: event.data.object.id,
+        bookingId: event.data.object.metadata?.bookingId,
+        reason: "Checkout session expired"
+      });
+      setLastPaymentVerificationResult({
+        source: "webhook",
+        verified: false,
+        sessionId: event.data.object.id,
+        bookingId: event.data.object.metadata?.bookingId,
+        sessionStatus: event.data.object.status,
+        paymentStatus: event.data.object.payment_status,
+        message: "Checkout session expired."
+      });
       console.warn("[EST Stripe] Checkout session expired", {
         eventId: event.id,
         sessionId: event.data.object.id,
@@ -59,6 +117,21 @@ export async function POST(request: Request) {
     }
 
     if (event.type === "payment_intent.payment_failed") {
+      console.warn("[EST Stripe] Payment not verified", {
+        eventId: event.id,
+        paymentIntentId: event.data.object.id,
+        bookingId: event.data.object.metadata?.bookingId,
+        reason: "Payment intent failed"
+      });
+      setLastPaymentVerificationResult({
+        source: "webhook",
+        verified: false,
+        sessionId: event.data.object.id,
+        bookingId: event.data.object.metadata?.bookingId,
+        sessionStatus: event.data.object.status,
+        paymentStatus: event.data.object.payment_status,
+        message: "Payment intent failed."
+      });
       console.error("[EST Stripe] Payment failed", {
         eventId: event.id,
         paymentIntentId: event.data.object.id,

@@ -23,6 +23,21 @@ import {
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
+type AdminDiagnostics = {
+  stripeKeyMode: "test" | "live" | "unknown" | "missing";
+  webhookSecretExists: boolean;
+  lastPaymentVerificationResult: {
+    checkedAt: string;
+    source: string;
+    verified: boolean;
+    sessionId?: string;
+    bookingId?: string;
+    sessionStatus?: string;
+    paymentStatus?: string;
+    message?: string;
+  } | null;
+};
+
 function readSlots() {
   if (typeof window === "undefined") {
     return defaultTrainingSlots;
@@ -131,6 +146,22 @@ async function deleteSyncedSlot(slot: TrainingSlot) {
   }
 }
 
+async function readAdminDiagnostics() {
+  try {
+    const response = await fetch("/api/admin/diagnostics", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as AdminDiagnostics;
+  } catch {
+    return null;
+  }
+}
+
 function formatDateParts(dateIso: string) {
   const date = new Date(`${dateIso}T00:00:00`);
   return {
@@ -157,6 +188,7 @@ export function AdminAvailability() {
   const [newDuration] = useState("60");
   const [blockDate, setBlockDate] = useState("2026-06-18");
   const [notice, setNotice] = useState("");
+  const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null);
 
   useEffect(() => {
     const loadedSlots = readSlots();
@@ -176,6 +208,12 @@ export function AdminAvailability() {
       const normalizedSlots = syncedSlots.map(normalizeTrainingSlot);
       setSlots(normalizedSlots);
       window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
+    });
+
+    readAdminDiagnostics().then((result) => {
+      if (active) {
+        setDiagnostics(result);
+      }
     });
 
     return () => {
@@ -349,6 +387,7 @@ export function AdminAvailability() {
 
   function refreshBookings() {
     setBookings(readBookings());
+    void readAdminDiagnostics().then(setDiagnostics);
     setNotice("Bookings refreshed.");
   }
 
@@ -380,6 +419,35 @@ export function AdminAvailability() {
         </div>
 
         {notice ? <p className="mt-5 rounded-md bg-field/10 p-3 text-sm font-bold text-field">{notice}</p> : null}
+
+        {diagnostics ? (
+          <div className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm sm:grid-cols-3">
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Stripe key mode</p>
+              <p className="mt-1 font-black text-navy">{diagnostics.stripeKeyMode}</p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Webhook secret</p>
+              <p className="mt-1 font-black text-navy">{diagnostics.webhookSecretExists ? "yes" : "no"}</p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Last payment verification</p>
+              <p className="mt-1 font-black text-navy">
+                {diagnostics.lastPaymentVerificationResult
+                  ? diagnostics.lastPaymentVerificationResult.verified
+                    ? "verified"
+                    : "not verified"
+                  : "none yet"}
+              </p>
+              {diagnostics.lastPaymentVerificationResult ? (
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  {diagnostics.lastPaymentVerificationResult.paymentStatus || "no payment status"} /{" "}
+                  {diagnostics.lastPaymentVerificationResult.sessionStatus || "no session status"}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-5 lg:grid-cols-2">
