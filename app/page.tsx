@@ -20,7 +20,7 @@ const coachCards = [
   {
     title: "Why EST Started",
     copy:
-      "After moving to the Coachella Valley in 2019, Coach Hugo created Elite Soccer Training to give local players a focused, professional small group environment to grow, compete, and reach higher levels."
+      "Elite Soccer Training was created to give Coachella Valley players a focused, professional small group environment to grow, compete, and reach higher levels."
   }
 ];
 const testimonials = [

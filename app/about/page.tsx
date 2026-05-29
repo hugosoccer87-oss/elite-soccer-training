@@ -62,8 +62,11 @@ export default function AboutPage() {
               <p>
                 In 2019, Coach Hugo moved to the Coachella Valley with his family. The valley has been great to him and
                 his family, and through soccer he has had the opportunity to meet many friends, families, and athletes
-                across the local community. Elite Soccer Training was created as a way to give back to the game and help
-                Coachella Valley youth players develop, compete, and reach higher levels.
+                across the local community.
+              </p>
+              <p>
+                Elite Soccer Training was created as a way to give back to the game and help Coachella Valley youth
+                players develop, compete, and reach higher levels.
               </p>
               <p>
                 Coach Hugo brings 15 years of coaching experience and currently coaches with Desert Empire Surf and
