@@ -60,6 +60,18 @@
       "namedRegex": "^/booking(?:/)?$"
     },
     {
+      "page": "/booking/cancel",
+      "regex": "^/booking/cancel(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/booking/cancel(?:/)?$"
+    },
+    {
+      "page": "/booking/success",
+      "regex": "^/booking/success(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/booking/success(?:/)?$"
+    },
+    {
       "page": "/contact",
       "regex": "^/contact(?:/)?$",
       "routeKeys": {},

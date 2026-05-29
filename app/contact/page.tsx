@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ContactForm } from "@/components/ContactForm";
 import { MailIcon, PhoneIcon, PinIcon, SocialIcon } from "@/components/Icons";
 import { PageHero } from "@/components/PageHero";
+import { SpecialRequestForm } from "@/components/SpecialRequestForm";
 import { business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
@@ -63,6 +64,22 @@ export default function ContactPage() {
             </div>
           </aside>
           <ContactForm />
+        </div>
+      </section>
+
+      <section className="bg-white py-16 sm:py-20">
+        <div className="section-shell grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div>
+            <p className="text-sm font-black uppercase text-electric">Special Training Request</p>
+            <h2 className="mt-3 text-3xl font-black leading-tight text-navy">
+              Need training outside the standard age-group sessions?
+            </h2>
+            <p className="mt-4 leading-7 text-slate-600">
+              Submit a request for players under age 9, adult players, sibling groups, team sessions, or custom
+              training needs. Coach Hugo will review and follow up.
+            </p>
+          </div>
+          <SpecialRequestForm />
         </div>
       </section>
     </>

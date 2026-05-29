@@ -9,6 +9,7 @@ import {
   type TrainingGroupId,
   type TrainingSlot
 } from "@/lib/booking-data";
+import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
 const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleTokenEndpoint = "https://oauth2.googleapis.com/token";
@@ -38,6 +39,7 @@ export type CalendarBookingResult = {
   eventId?: string;
   eventUrl?: string;
   message?: string;
+  alreadyExists?: boolean;
 };
 
 export type CalendarAvailabilityResult = {
@@ -301,6 +303,7 @@ function bookingDescription(booking: BookingRecord) {
     `Phone: ${booking.phone}`,
     `Email: ${booking.email}`,
     `Number of players: ${booking.players}`,
+    `Payment amount: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
     `Notes: ${booking.notes || "None"}`,
     `Medical notes/injuries: ${booking.medicalNotes || "None"}`,
     `Emergency contact: ${booking.emergencyName} - ${booking.emergencyPhone}`,
@@ -312,6 +315,27 @@ function bookingDescription(booking: BookingRecord) {
     `Digital signature: ${booking.guardianSignature || "Not recorded"}`,
     `Booking ID: ${booking.id}`
   ].join("\n");
+}
+
+async function findExistingBookingEvent(bookingId: string, accessToken: string) {
+  const params = new URLSearchParams({
+    maxResults: "1",
+    singleEvents: "true",
+    privateExtendedProperty: `estBookingId=${bookingId}`
+  });
+  const response = await fetch(
+    `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+    {
+      headers: calendarHeaders(accessToken)
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as GoogleCalendarListResponse;
+  return data.items?.[0] ?? null;
 }
 
 function eventToTrainingSlot(event: GoogleCalendarEvent): TrainingSlot | null {
@@ -634,6 +658,23 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
 
   if (!token.accessToken) {
     return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
+  }
+
+  const existingEvent = await findExistingBookingEvent(booking.id, token.accessToken);
+
+  if (existingEvent?.id) {
+    logCalendarInfo("Google Calendar booking event already exists", {
+      bookingId: booking.id,
+      eventId: existingEvent.id,
+      eventUrl: existingEvent.htmlLink
+    });
+
+    return {
+      status: "Created",
+      eventId: existingEvent.id,
+      eventUrl: existingEvent.htmlLink,
+      alreadyExists: true
+    };
   }
 
   const reservation = await reserveAvailabilityForBooking(booking, token.accessToken);

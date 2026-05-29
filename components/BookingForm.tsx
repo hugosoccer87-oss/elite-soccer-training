@@ -22,6 +22,7 @@ import {
   type TrainingSlot
 } from "@/lib/booking-data";
 import { business } from "@/lib/site-data";
+import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
@@ -45,11 +46,6 @@ type BookingFields = {
   waiverAgreement: boolean;
   mediaConsent: "" | "yes" | "no";
   guardianSignature: string;
-  cardName: string;
-  cardNumber: string;
-  cardExpiry: string;
-  cardCvc: string;
-  postalCode: string;
 };
 
 const initialFields: BookingFields = {
@@ -65,20 +61,12 @@ const initialFields: BookingFields = {
   emergencyPhone: "",
   waiverAgreement: false,
   mediaConsent: "",
-  guardianSignature: "",
-  cardName: "",
-  cardNumber: "",
-  cardExpiry: "",
-  cardCvc: "",
-  postalCode: ""
+  guardianSignature: ""
 };
 
-type BookingSubmissionResult = {
-  notificationStatus: BookingRecord["notificationStatus"];
-  calendarStatus: CalendarSyncStatus;
-  calendarMessage?: string;
-  calendarEventId?: string;
-  calendarEventUrl?: string;
+type StripeCheckoutResult = {
+  checkoutUrl?: string;
+  sessionId?: string;
   error?: string;
 };
 
@@ -140,39 +128,28 @@ function saveBooking(booking: BookingRecord) {
   return nextBookings;
 }
 
-async function sendBookingNotifications(booking: BookingRecord) {
+async function createStripeCheckout(booking: BookingRecord) {
   try {
-    const response = await fetch("/api/bookings", {
+    const response = await fetch("/api/stripe/checkout", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify(booking)
     });
-    const result = (await response.json()) as Partial<BookingSubmissionResult>;
+    const result = (await response.json()) as StripeCheckoutResult;
 
     if (!response.ok) {
       return {
-        notificationStatus: result.notificationStatus ?? "Ready",
-        calendarStatus: result.calendarStatus ?? "Failed",
-        calendarMessage: result.calendarMessage,
-        error: result.error ?? "That session could not be confirmed."
-      } satisfies BookingSubmissionResult;
+        error: result.error ?? "Stripe Checkout could not be started."
+      } satisfies StripeCheckoutResult;
     }
 
-    return {
-      notificationStatus: result.notificationStatus ?? "Ready",
-      calendarStatus: result.calendarStatus ?? "Google Calendar not configured",
-      calendarMessage: result.calendarMessage,
-      calendarEventId: result.calendarEventId,
-      calendarEventUrl: result.calendarEventUrl
-    } satisfies BookingSubmissionResult;
+    return result;
   } catch {
     return {
-      notificationStatus: "Email service not configured",
-      calendarStatus: "Failed",
-      calendarMessage: "The booking server could not be reached. Please try again."
-    } satisfies BookingSubmissionResult;
+      error: "The checkout server could not be reached. Please try again."
+    } satisfies StripeCheckoutResult;
   }
 }
 
@@ -320,6 +297,7 @@ export function BookingForm() {
   const activeStepIndex = ["program", "session", "details", "waiver", "payment", "confirmed"].findIndex((label) => label === step);
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
+  const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
   const calendarSummary =
     calendarStatus === "Created"
       ? "Google Calendar event created"
@@ -388,7 +366,7 @@ export function BookingForm() {
     return true;
   }
 
-  async function confirmPayment() {
+  async function startStripeCheckout() {
     if (!selectedSlot) {
       setStep("session");
       setError("That slot is no longer available. Please choose another time.");
@@ -415,12 +393,6 @@ export function BookingForm() {
       return;
     }
 
-    const updatedSlot: TrainingSlot = {
-      ...latestSlot,
-      bookedPlayers: latestSlot.bookedPlayers + requestedPlayers,
-      status: latestSlot.bookedPlayers + requestedPlayers >= latestSlot.capacity ? "booked" : "open"
-    };
-    const nextSlots = latestSlots.map((slot) => (slot.id === selectedSlot.id ? updatedSlot : slot));
     const bookingTimestamp = new Date().toISOString();
     const booking: BookingRecord = {
       id: `EST-${selectedSlot.id.replaceAll("-", "").slice(-8).toUpperCase()}-${Date.now().toString().slice(-5)}`,
@@ -448,7 +420,7 @@ export function BookingForm() {
       sessionTime: latestSlot.time,
       sessionDurationMinutes: 60,
       sessionCalendarEventId: latestSlot.calendarEventId,
-      paymentStatus: "Paid",
+      paymentStatus: "Pending",
       notificationStatus: "Ready",
       calendarStatus: "Ready"
     };
@@ -456,47 +428,16 @@ export function BookingForm() {
     setIsSubmitting(true);
     setError("");
 
-    const submission = await sendBookingNotifications(booking);
+    const checkout = await createStripeCheckout(booking);
 
-    setIsSubmitting(false);
-
-    if (submission.calendarStatus === "Unavailable") {
-      setSlots(readSlots());
-      setStep("session");
-      setError(submission.error ?? "That session no longer has enough spots. Please choose another available time.");
+    if (!checkout.checkoutUrl) {
+      setIsSubmitting(false);
+      setError(checkout.error ?? "Stripe Checkout could not be started. Please try again.");
       return;
     }
 
-    if (submission.calendarStatus === "Failed" || submission.calendarStatus === "Google Calendar not configured") {
-      setSlots(readSlots());
-      setError(
-        submission.error ??
-          submission.calendarMessage ??
-          "Google Calendar event could not be created. The booking was not confirmed."
-      );
-      return;
-    }
-
-    const updatedBooking: BookingRecord = {
-      ...booking,
-      notificationStatus: submission.notificationStatus,
-      calendarStatus: submission.calendarStatus,
-      calendarMessage: submission.calendarMessage,
-      calendarEventId: submission.calendarEventId,
-      calendarEventUrl: submission.calendarEventUrl
-    };
-
-    const savedSlots = saveSlots(nextSlots);
-    setSlots(savedSlots);
-    setBlockedDays(latestBlockedDays);
-    setConfirmedSlot(updatedSlot);
-    saveBooking(updatedBooking);
-    setConfirmedBooking(updatedBooking);
-    setNotificationStatus(updatedBooking.notificationStatus);
-    setCalendarStatus(updatedBooking.calendarStatus);
-    setCalendarMessage(updatedBooking.calendarMessage ?? "");
-    setBookingCode(booking.id);
-    setStep("confirmed");
+    window.localStorage.setItem("est-pending-booking", JSON.stringify({ ...booking, stripeSessionId: checkout.sessionId }));
+    window.location.href = checkout.checkoutUrl;
   }
 
   return (
@@ -889,56 +830,56 @@ export function BookingForm() {
           <section className="grid gap-6 p-5 sm:p-8 lg:grid-cols-[0.9fr_1.1fr]">
             <aside className="rounded-lg border border-slate-200 bg-mist p-5">
               <ShieldIcon className="h-9 w-9 text-electric" />
-              <p className="mt-4 text-sm font-black uppercase text-electric">Stripe Ready</p>
+              <p className="mt-4 text-sm font-black uppercase text-electric">Secure Checkout</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Complete payment to confirm.</h3>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Credit/debit card, Apple Pay, and Google Pay are ready for online checkout.
+                Payment is processed through Stripe Checkout. Your session is confirmed after payment succeeds.
               </p>
               {selectedSlot ? (
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
                   <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.time}</p>
                   <p>{fields.players} player(s) attending</p>
                   <p>{selectedGroup.name}</p>
+                  <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
+                    {fields.players} x {sessionPriceLabel} = {paymentTotal}
+                  </p>
                 </div>
               ) : null}
             </aside>
 
-            <div className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5" data-stripe-ready="true">
-              <button type="button" className="rounded-md bg-black px-5 py-3 text-sm font-black text-white">Pay with Apple Pay</button>
-              <button type="button" className="rounded-md border border-slate-300 px-5 py-3 text-sm font-black text-navy">Pay with Google Pay</button>
-              <div className="grid gap-4 border-t border-slate-200 pt-4 sm:grid-cols-2">
-                <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-                  Name on Card
-                  <input className={inputClass} value={fields.cardName} onChange={(event) => setField("cardName", event.target.value)} />
-                </label>
-                <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-                  Card Number
-                  <input className={inputClass} inputMode="numeric" value={fields.cardNumber} onChange={(event) => setField("cardNumber", event.target.value)} placeholder="4242 4242 4242 4242" />
-                </label>
-                <label className="grid gap-2 text-sm font-bold text-navy">
-                  Expiration
-                  <input className={inputClass} value={fields.cardExpiry} onChange={(event) => setField("cardExpiry", event.target.value)} placeholder="MM/YY" />
-                </label>
-                <label className="grid gap-2 text-sm font-bold text-navy">
-                  CVC
-                  <input className={inputClass} inputMode="numeric" value={fields.cardCvc} onChange={(event) => setField("cardCvc", event.target.value)} />
-                </label>
-                <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-                  ZIP / Postal Code
-                  <input className={inputClass} value={fields.postalCode} onChange={(event) => setField("postalCode", event.target.value)} />
-                </label>
+            <div className="grid gap-5 rounded-lg border border-slate-200 bg-white p-5" data-stripe-checkout-ready="true">
+              <div className="rounded-md border border-slate-200 bg-mist p-5">
+                <p className="text-sm font-black uppercase text-electric">Payment Summary</p>
+                <div className="mt-4 grid gap-3 text-sm text-slate-700">
+                  <div className="flex items-center justify-between gap-4">
+                    <span>Elite Soccer Training - Small Group Session</span>
+                    <span className="font-black text-navy">{sessionPriceLabel}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span>Players attending</span>
+                    <span className="font-black text-navy">{fields.players}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 border-t border-slate-300 pt-3 text-base">
+                    <span className="font-black text-navy">Total Due</span>
+                    <span className="font-black text-navy">{paymentTotal}</span>
+                  </div>
+                </div>
               </div>
+              <p className="text-sm leading-6 text-slate-600">
+                Stripe Checkout supports credit/debit cards, Apple Pay, and Google Pay when available. Calendar
+                confirmation and email notifications are sent after successful payment.
+              </p>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button type="button" onClick={() => setStep("waiver")} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
                   Back
                 </button>
                 <button
                   type="button"
-                  onClick={confirmPayment}
+                  onClick={startStripeCheckout}
                   disabled={isSubmitting}
                   className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-wait disabled:opacity-70"
                 >
-                  {isSubmitting ? "Confirming..." : "Pay And Confirm Session"}
+                  {isSubmitting ? "Opening Checkout..." : `Pay ${paymentTotal} With Stripe`}
                 </button>
               </div>
             </div>

@@ -1,5 +1,6 @@
 import { business } from "@/lib/site-data";
 import { type BookingRecord } from "@/lib/booking-data";
+import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
 type NodemailerModule = {
   default?: {
@@ -177,6 +178,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     ["Program", booking.programName],
     ["Player", booking.playerName],
     ["Player Count", booking.players],
+    ["Payment", `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`],
     ["Location", business.location],
     ["Waiver", `${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}${booking.waiverAcceptedAt ? ` on ${formatWaiverAcceptedAt(booking)}` : ""}`],
     ["Media Consent", booking.mediaConsent || "Not recorded"],
@@ -190,6 +192,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     `Your session is confirmed for ${booking.sessionDate} at ${booking.sessionTime}.`,
     `Program: ${booking.programName}`,
     `Player count: ${booking.players}`,
+    `Payment: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
     `Location: ${business.location}`,
     `Waiver: ${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}`,
     `Media consent: ${booking.mediaConsent || "Not recorded"}`,
@@ -237,6 +240,7 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     ["Program", booking.programName],
     ["Date / Time", `${booking.sessionDate} at ${booking.sessionTime}`],
     ["Number of Players", booking.players],
+    ["Payment Amount", `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`],
     ["Notes", booking.notes || "None"],
     ["Medical Notes/Injuries", booking.medicalNotes || "None"],
     ["Emergency Contact", `${booking.emergencyName} - ${booking.emergencyPhone}`],

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
 import { SectionHeader } from "@/components/SectionHeader";
+import { SpecialRequestForm } from "@/components/SpecialRequestForm";
 import { TrainingCard } from "@/components/TrainingCard";
 import { services } from "@/lib/site-data";
 
@@ -16,7 +17,7 @@ export default function ServicesPage() {
       <PageHero
         eyebrow="Training"
         title="Age-based small group soccer development."
-        description="Future Elite serves ages 9-12. Elite Performance serves ages 13-18. Every session is 60 minutes with a six-player maximum."
+        description="Main small group training serves players ages 9-18. Every session is 60 minutes, $55 per player, with a six-player maximum."
       />
 
       <section className="bg-mist py-16 sm:py-20">
@@ -42,6 +43,22 @@ export default function ServicesPage() {
               </article>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="bg-mist py-16 sm:py-20">
+        <div className="section-shell grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div>
+            <p className="text-sm font-black uppercase text-electric">Special Training Request</p>
+            <h2 className="mt-3 text-3xl font-black leading-tight text-navy">
+              Custom training for players outside the standard booking flow.
+            </h2>
+            <p className="mt-4 leading-7 text-slate-600">
+              Use this for players under age 9, adult players, sibling groups, team sessions, or custom training
+              requests. No payment is collected until Coach Hugo confirms the best arrangement.
+            </p>
+          </div>
+          <SpecialRequestForm />
         </div>
       </section>
 
