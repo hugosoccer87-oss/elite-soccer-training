@@ -15,7 +15,7 @@ export const business = {
 export const navItems = [
   { href: "/", label: "Home" },
   { href: "/about", label: "About" },
-  { href: "/services", label: "Training" },
+  { href: "/services", label: "Programs" },
   { href: "/booking", label: "Book Training" },
   { href: "/contact", label: "Contact" }
 ];

@@ -7,15 +7,15 @@ import { TrainingCard } from "@/components/TrainingCard";
 import { services } from "@/lib/site-data";
 
 export const metadata: Metadata = {
-  title: "Training",
-  description: "Small group soccer training for 1-6 youth players in the Coachella Valley."
+  title: "Programs",
+  description: "Small group soccer training programs for 1-6 youth players in the Coachella Valley."
 };
 
 export default function ServicesPage() {
   return (
     <>
       <PageHero
-        eyebrow="Training"
+        eyebrow="Programs"
         title="Age-based small group soccer development."
         description="Main small group training serves players ages 9-18. Every session is 60 minutes, $55 per player, with a six-player maximum."
       />

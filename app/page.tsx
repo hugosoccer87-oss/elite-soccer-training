@@ -6,6 +6,23 @@ import { TrainingCard } from "@/components/TrainingCard";
 import { benefits, business, services } from "@/lib/site-data";
 
 const benefitIcons = [TargetIcon, ShieldIcon, BoltIcon, BallIcon, ShieldIcon];
+const coachCards = [
+  {
+    title: "Coach Hugo's Background",
+    copy:
+      "Originally from South Gate, Los Angeles, Coach Hugo Chaparro brings 15 years of coaching experience across boys, girls, coed middle school, and high school soccer. He currently coaches with Desert Empire Surf and Desert Christian Academy."
+  },
+  {
+    title: "Coaching Philosophy",
+    copy:
+      "Every session is built around accountability, detail, intensity, and game-like repetition. The goal is to help players improve their technique, confidence, speed of play, decision-making, and competitive habits."
+  },
+  {
+    title: "Why EST Started",
+    copy:
+      "After moving to the Coachella Valley in 2019, Coach Hugo created Elite Soccer Training to give local players a focused, professional small group environment to grow, compete, and reach higher levels."
+  }
+];
 const testimonials = [
   {
     name: "Parent of 2012 Player",
@@ -64,7 +81,7 @@ export default function HomePage() {
                 href="/services"
                 className="inline-flex justify-center rounded-md border border-white/30 bg-white/10 px-7 py-4 text-sm font-black uppercase text-white transition hover:bg-white/20"
               >
-                View Training
+                View Programs
               </Link>
             </div>
           </div>
@@ -117,17 +134,13 @@ export default function HomePage() {
               title="REAL DEVELOPMENT. REAL CONFIDENCE."
               description="Elite Soccer Training uses technical repetition, game-realistic training, confidence building, speed of play, competitive standards, and small group attention to help youth players develop with purpose."
             />
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              {benefits.map((benefit, index) => {
-                const Icon = benefitIcons[index];
-                return (
-                  <div key={benefit.title} className="rounded-lg border border-slate-200 p-5">
-                    <Icon className="h-8 w-8 text-field" />
-                    <h3 className="mt-4 text-lg font-black text-navy">{benefit.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{benefit.description}</p>
-                  </div>
-                );
-              })}
+            <div className="mt-8 grid gap-4">
+              {coachCards.map((card) => (
+                <div key={card.title} className="border-l-4 border-electric bg-mist p-5">
+                  <h3 className="text-lg font-black text-navy">{card.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{card.copy}</p>
+                </div>
+              ))}
             </div>
             <Link
               href="/about"
@@ -142,7 +155,7 @@ export default function HomePage() {
       <section className="bg-mist py-16 sm:py-20">
         <div className="section-shell">
           <SectionHeader
-            eyebrow="Training Programs"
+            eyebrow="Programs"
             title="Age-based soccer development groups."
             description="Future Elite builds foundation for ages 9-12. Elite Performance pushes ages 13-18 with speed, intensity, finishing, and game-realistic repetition."
           />

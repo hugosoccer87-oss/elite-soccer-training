@@ -3,7 +3,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
 import { SectionHeader } from "@/components/SectionHeader";
-import { business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "About Coach Hugo",
@@ -16,7 +15,7 @@ export default function AboutPage() {
       <PageHero
         eyebrow="About Coach Hugo"
         title="A focused training environment for players who want to keep improving."
-        description="Coach Hugo Chaparro started Elite Soccer Training to give youth players detailed technical work, honest feedback, and a high-energy small group environment built for confidence."
+        description="Coach Hugo Chaparro brings 15 years of coaching experience, a deep connection to the game, and a personal commitment to helping Coachella Valley youth players reach higher levels."
       />
 
       <section className="bg-white py-16 sm:py-20">
@@ -33,29 +32,41 @@ export default function AboutPage() {
           <div>
             <SectionHeader
               eyebrow="Coach Profile"
-              title={business.coach}
-              description="Elite Soccer Training is built on technical detail, positive standards, and practical player development. The goal is to help every player leave with better habits, sharper confidence, and a clearer path for continued growth."
+              title="About Coach Hugo"
             />
-            <div className="mt-8 grid gap-5">
-              {[
-                {
-                  title: "Background / Coaching Experience",
-                  copy: "Youth-focused small group training for players who need cleaner technique, faster movement, competitive reps, and more confidence in game situations."
-                },
-                {
-                  title: "Coaching Philosophy",
-                  copy: "Train the detail, raise the standard, and make every repetition connect to real soccer decisions."
-                },
-                {
-                  title: "Why EST Started",
-                  copy: "To create a premium local option for families in the Coachella Valley who want serious, soccer-specific development."
-                }
-              ].map((item) => (
-                <div key={item.title} className="border-l-4 border-electric bg-mist p-5">
-                  <h2 className="text-lg font-black text-navy">{item.title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">{item.copy}</p>
-                </div>
-              ))}
+            <div className="mt-7 grid max-w-3xl gap-4 text-sm leading-7 text-slate-600 sm:text-base">
+              <p>
+                Coach Hugo Chaparro is originally from Los Angeles, specifically South Gate, where soccer became a
+                major part of his life at a young age. He grew up playing pickup soccer at the park, recreational
+                soccer, and with Pachuca USA before playing high school soccer at South Gate High School, where he was
+                part of a CIF championship-winning team in 2005.
+              </p>
+              <p>
+                In 2019, Coach Hugo moved to the Coachella Valley with his family. The valley has been great to him and
+                his family, and through soccer he has had the opportunity to meet many friends, families, and athletes
+                across the local community. Elite Soccer Training was created as a way to give back to the game and help
+                Coachella Valley youth players develop, compete, and reach higher levels.
+              </p>
+              <p>
+                Coach Hugo brings 15 years of coaching experience and currently coaches with Desert Empire Surf and
+                Desert Christian Academy, working with coed middle school players, high school girls, and competitive
+                youth players across multiple age groups. His coaching background includes boys 2006, boys 2011, and
+                girls 2010 teams, along with players at different stages of development.
+              </p>
+              <p>
+                Coach Hugo holds a D License and is currently working toward his C License. He has also completed
+                numerous coaching education courses, most recently attending a course with Club América.
+              </p>
+              <p>
+                His training approach is built around accountability, detail, intensity, and game-like repetition. He
+                believes small group training gives players more touches, more individual attention, more competitive
+                reps, and more opportunities to solve real soccer situations.
+              </p>
+              <p>
+                Parents appreciate the accountability Coach Hugo expects from each athlete and the way he pushes players
+                to train with purpose. Players enjoy the intensity, competitiveness, and energy of the sessions while
+                still being challenged in a fun and positive environment.
+              </p>
             </div>
           </div>
         </div>
