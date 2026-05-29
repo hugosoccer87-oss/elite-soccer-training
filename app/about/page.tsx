@@ -4,6 +4,24 @@ import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
 import { SectionHeader } from "@/components/SectionHeader";
 
+const developmentCards = [
+  {
+    title: "Player Development",
+    copy:
+      "Focused small group training designed to improve first touch, ball control, passing, receiving, finishing, movement, and decision-making in game-like situations."
+  },
+  {
+    title: "Confidence",
+    copy:
+      "Players build confidence through repetition, guided coaching, competitive challenges, and positive correction that helps them trust their ability on the field."
+  },
+  {
+    title: "Work Ethic",
+    copy:
+      "Every session demands focus, effort, accountability, and consistency so players learn how to train with purpose and compete at a higher standard."
+  }
+];
+
 export const metadata: Metadata = {
   title: "About Coach Hugo",
   description: "Learn about Coach Hugo Chaparro and the player-development philosophy behind Elite Soccer Training."
@@ -74,12 +92,11 @@ export default function AboutPage() {
 
       <section className="bg-mist py-16 sm:py-20">
         <div className="section-shell grid gap-8 md:grid-cols-3">
-          {["Player Development", "Confidence", "Work Ethic"].map((item) => (
-            <article key={item} className="panel p-6">
-              <h2 className="text-xl font-black text-navy">{item}</h2>
+          {developmentCards.map((card) => (
+            <article key={card.title} className="panel p-6">
+              <h2 className="text-xl font-black text-navy">{card.title}</h2>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Sessions are designed to create repeatable habits that help youth players compete with more clarity and
-                belief.
+                {card.copy}
               </p>
             </article>
           ))}
