@@ -4,7 +4,7 @@ import { PageHero } from "@/components/PageHero";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecialRequestForm } from "@/components/SpecialRequestForm";
 import { TrainingCard } from "@/components/TrainingCard";
-import { services } from "@/lib/site-data";
+import { groupSizeMessage, services } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "Programs",
@@ -17,11 +17,15 @@ export default function ServicesPage() {
       <PageHero
         eyebrow="Programs"
         title="Age-based small group soccer development."
-        description="Main small group training serves players ages 9-18. Every session is 60 minutes, $55 per player, with a six-player maximum."
+        description={`Main small group training serves players ages 9-18. Every session is 60 minutes and $55 per player. ${groupSizeMessage}`}
       />
 
       <section className="bg-mist py-16 sm:py-20">
         <div className="section-shell grid max-w-5xl gap-6">
+          <div className="rounded-lg border border-electric/20 bg-white p-5 shadow-sm">
+            <p className="text-sm font-black uppercase text-electric">Limited Group Size</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+          </div>
           {services.map((service, index) => (
             <TrainingCard key={service.title} index={index} {...service} />
           ))}
@@ -46,17 +50,23 @@ export default function ServicesPage() {
         </div>
       </section>
 
-      <section className="bg-mist py-16 sm:py-20">
+      <section id="special-request" className="bg-mist py-16 sm:py-20">
         <div className="section-shell grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
           <div>
             <p className="text-sm font-black uppercase text-electric">Special Training Request</p>
             <h2 className="mt-3 text-3xl font-black leading-tight text-navy">
-              Custom training for players outside the standard booking flow.
+              Special Training Request
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
-              Use this for players under age 9, adult players, sibling groups, team sessions, or custom training
-              requests. No payment is collected until Coach Hugo confirms the best arrangement.
+              Have a player outside the standard 9-18 age range, a sibling group, team training request, or a custom
+              training need? Submit a special request and Coach Hugo will review the details.
             </p>
+            <a
+              href="#special-request-form"
+              className="mt-6 inline-flex rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500"
+            >
+              Submit Special Request
+            </a>
           </div>
           <SpecialRequestForm />
         </div>

@@ -1,4 +1,9 @@
-import { bookingArrivalInstructions, business } from "@/lib/site-data";
+import {
+  bookingArrivalInstructions,
+  business,
+  coachHugoConfirmationNote,
+  refundCancellationReminder
+} from "@/lib/site-data";
 import { type BookingRecord } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
@@ -199,6 +204,12 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     "",
     ...bookingArrivalInstructions,
     "",
+    refundCancellationReminder,
+    "",
+    coachHugoConfirmationNote,
+    "",
+    "— Coach Hugo",
+    "",
     `Questions? Email ${business.email} or call ${business.phone}.`,
     "",
     `Booking ID: ${booking.id}`
@@ -214,6 +225,14 @@ function customerEmail(booking: BookingRecord): EmailMessage {
       <div style="margin-top:22px;border-left:4px solid #1783ff;background:#eef6ff;padding:16px;color:#334155;line-height:1.6">
         <strong style="color:#06152b">Before the session</strong><br />
         ${bookingArrivalInstructions.map((item) => `<p style="margin:10px 0 0">${escapeHtml(item)}</p>`).join("")}
+      </div>
+      <div style="margin-top:22px;border-left:4px solid #1783ff;background:#f5f8fc;padding:16px;color:#334155;line-height:1.6">
+        <strong style="color:#06152b">Refund and cancellation reminder</strong><br />
+        <p style="margin:10px 0 0">${escapeHtml(refundCancellationReminder)}</p>
+      </div>
+      <div style="margin-top:22px;border-left:4px solid #06152b;background:#ffffff;padding:16px;color:#334155;line-height:1.7">
+        <p style="margin:0">${escapeHtml(coachHugoConfirmationNote)}</p>
+        <p style="margin:14px 0 0;font-weight:800;color:#06152b">— Coach Hugo</p>
       </div>
       <div style="margin-top:22px;border-left:4px solid #1783ff;background:#f5f8fc;padding:16px;color:#334155;line-height:1.6">
         <strong style="color:#06152b">Contact</strong><br />

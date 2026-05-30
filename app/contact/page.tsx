@@ -67,17 +67,23 @@ export default function ContactPage() {
         </div>
       </section>
 
-      <section className="bg-white py-16 sm:py-20">
+      <section id="special-request" className="bg-white py-16 sm:py-20">
         <div className="section-shell grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
           <div>
             <p className="text-sm font-black uppercase text-electric">Special Training Request</p>
             <h2 className="mt-3 text-3xl font-black leading-tight text-navy">
-              Need training outside the standard age-group sessions?
+              Special Training Request
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
-              Submit a request for players under age 9, adult players, sibling groups, team sessions, or custom
-              training needs. Coach Hugo will review and follow up.
+              Have a player outside the standard 9-18 age range, a sibling group, team training request, or a custom
+              training need? Submit a special request and Coach Hugo will review the details.
             </p>
+            <a
+              href="#special-request-form"
+              className="mt-6 inline-flex rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500"
+            >
+              Submit Special Request
+            </a>
           </div>
           <SpecialRequestForm />
         </div>

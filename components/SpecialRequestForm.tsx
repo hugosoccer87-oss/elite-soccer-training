@@ -61,7 +61,7 @@ export function SpecialRequestForm() {
   }
 
   return (
-    <form className="panel grid gap-5 p-5 sm:p-8" onSubmit={submitRequest}>
+    <form id="special-request-form" className="panel grid gap-5 p-5 sm:p-8" onSubmit={submitRequest}>
       <div>
         <p className="text-sm font-black uppercase text-electric">Special Training Request</p>
         <h3 className="mt-2 text-2xl font-black text-navy">Need a different arrangement?</h3>

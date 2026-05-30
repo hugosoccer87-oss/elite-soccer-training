@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import { MobileStickyBookButton } from "@/components/MobileStickyBookButton";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import { business } from "@/lib/site-data";
@@ -36,8 +37,9 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <SiteHeader />
-        <main>{children}</main>
+        <main className="pb-20 md:pb-0">{children}</main>
         <SiteFooter />
+        <MobileStickyBookButton />
       </body>
     </html>
   );

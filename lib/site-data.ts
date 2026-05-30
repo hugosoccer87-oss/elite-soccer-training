@@ -80,3 +80,12 @@ export const bookingArrivalInstructions = [
   "Each session is 60 minutes, and arriving early helps us make sure the athlete gets the most out of the full training time.",
   "Please bring plenty of water."
 ];
+
+export const groupSizeMessage =
+  "Small group sessions are capped at 6 players to keep training focused, competitive, and personal.";
+
+export const refundCancellationReminder =
+  "Sessions are non-refundable. If Elite Soccer Training cancels due to weather, field conditions, or scheduling changes, families will receive a reschedule option.";
+
+export const coachHugoConfirmationNote =
+  "Thank you for trusting Elite Soccer Training. I'm excited to work with your athlete and help them continue developing with purpose, intensity, and confidence.";

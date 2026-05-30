@@ -19,7 +19,7 @@ import {
   type TrainingGroupId,
   type TrainingSlot
 } from "@/lib/booking-data";
-import { business } from "@/lib/site-data";
+import { business, groupSizeMessage, refundCancellationReminder } from "@/lib/site-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
 const inputClass =
@@ -413,7 +413,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Booking</p>
               <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Select your program.</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                60-minute small group soccer training for 1-6 players.
+                60-minute small group soccer training for 1-6 players. {groupSizeMessage}
               </p>
             </div>
             {displaySlot ? (
@@ -423,6 +423,7 @@ export function BookingForm() {
                   {displaySlot.dateLabel} at {displaySlot.time}
                 </p>
                 <p className="mt-1 text-slate-300">{displaySlot.duration}</p>
+                <p className="mt-2 text-xs font-bold uppercase text-electric">{groupSizeMessage}</p>
               </div>
             ) : (
               <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
@@ -457,6 +458,7 @@ export function BookingForm() {
             <div>
               <p className="text-sm font-black uppercase text-electric">Program</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose the right age group</h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
@@ -498,6 +500,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Availability</p>
               <h3 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h3>
               <p className="mt-2 text-sm font-bold text-slate-600">{selectedGroup.ages}</p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
             </div>
 
             {dates.length > 0 ? (
@@ -609,7 +612,7 @@ export function BookingForm() {
             </label>
             {selectedSlot ? (
               <p className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600 sm:col-span-2">
-                {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {selectedSlot.time}.
+                {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {selectedSlot.time}. {groupSizeMessage}
               </p>
             ) : null}
             <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
@@ -804,6 +807,7 @@ export function BookingForm() {
                   <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.time}</p>
                   <p>{fields.players} player(s) attending</p>
                   <p>{selectedGroup.name}</p>
+                  <p className="mt-2 text-xs font-bold uppercase text-slate-500">{groupSizeMessage}</p>
                   <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
                     {fields.players} x {sessionPriceLabel} = {paymentTotal}
                   </p>
@@ -832,6 +836,9 @@ export function BookingForm() {
               <p className="text-sm leading-6 text-slate-600">
                 Stripe Checkout supports credit/debit cards, Apple Pay, and Google Pay when available. Calendar
                 confirmation and email notifications are sent after successful payment.
+              </p>
+              <p className="rounded-md border border-slate-200 bg-mist p-4 text-sm font-bold leading-6 text-slate-700">
+                {refundCancellationReminder}
               </p>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button type="button" onClick={() => setStep("waiver")} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
