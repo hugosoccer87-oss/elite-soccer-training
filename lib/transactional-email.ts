@@ -1,4 +1,4 @@
-import { business } from "@/lib/site-data";
+import { bookingArrivalInstructions, business } from "@/lib/site-data";
 import { type BookingRecord } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
@@ -197,6 +197,8 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     `Waiver: ${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}`,
     `Media consent: ${booking.mediaConsent || "Not recorded"}`,
     "",
+    ...bookingArrivalInstructions,
+    "",
     `Questions? Email ${business.email} or call ${business.phone}.`,
     "",
     `Booking ID: ${booking.id}`
@@ -209,6 +211,10 @@ function customerEmail(booking: BookingRecord): EmailMessage {
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
         ${detailsRows(rows)}
       </table>
+      <div style="margin-top:22px;border-left:4px solid #1783ff;background:#eef6ff;padding:16px;color:#334155;line-height:1.6">
+        <strong style="color:#06152b">Before the session</strong><br />
+        ${bookingArrivalInstructions.map((item) => `<p style="margin:10px 0 0">${escapeHtml(item)}</p>`).join("")}
+      </div>
       <div style="margin-top:22px;border-left:4px solid #1783ff;background:#f5f8fc;padding:16px;color:#334155;line-height:1.6">
         <strong style="color:#06152b">Contact</strong><br />
         Email: ${escapeHtml(business.email)}<br />

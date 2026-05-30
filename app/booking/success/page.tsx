@@ -3,7 +3,7 @@ import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import { isStripePaymentVerified, retrieveStripeCheckoutSession } from "@/lib/stripe";
-import { business } from "@/lib/site-data";
+import { bookingArrivalInstructions, business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "Booking Payment Verification",
@@ -153,6 +153,16 @@ export default async function BookingSuccessPage({ searchParams }: BookingSucces
                 </p>
               ) : null}
             </div>
+            {verification.verified ? (
+              <div className="mt-6 rounded-md border border-electric/20 bg-blue-50 p-5 text-sm leading-6 text-slate-700">
+                <p className="font-black uppercase text-navy">Before The Session</p>
+                <div className="mt-3 grid gap-3">
+                  {bookingArrivalInstructions.map((item) => (
+                    <p key={item}>{item}</p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <Link
                 href="/booking"

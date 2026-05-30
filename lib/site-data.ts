@@ -74,3 +74,9 @@ export const socialLinks = [
   { label: "YouTube", href: "https://www.youtube.com/", handle: "YouTube" },
   { label: "Facebook", href: "https://www.facebook.com/", handle: "Facebook" }
 ];
+
+export const bookingArrivalInstructions = [
+  "Please arrive 15 minutes before your session so the athlete has time to check in, get settled, and warm up properly.",
+  "Each session is 60 minutes, and arriving early helps us make sure the athlete gets the most out of the full training time.",
+  "Please bring plenty of water."
+];
