@@ -19,13 +19,18 @@ import {
   type TrainingGroupId,
   type TrainingSlot
 } from "@/lib/booking-data";
-import { business, groupSizeMessage, refundCancellationReminder } from "@/lib/site-data";
+import {
+  bookingArrivalInstructions,
+  business,
+  groupSizeMessage,
+  refundCancellationReminder
+} from "@/lib/site-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
-const stepLabels = ["Program", "Session", "Details", "Waiver", "Payment"];
+const publicStepLabels = ["Choose Your Training Session", "Athlete Information", "Parent Waiver + Secure Payment"];
 const waiverVersion = "EST-CA-2026-05";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
@@ -121,14 +126,14 @@ async function createStripeCheckout(booking: BookingRecord) {
 
     if (!response.ok) {
       return {
-        error: result.error ?? "Stripe Checkout could not be started."
+        error: result.error ?? "Secure payment could not be started."
       } satisfies StripeCheckoutResult;
     }
 
     return result;
   } catch {
     return {
-      error: "The checkout server could not be reached. Please try again."
+      error: "Secure payment could not be reached. Please try again."
     } satisfies StripeCheckoutResult;
   }
 }
@@ -268,10 +273,9 @@ export function BookingForm() {
   const selectedGroup = getTrainingGroup(selectedGroupId);
   const displaySlot = selectedSlot;
   const dateSlots = openSlots.filter((slot) => slot.dateIso === selectedDate);
-  const activeStepIndex = ["program", "session", "details", "waiver", "payment"].findIndex((label) => label === step);
-  const currentStepNumber = Math.max(0, activeStepIndex) + 1;
-  const currentStepLabel = stepLabels[currentStepNumber - 1] ?? stepLabels[0];
-  const progressWidth = `${(currentStepNumber / stepLabels.length) * 100}%`;
+  const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
+  const publicStepLabel = publicStepLabels[publicStepNumber - 1];
+  const progressWidth = `${(publicStepNumber / publicStepLabels.length) * 100}%`;
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
@@ -299,11 +303,20 @@ export function BookingForm() {
   }
 
   function requireDetails() {
-    const needed = [fields.parentName, fields.playerName, fields.playerAge, fields.phone, fields.email, fields.players];
+    const needed = [
+      fields.parentName,
+      fields.playerName,
+      fields.playerAge,
+      fields.phone,
+      fields.email,
+      fields.players,
+      fields.emergencyName,
+      fields.emergencyPhone
+    ];
     const playerCount = Number(fields.players);
 
     if (needed.some((value) => String(value).trim() === "")) {
-      setError("Complete the required parent, player, and training details before continuing.");
+      setError("Complete the required parent, athlete, and emergency contact details before continuing.");
       return false;
     }
 
@@ -323,10 +336,10 @@ export function BookingForm() {
   }
 
   function requireWaiver() {
-    const needed = [fields.emergencyName, fields.emergencyPhone, fields.medicalNotes, fields.guardianSignature];
+    const needed = [fields.medicalNotes, fields.guardianSignature];
 
     if (needed.some((value) => value.trim() === "") || !fields.mediaConsent || !fields.waiverAgreement) {
-      setError("Complete the waiver, media consent, emergency contact, medical information, and parent signature before payment.");
+      setError("Complete the parent waiver, media consent, medical information, and parent signature before payment.");
       return false;
     }
 
@@ -399,7 +412,7 @@ export function BookingForm() {
 
     if (!checkout.checkoutUrl) {
       setIsSubmitting(false);
-      setError(checkout.error ?? "Stripe Checkout could not be started. Please try again.");
+      setError(checkout.error ?? "Secure payment could not be started. Please try again.");
       return;
     }
 
@@ -414,7 +427,7 @@ export function BookingForm() {
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-sm font-black uppercase text-electric">Booking</p>
-              <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Select your program.</h2>
+              <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">{publicStepLabel}</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
                 60-minute small group soccer training for 1-6 players. {groupSizeMessage}
               </p>
@@ -440,9 +453,9 @@ export function BookingForm() {
         <div className="border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-4 text-xs font-black uppercase tracking-wide">
             <p className="text-slate-500">
-              Step {currentStepNumber} of {stepLabels.length}
+              Step {publicStepNumber} of {publicStepLabels.length}
             </p>
-            <p className="text-navy">{currentStepLabel}</p>
+            <p className="text-navy">{publicStepLabel}</p>
           </div>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
             <div className="h-full rounded-full bg-electric transition-all" style={{ width: progressWidth }} />
@@ -456,8 +469,8 @@ export function BookingForm() {
         {step === "program" ? (
           <section className="grid gap-6 p-5 sm:p-8">
             <div>
-              <p className="text-sm font-black uppercase text-electric">Program</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Choose the right age group</h3>
+              <p className="text-sm font-black uppercase text-electric">Step 1</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
             </div>
 
@@ -489,7 +502,7 @@ export function BookingForm() {
               onClick={() => setStep("session")}
               className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
             >
-              Continue To Sessions
+              Choose Date & Time
             </button>
           </section>
         ) : null}
@@ -497,8 +510,8 @@ export function BookingForm() {
         {step === "session" ? (
           <section className="grid gap-6 p-5 sm:p-8">
             <div>
-              <p className="text-sm font-black uppercase text-electric">Availability</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h3>
+              <p className="text-sm font-black uppercase text-electric">Step 1</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 text-sm font-bold text-slate-600">{selectedGroup.ages}</p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
             </div>
@@ -570,16 +583,23 @@ export function BookingForm() {
               className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
             >
               <CalendarIcon className="h-5 w-5" />
-              Continue To Details
+              Continue To Athlete Information
             </button>
             <button type="button" onClick={() => setStep("program")} className="w-fit rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
-              Back To Programs
+              Back
             </button>
           </section>
         ) : null}
 
         {step === "details" ? (
           <section className="grid gap-5 p-5 sm:grid-cols-2 sm:p-8">
+            <div className="sm:col-span-2">
+              <p className="text-sm font-black uppercase text-electric">Step 2</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Athlete information</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Add parent contact details, athlete information, emergency contact, and any helpful notes for Coach Hugo.
+              </p>
+            </div>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Parent/Guardian Name
               <input className={inputClass} value={fields.parentName} onChange={(event) => setField("parentName", event.target.value)} />
@@ -599,6 +619,14 @@ export function BookingForm() {
             <label className="grid gap-2 text-sm font-bold text-navy">
               Email
               <input className={inputClass} type="email" value={fields.email} onChange={(event) => setField("email", event.target.value)} />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-navy">
+              Emergency Contact Name
+              <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-navy">
+              Emergency Contact Phone
+              <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Number of Players Attending
@@ -646,7 +674,7 @@ export function BookingForm() {
                 }}
                 className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25"
               >
-                Continue To Waiver
+                Continue To Parent Waiver
               </button>
             </div>
           </section>
@@ -656,12 +684,12 @@ export function BookingForm() {
           <section className="grid gap-5 bg-[#f4f6f8] px-4 py-6 sm:px-8 sm:py-8">
             <article className="mx-auto w-full max-w-3xl border border-slate-300 bg-[#fffdf8] px-5 py-7 shadow-sm sm:px-10 sm:py-10">
               <header className="border-b border-slate-300 pb-5">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Waiver Required</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Step 3</p>
                 <h3 className="mt-2 text-xl font-black leading-tight text-navy sm:text-2xl">
                   Elite Soccer Training Participation Waiver & Release of Liability
                 </h3>
                 <p className="mt-3 text-sm leading-6 text-slate-700">
-                  Review this document, choose media consent, and sign electronically before payment.
+                  Review the parent waiver, choose media consent, and sign electronically before secure payment.
                 </p>
               </header>
 
@@ -673,7 +701,9 @@ export function BookingForm() {
                       ["Participant Name", fields.playerName || "Complete player details"],
                       ["Parent/Guardian Name", fields.parentName || "Complete parent details"],
                       ["Phone Number", fields.phone || "Complete phone number"],
-                      ["Email", fields.email || "Complete email address"]
+                      ["Email", fields.email || "Complete email address"],
+                      ["Emergency Contact", fields.emergencyName || "Complete emergency contact"],
+                      ["Emergency Phone", fields.emergencyPhone || "Complete emergency phone"]
                     ].map(([label, value]) => (
                       <div key={label} className="border-b border-slate-300 pb-2">
                         <dt className="text-[11px] font-bold uppercase text-slate-500">{label}</dt>
@@ -681,17 +711,6 @@ export function BookingForm() {
                       </div>
                     ))}
                   </dl>
-
-                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <label className="grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
-                      Emergency Contact Name
-                      <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
-                    </label>
-                    <label className="grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
-                      Emergency Contact Phone
-                      <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
-                    </label>
-                  </div>
 
                   <label className="mt-4 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                     Medical Conditions / Allergies
@@ -737,6 +756,9 @@ export function BookingForm() {
                   </div>
 
                   <h4 className="mt-5 text-sm font-black uppercase tracking-wide text-navy">Electronic Agreement & Signature</h4>
+                  <div className="mt-3 rounded-md border border-slate-300 bg-white p-4 text-sm font-semibold leading-6 text-slate-700">
+                    <p>{refundCancellationReminder}</p>
+                  </div>
                   <label className="mt-3 flex items-start gap-3 text-sm font-semibold leading-6 text-slate-700">
                     <input
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
@@ -787,7 +809,7 @@ export function BookingForm() {
                 }}
                 className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25"
               >
-                Continue To Payment
+                Continue To Secure Payment
               </button>
             </div>
           </section>
@@ -797,10 +819,10 @@ export function BookingForm() {
           <section className="grid gap-6 p-5 sm:p-8 lg:grid-cols-[0.9fr_1.1fr]">
             <aside className="rounded-lg border border-slate-200 bg-mist p-5">
               <ShieldIcon className="h-9 w-9 text-electric" />
-              <p className="mt-4 text-sm font-black uppercase text-electric">Secure Checkout</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Complete payment to confirm.</h3>
+              <p className="mt-4 text-sm font-black uppercase text-electric">Step 3</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Parent waiver + secure payment</h3>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Secure online payment is completed after the waiver. Your session is confirmed after payment succeeds.
+                Secure online payment is completed after the waiver.
               </p>
               {selectedSlot ? (
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
@@ -817,7 +839,7 @@ export function BookingForm() {
 
             <div className="grid gap-5 rounded-lg border border-slate-200 bg-white p-5" data-stripe-checkout-ready="true">
               <div className="rounded-md border border-slate-200 bg-mist p-5">
-                <p className="text-sm font-black uppercase text-electric">Payment Summary</p>
+                <p className="text-sm font-black uppercase text-electric">Confirm & Pay</p>
                 <div className="mt-4 grid gap-3 text-sm text-slate-700">
                   <div className="flex items-center justify-between gap-4">
                     <span>Elite Soccer Training - Small Group Session</span>
@@ -834,9 +856,12 @@ export function BookingForm() {
                 </div>
               </div>
               <p className="text-sm leading-6 text-slate-600">
-                Secure online payment is completed after the waiver. Confirmation details are sent after successful
-                payment.
+                Secure online payment is completed after the waiver.
               </p>
+              <div className="rounded-md border border-electric/20 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
+                <p className="font-black uppercase text-navy">Arrival Reminder</p>
+                <p className="mt-2">{bookingArrivalInstructions.join(" ")}</p>
+              </div>
               <p className="rounded-md border border-slate-200 bg-mist p-4 text-sm font-bold leading-6 text-slate-700">
                 {refundCancellationReminder}
               </p>
@@ -850,7 +875,7 @@ export function BookingForm() {
                   disabled={isSubmitting}
                   className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-wait disabled:opacity-70"
                 >
-                  {isSubmitting ? "Opening Checkout..." : `Pay ${paymentTotal} With Stripe`}
+                  {isSubmitting ? "Opening Secure Payment..." : "Confirm & Pay"}
                 </button>
               </div>
             </div>

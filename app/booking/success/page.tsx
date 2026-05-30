@@ -6,8 +6,8 @@ import { isStripePaymentVerified, retrieveStripeCheckoutSession } from "@/lib/st
 import { bookingArrivalInstructions, business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
-  title: "Booking Payment Verification",
-  description: "Elite Soccer Training payment verification."
+  title: "Booking Confirmation",
+  description: "Elite Soccer Training booking confirmation."
 };
 
 export const dynamic = "force-dynamic";
@@ -31,8 +31,8 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
 
     return {
       verified: false,
-      title: "Payment could not be verified.",
-      message: "Stripe did not return a Checkout Session ID. Your booking is not marked confirmed on this page.",
+      title: "Payment could not be confirmed.",
+      message: "We could not confirm a completed payment for this booking. Your session is not confirmed yet.",
       sessionId: "",
       bookingId: "",
       status: "",
@@ -71,10 +71,10 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
 
     return {
       verified,
-      title: verified ? "Payment confirmed." : "Payment not confirmed.",
+      title: verified ? "Booking confirmed." : "Payment not confirmed.",
       message: verified
-        ? "Stripe has verified your payment. Your booking confirmation, calendar event, and email notifications are handled automatically after payment verification."
-        : "Stripe has not verified a completed payment for this session. Your booking is not confirmed.",
+        ? "Your secure payment is complete. Your session details will be sent by email."
+        : "We could not confirm a completed payment for this session. Your booking is not confirmed.",
       sessionId: session.id,
       bookingId,
       status: session.status ?? "",
@@ -94,11 +94,8 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
 
     return {
       verified: false,
-      title: "Payment could not be verified.",
-      message:
-        error instanceof Error
-          ? error.message
-          : "Stripe payment could not be verified. Your booking is not confirmed.",
+      title: "Payment could not be confirmed.",
+      message: "Secure payment could not be confirmed. Your booking is not confirmed.",
       sessionId,
       bookingId: "",
       status: "",
@@ -115,7 +112,7 @@ export default async function BookingSuccessPage({ searchParams }: BookingSucces
   return (
     <>
       <PageHero
-        eyebrow={verification.verified ? "Payment Verified" : "Payment Review"}
+        eyebrow={verification.verified ? "Booking Confirmed" : "Payment Needed"}
         title={verification.title}
         description={verification.message}
       />
@@ -124,34 +121,27 @@ export default async function BookingSuccessPage({ searchParams }: BookingSucces
         <div className="section-shell max-w-3xl">
           <div className="panel p-6 sm:p-8">
             <p className={`text-sm font-black uppercase ${verification.verified ? "text-field" : "text-red-700"}`}>
-              {verification.verified ? "Stripe Payment Confirmed" : "Booking Not Confirmed"}
+              {verification.verified ? "Session Confirmed" : "Booking Not Confirmed"}
             </p>
             <h2 className="mt-3 text-3xl font-black text-navy">
-              {verification.verified ? "Thank you for booking with Elite Soccer Training." : "Please return to secure checkout."}
+              {verification.verified ? "Thank you for booking with Elite Soccer Training." : "Please return to secure payment."}
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
               {verification.verified
-                ? "Your secure Stripe payment is complete. The confirmed booking details are processed through the Stripe webhook before calendar and email confirmations are sent."
-                : "The site did not receive a verified paid Stripe Checkout Session. No session has been marked paid or confirmed."}
+                ? "Your secure payment is complete. Watch your email for session details and reminders."
+                : "No completed payment was confirmed for this booking. Please return to the booking page when you are ready to finish."}
             </p>
             <div className="mt-6 grid gap-3 rounded-md border border-slate-200 bg-mist p-4 text-sm text-slate-700">
-              <p>
-                <span className="font-black text-navy">Stripe session:</span>{" "}
-                {verification.sessionId || "Not provided"}
-              </p>
-              <p>
-                <span className="font-black text-navy">Session status:</span>{" "}
-                {verification.status || "Not verified"}
-              </p>
-              <p>
-                <span className="font-black text-navy">Payment status:</span>{" "}
-                {verification.paymentStatus || "Not verified"}
-              </p>
               {verification.bookingId ? (
                 <p>
                   <span className="font-black text-navy">Booking ID:</span> {verification.bookingId}
                 </p>
-              ) : null}
+              ) : (
+                <p>
+                  <span className="font-black text-navy">Need help?</span> Call {business.phone} and Coach Hugo can
+                  help review the booking.
+                </p>
+              )}
             </div>
             {verification.verified ? (
               <div className="mt-6 rounded-md border border-electric/20 bg-blue-50 p-5 text-sm leading-6 text-slate-700">

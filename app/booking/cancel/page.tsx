@@ -19,11 +19,11 @@ export default function BookingCancelPage() {
       <section className="bg-mist py-16 sm:py-20">
         <div className="section-shell max-w-3xl">
           <div className="panel p-6 sm:p-8">
-            <p className="text-sm font-black uppercase text-electric">Checkout Closed</p>
+            <p className="text-sm font-black uppercase text-electric">Payment Not Completed</p>
             <h2 className="mt-3 text-3xl font-black text-navy">Complete payment to reserve your training session.</h2>
             <p className="mt-4 leading-7 text-slate-600">
-              The session is only confirmed after successful Stripe payment. You can return to the booking flow and
-              choose an available time.
+              The session is only confirmed after successful secure payment. You can return to booking and choose an
+              available time.
             </p>
             <Link
               href="/booking"
