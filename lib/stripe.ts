@@ -112,6 +112,7 @@ export async function createStripeCheckoutSession(booking: BookingRecord) {
     mode: "payment",
     success_url: `${siteUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${siteUrl}/booking/cancel`,
+    allow_promotion_codes: "true",
     client_reference_id: booking.id,
     customer_email: booking.email,
     "line_items[0][price_data][currency]": sessionCurrency,
@@ -120,6 +121,9 @@ export async function createStripeCheckoutSession(booking: BookingRecord) {
     "line_items[0][quantity]": String(Math.max(1, Number(booking.players) || 1)),
     "payment_intent_data[metadata][bookingId]": booking.id
   });
+
+  // Stripe Checkout uses Dashboard-managed dynamic payment methods when payment_method_types is omitted.
+  // Apple Pay and Google Pay visibility depends on Stripe settings, domain verification, device/browser support, and live mode.
 
   appendMetadata(params, bookingToStripeMetadata(booking));
 

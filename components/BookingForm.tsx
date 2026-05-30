@@ -882,6 +882,9 @@ export function BookingForm() {
               <p className="text-sm leading-6 text-slate-600">
                 Secure online payment is completed after the waiver.
               </p>
+              <p className="text-sm font-semibold leading-6 text-slate-600">
+                Have a promo code? You'll be able to enter it securely during checkout.
+              </p>
               <div className="rounded-md border border-electric/20 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
                 <p className="font-black uppercase text-navy">Arrival Reminder</p>
                 <p className="mt-2">{bookingArrivalInstructions.join(" ")}</p>
