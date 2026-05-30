@@ -456,17 +456,7 @@ export function BookingForm() {
                 <p className="mt-1 text-slate-300">{displaySlot.duration}</p>
                 <p className="mt-2 text-xs font-bold uppercase text-electric">{groupSizeMessage}</p>
               </div>
-            ) : isSpecialRequest ? (
-              <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
-                <p className="font-black text-white">Special Training Request</p>
-                <p className="mt-1 text-slate-300">Inquiry only. Coach Hugo will follow up.</p>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
-                <p className="font-black text-white">{selectedGroup.name}</p>
-                <p className="mt-1 text-slate-300">{selectedGroup.ages}</p>
-              </div>
-            )}
+            ) : null}
           </div>
         </div>
 
