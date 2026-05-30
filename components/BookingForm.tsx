@@ -269,6 +269,9 @@ export function BookingForm() {
   const displaySlot = selectedSlot;
   const dateSlots = openSlots.filter((slot) => slot.dateIso === selectedDate);
   const activeStepIndex = ["program", "session", "details", "waiver", "payment"].findIndex((label) => label === step);
+  const currentStepNumber = Math.max(0, activeStepIndex) + 1;
+  const currentStepLabel = stepLabels[currentStepNumber - 1] ?? stepLabels[0];
+  const progressWidth = `${(currentStepNumber / stepLabels.length) * 100}%`;
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
@@ -434,19 +437,16 @@ export function BookingForm() {
           </div>
         </div>
 
-        <div className="grid gap-3 border-b border-slate-200 bg-white p-4 sm:grid-cols-6">
-          {stepLabels.map((label, index) => (
-            <div
-              key={label}
-              className={`rounded-md border px-3 py-3 text-xs font-black uppercase ${
-                index <= activeStepIndex
-                  ? "border-electric bg-electric text-white"
-                  : "border-slate-200 bg-slate-50 text-slate-500"
-              }`}
-            >
-              {String(index + 1).padStart(2, "0")} {label}
-            </div>
-          ))}
+        <div className="border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+          <div className="flex items-center justify-between gap-4 text-xs font-black uppercase tracking-wide">
+            <p className="text-slate-500">
+              Step {currentStepNumber} of {stepLabels.length}
+            </p>
+            <p className="text-navy">{currentStepLabel}</p>
+          </div>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full rounded-full bg-electric transition-all" style={{ width: progressWidth }} />
+          </div>
         </div>
 
         {error ? (
@@ -800,7 +800,7 @@ export function BookingForm() {
               <p className="mt-4 text-sm font-black uppercase text-electric">Secure Checkout</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Complete payment to confirm.</h3>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Payment is processed through Stripe Checkout. Your session is confirmed after payment succeeds.
+                Secure online payment is completed after the waiver. Your session is confirmed after payment succeeds.
               </p>
               {selectedSlot ? (
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
@@ -834,8 +834,8 @@ export function BookingForm() {
                 </div>
               </div>
               <p className="text-sm leading-6 text-slate-600">
-                Stripe Checkout supports credit/debit cards, Apple Pay, and Google Pay when available. Calendar
-                confirmation and email notifications are sent after successful payment.
+                Secure online payment is completed after the waiver. Confirmation details are sent after successful
+                payment.
               </p>
               <p className="rounded-md border border-slate-200 bg-mist p-4 text-sm font-bold leading-6 text-slate-700">
                 {refundCancellationReminder}

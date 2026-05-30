@@ -28,12 +28,6 @@ export default function BookingPage() {
               Future Elite supports ages 9-12. Elite Performance supports ages 13-18. Each session holds up to
               six players. Training is $55 per player.
             </p>
-            <div className="mt-8 rounded-lg border border-slate-200 bg-white p-5">
-              <p className="text-sm font-black uppercase text-electric">Secure Stripe Checkout</p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Payment follows the waiver step. Total is calculated as number of players x $55.
-              </p>
-            </div>
             <a
               href={business.phoneHref}
               className="mt-4 inline-flex rounded-md border border-navy px-5 py-3 text-sm font-black text-navy transition hover:border-electric hover:text-electric"
