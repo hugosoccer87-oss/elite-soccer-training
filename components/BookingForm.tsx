@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon, ShieldIcon } from "./Icons";
 import { SignaturePad } from "./SignaturePad";
+import { SpecialRequestForm } from "./SpecialRequestForm";
 import {
   availabilityStorageKey,
   blockedDaysStorageKey,
@@ -31,6 +32,7 @@ const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
 const publicStepLabels = ["Choose Your Training Session", "Athlete Information", "Parent Waiver + Secure Payment"];
+const specialTrainingRequestValue = "special-training-request";
 const waiverVersion = "EST-CA-2026-05";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
@@ -215,6 +217,7 @@ export function BookingForm() {
     defaultTrainingSlots.find((slot) => slot.groupId === trainingGroups[0].id)?.dateIso ?? ""
   );
   const [selectedSlotId, setSelectedSlotId] = useState("");
+  const [isSpecialRequest, setIsSpecialRequest] = useState(false);
   const [fields, setFields] = useState<BookingFields>(initialFields);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -288,10 +291,22 @@ export function BookingForm() {
   function selectGroup(groupId: TrainingGroupId) {
     const nextGroupSlot = slots.find((slot) => slot.groupId === groupId && isSlotAvailable(slot, blockedDays));
 
+    setIsSpecialRequest(false);
     setSelectedGroupId(groupId);
     setSelectedSlotId("");
     setSelectedDate(nextGroupSlot?.dateIso ?? "");
     setError("");
+  }
+
+  function selectTrainingGroup(value: string) {
+    if (value === specialTrainingRequestValue) {
+      setIsSpecialRequest(true);
+      setSelectedSlotId("");
+      setError("");
+      return;
+    }
+
+    selectGroup(value as TrainingGroupId);
   }
 
   function requireSchedule() {
@@ -441,6 +456,11 @@ export function BookingForm() {
                 <p className="mt-1 text-slate-300">{displaySlot.duration}</p>
                 <p className="mt-2 text-xs font-bold uppercase text-electric">{groupSizeMessage}</p>
               </div>
+            ) : isSpecialRequest ? (
+              <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
+                <p className="font-black text-white">Special Training Request</p>
+                <p className="mt-1 text-slate-300">Inquiry only. Coach Hugo will follow up.</p>
+              </div>
             ) : (
               <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
                 <p className="font-black text-white">{selectedGroup.name}</p>
@@ -471,39 +491,53 @@ export function BookingForm() {
             <div>
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Select the best training group first. Exact player age is collected later for Coach Hugo's records.
+              </p>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-2">
-              {trainingGroups.map((group) => (
-                <button
-                  key={group.id}
-                  type="button"
-                  onClick={() => selectGroup(group.id)}
-                  className={`rounded-lg border p-5 text-left transition ${
-                    selectedGroupId === group.id
-                      ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
-                      : "border-slate-200 bg-white text-navy hover:border-electric"
-                  }`}
-                >
-                  <span className="text-xs font-black uppercase text-electric">{group.ages}</span>
-                  <span className="mt-2 block text-2xl font-black">{group.name}</span>
-                  <span className="mt-4 grid gap-2 text-sm font-semibold opacity-85">
-                    {group.focus.map((item) => (
-                      <span key={item}>{item}</span>
+            <label className="grid gap-2 text-sm font-bold text-navy">
+              Select Training Group
+              <select
+                className={inputClass}
+                value={isSpecialRequest ? specialTrainingRequestValue : selectedGroupId}
+                onChange={(event) => selectTrainingGroup(event.target.value)}
+              >
+                {trainingGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}: {group.ages}
+                  </option>
+                ))}
+                <option value={specialTrainingRequestValue}>Special Training Request</option>
+              </select>
+            </label>
+
+            {isSpecialRequest ? (
+              <div className="rounded-lg border border-slate-200 bg-mist p-5">
+                <SpecialRequestForm embedded />
+              </div>
+            ) : (
+              <>
+                <div className="rounded-lg border border-slate-200 bg-mist p-5">
+                  <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
+                  <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+                  <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-2">
+                    {selectedGroup.focus.map((item) => (
+                      <p key={item}>{item}</p>
                     ))}
-                  </span>
-                </button>
-              ))}
-            </div>
+                  </div>
+                </div>
 
-            <button
-              type="button"
-              onClick={() => setStep("session")}
-              className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
-            >
-              Choose Date & Time
-            </button>
+                <button
+                  type="button"
+                  onClick={() => setStep("session")}
+                  className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
+                >
+                  Choose Date & Time
+                </button>
+              </>
+            )}
           </section>
         ) : null}
 

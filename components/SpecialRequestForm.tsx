@@ -8,15 +8,21 @@ const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
 const requestTypes = [
-  "Player under age 9",
-  "Adult player",
-  "Sibling group",
-  "Team session",
-  "Custom training request",
+  "Private 1-on-1 Training",
+  "Player Under Age 9",
+  "Player Over Age 18",
+  "Sibling Group",
+  "Team Training",
+  "Custom Schedule Request",
+  "Position-Specific Training",
   "Other"
 ];
 
-export function SpecialRequestForm() {
+type SpecialRequestFormProps = {
+  embedded?: boolean;
+};
+
+export function SpecialRequestForm({ embedded = false }: SpecialRequestFormProps) {
   const [status, setStatus] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -61,13 +67,18 @@ export function SpecialRequestForm() {
   }
 
   return (
-    <form id="special-request-form" className="panel grid gap-5 p-5 sm:p-8" onSubmit={submitRequest}>
+    <form
+      id="special-request-form"
+      className={`${embedded ? "grid gap-5" : "panel grid gap-5 p-5 sm:p-8"}`}
+      onSubmit={submitRequest}
+    >
       <div>
         <p className="text-sm font-black uppercase text-electric">Special Training Request</p>
         <h3 className="mt-2 text-2xl font-black text-navy">Need a different arrangement?</h3>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          Use this for players under age 9, adult players, sibling groups, team sessions, or custom training requests.
-          No payment is collected for special requests.
+          Use this for private 1-on-1 training, players under age 9, players over age 18, sibling groups, team
+          training, custom schedule requests, position-specific training, or other custom needs. Coach Hugo will
+          review and follow up. No payment is collected and no automatic booking is created.
         </p>
       </div>
 
