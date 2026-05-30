@@ -4,7 +4,7 @@ import {
   coachHugoConfirmationNote,
   refundCancellationReminder
 } from "@/lib/site-data";
-import { type BookingRecord } from "@/lib/booking-data";
+import { bookingNotificationEmail, type BookingRecord } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 
 type NodemailerModule = {
@@ -49,6 +49,32 @@ type EmailResult = {
   message?: string;
 };
 
+type EmailAttemptStatus = {
+  checkedAt: string;
+  bookingId?: string;
+  smtpConfigured: boolean;
+  emailFromConfigured: boolean;
+  adminNotificationRecipient: string;
+  customerRecipient?: string;
+  customerStatus: "not_attempted" | "sent" | "failed";
+  adminStatus: "not_attempted" | "sent" | "failed";
+  message?: string;
+};
+
+type EmailDiagnosticsStore = {
+  lastEmailAttempt: EmailAttemptStatus | null;
+};
+
+const globalEmailDiagnostics = globalThis as typeof globalThis & {
+  __estEmailDiagnostics?: EmailDiagnosticsStore;
+};
+
+const emailDiagnosticsStore =
+  globalEmailDiagnostics.__estEmailDiagnostics ??
+  (globalEmailDiagnostics.__estEmailDiagnostics = {
+    lastEmailAttempt: null
+  });
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -70,6 +96,59 @@ function getSmtpConfig() {
     pass: process.env.SMTP_PASS,
     from: process.env.EMAIL_FROM
   };
+}
+
+export function getSmtpEnvironmentStatus() {
+  const config = getSmtpConfig();
+
+  return {
+    smtpHostExists: Boolean(config.host),
+    smtpPortExists: Boolean(config.rawPort),
+    smtpUserExists: Boolean(config.user),
+    smtpPassExists: Boolean(config.pass),
+    emailFromExists: Boolean(config.from)
+  };
+}
+
+export function isSmtpConfigured() {
+  const status = getSmtpEnvironmentStatus();
+
+  return (
+    status.smtpHostExists &&
+    status.smtpPortExists &&
+    status.smtpUserExists &&
+    status.smtpPassExists &&
+    status.emailFromExists
+  );
+}
+
+export function getEmailDiagnostics() {
+  return {
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    lastEmailAttempt: emailDiagnosticsStore.lastEmailAttempt
+  };
+}
+
+function setLastEmailAttempt(status: Omit<EmailAttemptStatus, "checkedAt">) {
+  emailDiagnosticsStore.lastEmailAttempt = {
+    checkedAt: new Date().toISOString(),
+    ...status
+  };
+}
+
+function logSmtpEnvironment() {
+  const status = getSmtpEnvironmentStatus();
+
+  console.info("[EST Email] SMTP environment check", {
+    "SMTP_HOST exists": status.smtpHostExists ? "yes" : "no",
+    "SMTP_PORT exists": status.smtpPortExists ? "yes" : "no",
+    "SMTP_USER exists": status.smtpUserExists ? "yes" : "no",
+    "SMTP_PASS exists": status.smtpPassExists ? "yes" : "no",
+    "EMAIL_FROM exists": status.emailFromExists ? "yes" : "no",
+    "SMTP secure": getSmtpConfig().port === 465 ? "true" : "false"
+  });
 }
 
 function validateSmtpConfig() {
@@ -289,7 +368,7 @@ function adminEmail(booking: BookingRecord): EmailMessage {
 
   return {
     from: process.env.EMAIL_FROM as string,
-    to: process.env.EMAIL_FROM as string,
+    to: bookingNotificationEmail,
     replyTo: booking.email,
     subject: `New EST booking: ${booking.playerName} - ${booking.programName}`,
     text,
@@ -298,10 +377,34 @@ function adminEmail(booking: BookingRecord): EmailMessage {
 }
 
 export async function sendBookingTransactionalEmails(booking: BookingRecord): Promise<EmailResult> {
+  const customer = customerEmail(booking);
+  const admin = adminEmail(booking);
+  const baseAttempt = {
+    bookingId: booking.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+  console.info("[EST Email] Preparing customer confirmation email", {
+    bookingId: booking.id
+  });
+  console.info("[EST Email] Customer email recipient:", {
+    bookingId: booking.id,
+    to: customer.to
+  });
+  console.info("[EST Email] Preparing admin notification email", {
+    bookingId: booking.id
+  });
+  console.info("[EST Email] Admin email recipient:", {
+    bookingId: booking.id,
+    to: admin.to
+  });
+
   try {
     const transport = await createTransport();
-    const customer = customerEmail(booking);
-    const admin = adminEmail(booking);
 
     const [customerResult, adminResult] = await Promise.allSettled([
       transport.sendMail(customer),
@@ -311,15 +414,13 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
     const adminSent = adminResult.status === "fulfilled";
 
     if (customerSent) {
-      console.info("[EST Email] Email sent successfully", {
-        type: "customer",
+      console.info("[EST Email] Customer confirmation sent", {
         to: customer.to,
         bookingId: booking.id,
         messageId: customerResult.value.messageId
       });
     } else {
-      console.error("[EST Email] Failed to send email", {
-        type: "customer",
+      console.error("[EST Email] Customer confirmation failed", {
         to: customer.to,
         bookingId: booking.id,
         error: customerResult.reason instanceof Error ? customerResult.reason.message : String(customerResult.reason)
@@ -327,20 +428,25 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
     }
 
     if (adminSent) {
-      console.info("[EST Email] Email sent successfully", {
-        type: "admin",
+      console.info("[EST Email] Admin notification sent", {
         to: admin.to,
         bookingId: booking.id,
         messageId: adminResult.value.messageId
       });
     } else {
-      console.error("[EST Email] Failed to send email", {
-        type: "admin",
+      console.error("[EST Email] Admin notification failed", {
         to: admin.to,
         bookingId: booking.id,
         error: adminResult.reason instanceof Error ? adminResult.reason.message : String(adminResult.reason)
       });
     }
+
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: customerSent ? "sent" : "failed",
+      adminStatus: adminSent ? "sent" : "failed",
+      message: customerSent && adminSent ? undefined : "One or more transactional emails failed to send."
+    });
 
     return {
       sent: customerSent && adminSent,
@@ -349,9 +455,22 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
       message: customerSent && adminSent ? undefined : "One or more transactional emails failed to send."
     };
   } catch (error) {
-    console.error("[EST Email] Failed to send email", {
+    console.error("[EST Email] Customer confirmation failed", {
+      to: customer.to,
       bookingId: booking.id,
       error: error instanceof Error ? error.message : String(error)
+    });
+    console.error("[EST Email] Admin notification failed", {
+      to: admin.to,
+      bookingId: booking.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message: error instanceof Error ? error.message : "Transactional email failed to send."
     });
 
     return {

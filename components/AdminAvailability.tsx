@@ -26,6 +26,20 @@ const inputClass =
 type AdminDiagnostics = {
   stripeKeyMode: "test" | "live" | "unknown" | "missing";
   webhookSecretExists: boolean;
+  smtpConfigured: boolean;
+  emailFromConfigured: boolean;
+  adminNotificationRecipient: string;
+  lastEmailAttempt: {
+    checkedAt: string;
+    bookingId?: string;
+    smtpConfigured: boolean;
+    emailFromConfigured: boolean;
+    adminNotificationRecipient: string;
+    customerRecipient?: string;
+    customerStatus: "not_attempted" | "sent" | "failed";
+    adminStatus: "not_attempted" | "sent" | "failed";
+    message?: string;
+  } | null;
   lastPaymentVerificationResult: {
     checkedAt: string;
     source: string;
@@ -421,7 +435,7 @@ export function AdminAvailability() {
         {notice ? <p className="mt-5 rounded-md bg-field/10 p-3 text-sm font-bold text-field">{notice}</p> : null}
 
         {diagnostics ? (
-          <div className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm sm:grid-cols-3">
+          <div className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Stripe key mode</p>
               <p className="mt-1 font-black text-navy">{diagnostics.stripeKeyMode}</p>
@@ -444,6 +458,28 @@ export function AdminAvailability() {
                   {diagnostics.lastPaymentVerificationResult.paymentStatus || "no payment status"} /{" "}
                   {diagnostics.lastPaymentVerificationResult.sessionStatus || "no session status"}
                 </p>
+              ) : null}
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">SMTP configured</p>
+              <p className="mt-1 font-black text-navy">{diagnostics.smtpConfigured ? "yes" : "no"}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                EMAIL_FROM: {diagnostics.emailFromConfigured ? "yes" : "no"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Admin email recipient</p>
+              <p className="mt-1 break-words font-black text-navy">{diagnostics.adminNotificationRecipient}</p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Last email attempt</p>
+              <p className="mt-1 font-black text-navy">
+                {diagnostics.lastEmailAttempt
+                  ? `Customer ${diagnostics.lastEmailAttempt.customerStatus} / Admin ${diagnostics.lastEmailAttempt.adminStatus}`
+                  : "none yet"}
+              </p>
+              {diagnostics.lastEmailAttempt?.message ? (
+                <p className="mt-1 text-xs font-bold text-slate-500">{diagnostics.lastEmailAttempt.message}</p>
               ) : null}
             </div>
           </div>

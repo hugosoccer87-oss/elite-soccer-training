@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminSessionCookie, getAdminSessionValue } from "@/lib/admin-auth";
 import { getLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import { getStripeKeyMode, hasStripeWebhookSecret } from "@/lib/stripe";
+import { getEmailDiagnostics } from "@/lib/transactional-email";
 
 export async function GET() {
   const expectedSession = getAdminSessionValue();
@@ -24,6 +25,7 @@ export async function GET() {
   return NextResponse.json({
     stripeKeyMode: getStripeKeyMode(),
     webhookSecretExists: hasStripeWebhookSecret(),
-    lastPaymentVerificationResult: getLastPaymentVerificationResult()
+    lastPaymentVerificationResult: getLastPaymentVerificationResult(),
+    ...getEmailDiagnostics()
   });
 }

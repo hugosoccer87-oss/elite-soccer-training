@@ -41,9 +41,36 @@ export async function confirmPaidBooking(booking: BookingRecord) {
     calendarEventUrl: calendarResult.eventUrl
   };
 
+  console.info("[EST Stripe] Booking confirmed", {
+    bookingId: booking.id,
+    calendarEventId: calendarResult.eventId,
+    calendarAlreadyExists: Boolean(calendarResult.alreadyExists)
+  });
+
   const emailResult = calendarResult.alreadyExists
     ? null
-    : await sendBookingTransactionalEmails(confirmedBooking);
+    : await (async () => {
+        console.info("[EST Stripe] Starting email notifications", {
+          bookingId: booking.id
+        });
+        const result = await sendBookingTransactionalEmails(confirmedBooking);
+        console.info("[EST Stripe] Email notifications complete", {
+          bookingId: booking.id,
+          sent: result.sent,
+          customerSent: result.customerSent,
+          adminSent: result.adminSent,
+          message: result.message
+        });
+        return result;
+      })();
+
+  if (calendarResult.alreadyExists) {
+    console.info("[EST Stripe] Email notifications complete", {
+      bookingId: booking.id,
+      skipped: true,
+      reason: "Booking calendar event already exists"
+    });
+  }
 
   return {
     booking: {

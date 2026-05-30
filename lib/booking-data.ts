@@ -71,7 +71,7 @@ export type BookingRecord = {
 export const availabilityStorageKey = "est-availability-v3";
 export const blockedDaysStorageKey = "est-blocked-days-v3";
 export const bookingsStorageKey = "est-bookings-v1";
-export const bookingNotificationEmail = "hugo.soccer87@gmail.com";
+export const bookingNotificationEmail = "info@elitesoccertrainingcv.com";
 export const slotCapacity = 6;
 
 export const trainingGroups: TrainingGroup[] = [
