@@ -2,7 +2,7 @@ export const business = {
   name: "Elite Soccer Training CV",
   coach: "Hugo Chaparro",
   location: "Coachella Valley, California",
-  email: "hugo.soccer87@gmail.com",
+  email: "info@elitesoccertrainingcv.com",
   phone: "323-684-8024",
   phoneHref: "tel:3236848024",
   instagramHandle: "@elite_training06",
