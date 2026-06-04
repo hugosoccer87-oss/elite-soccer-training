@@ -7,7 +7,7 @@ import { bookingArrivalInstructions, business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "Booking Confirmation",
-  description: "Elite Soccer Training booking confirmation."
+  description: "Elite Soccer Training CV booking confirmation."
 };
 
 export const dynamic = "force-dynamic";
@@ -124,7 +124,7 @@ export default async function BookingSuccessPage({ searchParams }: BookingSucces
               {verification.verified ? "Session Confirmed" : "Booking Not Confirmed"}
             </p>
             <h2 className="mt-3 text-3xl font-black text-navy">
-              {verification.verified ? "Thank you for booking with Elite Soccer Training." : "Please return to secure payment."}
+              {verification.verified ? "Thank you for booking with Elite Soccer Training CV." : "Please return to secure payment."}
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
               {verification.verified

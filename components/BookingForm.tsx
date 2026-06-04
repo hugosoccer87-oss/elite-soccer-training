@@ -53,6 +53,9 @@ type BookingFields = {
   guardianSignature: string;
 };
 
+type BookingFieldErrorKey = keyof BookingFields | "session";
+type BookingFieldErrors = Partial<Record<BookingFieldErrorKey, string>>;
+
 const initialFields: BookingFields = {
   parentName: "",
   playerName: "",
@@ -166,16 +169,20 @@ function spotsLabel(count: number) {
   return `${count} ${count === 1 ? "spot" : "spots"} remaining`;
 }
 
+function isValidEmailAddress(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 const waiverSections = [
   {
     title: "Assumption of Risk",
     copy:
-      "I understand that Elite Soccer Training activities include small group soccer training, camps, clinics, conditioning, and related soccer activities. Participation involves inherent risks, including falls, collisions, physical contact, weather conditions, field conditions, equipment-related injuries, sprains, fractures, concussions, serious injury, or death."
+      "I understand that Elite Soccer Training CV activities include small group soccer training, camps, clinics, conditioning, and related soccer activities. Participation involves inherent risks, including falls, collisions, physical contact, weather conditions, field conditions, equipment-related injuries, sprains, fractures, concussions, serious injury, or death."
   },
   {
     title: "Release of Liability",
     copy:
-      "On behalf of myself, the participant, and our family or representatives, I release and hold harmless Elite Soccer Training, its coaches, trainers, staff, contractors, affiliates, and facility partners from claims, demands, damages, or losses related to participation, except to the extent caused by gross negligence or intentional misconduct."
+      "On behalf of myself, the participant, and our family or representatives, I release and hold harmless Elite Soccer Training CV, its coaches, trainers, staff, contractors, affiliates, and facility partners from claims, demands, damages, or losses related to participation, except to the extent caused by gross negligence or intentional misconduct."
   },
   {
     title: "Medical Authorization",
@@ -185,12 +192,12 @@ const waiverSections = [
   {
     title: "Photo & Media Consent",
     copy:
-      "I may allow Elite Soccer Training to use photos or videos from training for its website, social media, marketing, and promotional materials. I can decline media consent below while still completing registration."
+      "I may allow Elite Soccer Training CV to use photos or videos from training for its website, social media, marketing, and promotional materials. I can decline media consent below while still completing registration."
   },
   {
     title: "Weather, Scheduling, Refunds & Cancellations",
     copy:
-      "Sessions may continue during normal weather. Elite Soccer Training may cancel, delay, or reschedule training when weather, heat, air quality, lightning, or field conditions make participation unsafe. Payments are generally non-refundable. Missed sessions, no-shows, or late cancellations may not qualify for makeup sessions, credits, or refunds."
+      "Sessions may continue during normal weather. Elite Soccer Training CV may cancel, delay, or reschedule training when weather, heat, air quality, lightning, or field conditions make participation unsafe. Payments are generally non-refundable. Missed sessions, no-shows, or late cancellations may not qualify for makeup sessions, credits, or refunds."
   },
   {
     title: "Parent/Guardian Responsibility",
@@ -219,6 +226,7 @@ export function BookingForm() {
   const [selectedSlotId, setSelectedSlotId] = useState("");
   const [isSpecialRequest, setIsSpecialRequest] = useState(false);
   const [fields, setFields] = useState<BookingFields>(initialFields);
+  const [fieldErrors, setFieldErrors] = useState<BookingFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -283,8 +291,59 @@ export function BookingForm() {
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
 
+  function clearFieldError(field: BookingFieldErrorKey) {
+    setFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function focusBookingField(field: BookingFieldErrorKey) {
+    window.setTimeout(() => {
+      const target = document.querySelector<HTMLElement>(`[data-booking-field="${field}"]`);
+
+      if (!target) {
+        return;
+      }
+
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.focus({ preventScroll: true });
+    }, 50);
+  }
+
+  function applyFieldErrors(nextErrors: BookingFieldErrors, message: string) {
+    setFieldErrors(nextErrors);
+    setError(message);
+
+    const firstField = Object.keys(nextErrors)[0] as BookingFieldErrorKey | undefined;
+
+    if (firstField) {
+      focusBookingField(firstField);
+    }
+  }
+
+  function fieldInputClass(field: BookingFieldErrorKey, baseClass = inputClass) {
+    return `${baseClass} ${
+      fieldErrors[field] ? "border-red-500 bg-red-50 text-red-950 ring-1 ring-red-500" : ""
+    }`;
+  }
+
+  function fieldLabelClass(field: BookingFieldErrorKey, extraClass = "") {
+    return `grid gap-2 text-sm font-bold ${fieldErrors[field] ? "text-red-700" : "text-navy"} ${extraClass}`;
+  }
+
+  function fieldErrorMessage(field: BookingFieldErrorKey) {
+    return fieldErrors[field] ? <p className="text-xs font-bold leading-5 text-red-700">{fieldErrors[field]}</p> : null;
+  }
+
   function setField(field: keyof BookingFields, value: string | boolean) {
     setFields((current) => ({ ...current, [field]: value }));
+    clearFieldError(field);
     setError("");
   }
 
@@ -295,6 +354,7 @@ export function BookingForm() {
     setSelectedGroupId(groupId);
     setSelectedSlotId("");
     setSelectedDate(nextGroupSlot?.dateIso ?? "");
+    clearFieldError("session");
     setError("");
   }
 
@@ -302,6 +362,7 @@ export function BookingForm() {
     if (value === specialTrainingRequestValue) {
       setIsSpecialRequest(true);
       setSelectedSlotId("");
+      setFieldErrors({});
       setError("");
       return;
     }
@@ -311,52 +372,107 @@ export function BookingForm() {
 
   function requireSchedule() {
     if (!selectedSlot) {
-      setError("Choose an available training slot before continuing.");
+      applyFieldErrors(
+        { session: "Select an available date and time before continuing." },
+        "Choose an available training slot before continuing."
+      );
       return false;
     }
+
+    clearFieldError("session");
+    setError("");
     return true;
   }
 
   function requireDetails() {
-    const needed = [
-      fields.parentName,
-      fields.playerName,
-      fields.playerAge,
-      fields.phone,
-      fields.email,
-      fields.players,
-      fields.emergencyName,
-      fields.emergencyPhone
-    ];
+    const nextErrors: BookingFieldErrors = {};
     const playerCount = Number(fields.players);
 
-    if (needed.some((value) => String(value).trim() === "")) {
-      setError("Complete the required parent, athlete, and emergency contact details before continuing.");
+    if (!fields.parentName.trim()) {
+      nextErrors.parentName = "Enter the parent or guardian name.";
+    }
+
+    if (!fields.playerName.trim()) {
+      nextErrors.playerName = "Enter the player name.";
+    }
+
+    if (!fields.playerAge.trim()) {
+      nextErrors.playerAge = "Enter the player age.";
+    } else {
+      const playerAge = Number(fields.playerAge);
+
+      if (!Number.isInteger(playerAge)) {
+        nextErrors.playerAge = "Enter a valid whole-number age.";
+      } else if (!isAgeInGroup(playerAge, selectedGroupId)) {
+        nextErrors.playerAge = `${selectedGroup.name} is for ${selectedGroup.ages}. Choose the correct training group.`;
+      }
+    }
+
+    if (!fields.phone.trim()) {
+      nextErrors.phone = "Enter a phone number.";
+    }
+
+    if (!fields.email.trim()) {
+      nextErrors.email = "Enter an email address.";
+    } else if (!isValidEmailAddress(fields.email)) {
+      nextErrors.email = "Enter a valid email address.";
+    }
+
+    if (!fields.emergencyName.trim()) {
+      nextErrors.emergencyName = "Enter an emergency contact name.";
+    }
+
+    if (!fields.emergencyPhone.trim()) {
+      nextErrors.emergencyPhone = "Enter an emergency contact phone number.";
+    }
+
+    if (!fields.players.trim()) {
+      nextErrors.players = "Select the number of players attending.";
+    } else if (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > getRemainingSpots(selectedSlot)) {
+      nextErrors.players = `This session has ${spotsLabel(selectedRemainingSpots)}. Adjust the player count before continuing.`;
+    }
+
+    if (!fields.medicalNotes.trim()) {
+      nextErrors.medicalNotes = "Enter medical notes/injuries, or type None.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      applyFieldErrors(nextErrors, "Complete the highlighted athlete information before continuing.");
       return false;
     }
 
-    if (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > getRemainingSpots(selectedSlot)) {
-      setError(`This session has ${spotsLabel(selectedRemainingSpots)}. Adjust the player count before continuing.`);
-      return false;
-    }
-
-    const playerAge = Number(fields.playerAge);
-
-    if (!Number.isInteger(playerAge) || !isAgeInGroup(playerAge, selectedGroupId)) {
-      setError(`${selectedGroup.name} is for ${selectedGroup.ages}. Choose the correct program before continuing.`);
-      return false;
-    }
+    setFieldErrors({});
+    setError("");
 
     return true;
   }
 
   function requireWaiver() {
-    const needed = [fields.medicalNotes, fields.guardianSignature];
+    const nextErrors: BookingFieldErrors = {};
 
-    if (needed.some((value) => value.trim() === "") || !fields.mediaConsent || !fields.waiverAgreement) {
-      setError("Complete the parent waiver, media consent, medical information, and parent signature before payment.");
+    if (!fields.medicalNotes.trim()) {
+      nextErrors.medicalNotes = "Enter medical notes/injuries, or type None.";
+    }
+
+    if (!fields.mediaConsent) {
+      nextErrors.mediaConsent = "Choose yes or no for media consent.";
+    }
+
+    if (!fields.waiverAgreement) {
+      nextErrors.waiverAgreement = "Confirm that you have read and agree to the waiver.";
+    }
+
+    if (!fields.guardianSignature.trim()) {
+      nextErrors.guardianSignature = "Type the parent or guardian legal name.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      applyFieldErrors(nextErrors, "Complete the highlighted waiver fields before payment.");
       return false;
     }
+
+    setFieldErrors({});
+    setError("");
 
     return true;
   }
@@ -541,7 +657,13 @@ export function BookingForm() {
             </div>
 
             {dates.length > 0 ? (
-              <>
+              <div
+                data-booking-field="session"
+                tabIndex={-1}
+                className={`grid gap-3 rounded-lg outline-none ${
+                  fieldErrors.session ? "border border-red-300 bg-red-50 p-3" : ""
+                }`}
+              >
                 <div className="grid gap-3 sm:grid-cols-3">
                   {dates.map((slot) => (
                     <button
@@ -550,6 +672,7 @@ export function BookingForm() {
                       onClick={() => {
                         setSelectedDate(slot.dateIso);
                         setSelectedSlotId("");
+                        clearFieldError("session");
                       }}
                       className={`rounded-lg border p-4 text-left transition ${
                         selectedDate === slot.dateIso
@@ -570,6 +693,7 @@ export function BookingForm() {
                       type="button"
                       onClick={() => {
                         setSelectedSlotId(slot.id);
+                        clearFieldError("session");
                         setFields((current) => ({
                           ...current,
                           players: String(Math.min(Number(current.players) || 1, getRemainingSpots(slot)))
@@ -587,13 +711,15 @@ export function BookingForm() {
                     </button>
                   ))}
                 </div>
-              </>
+                {fieldErrorMessage("session")}
+              </div>
             ) : (
-              <div className="rounded-lg border border-slate-200 bg-mist p-6">
+              <div data-booking-field="session" tabIndex={-1} className="rounded-lg border border-slate-200 bg-mist p-6 outline-none">
                 <p className="font-black text-navy">No open training slots are currently available.</p>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   Check back soon or call <a className="font-black underline" href={business.phoneHref}>{business.phone}</a> for schedule help.
                 </p>
+                {fieldErrorMessage("session")}
               </div>
             )}
 
@@ -624,43 +750,103 @@ export function BookingForm() {
                 Add parent contact details, athlete information, emergency contact, and any helpful notes for Coach Hugo.
               </p>
             </div>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("parentName")}>
               Parent/Guardian Name
-              <input className={inputClass} value={fields.parentName} onChange={(event) => setField("parentName", event.target.value)} />
+              <input
+                data-booking-field="parentName"
+                className={fieldInputClass("parentName")}
+                value={fields.parentName}
+                onChange={(event) => setField("parentName", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.parentName)}
+              />
+              {fieldErrorMessage("parentName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("playerName")}>
               Player Name
-              <input className={inputClass} value={fields.playerName} onChange={(event) => setField("playerName", event.target.value)} />
+              <input
+                data-booking-field="playerName"
+                className={fieldInputClass("playerName")}
+                value={fields.playerName}
+                onChange={(event) => setField("playerName", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.playerName)}
+              />
+              {fieldErrorMessage("playerName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("playerAge")}>
               Player Age
-              <input className={inputClass} inputMode="numeric" value={fields.playerAge} onChange={(event) => setField("playerAge", event.target.value)} />
+              <input
+                data-booking-field="playerAge"
+                className={fieldInputClass("playerAge")}
+                inputMode="numeric"
+                value={fields.playerAge}
+                onChange={(event) => setField("playerAge", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.playerAge)}
+              />
+              {fieldErrorMessage("playerAge")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("phone")}>
               Phone Number
-              <input className={inputClass} type="tel" value={fields.phone} onChange={(event) => setField("phone", event.target.value)} />
+              <input
+                data-booking-field="phone"
+                className={fieldInputClass("phone")}
+                type="tel"
+                value={fields.phone}
+                onChange={(event) => setField("phone", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.phone)}
+              />
+              {fieldErrorMessage("phone")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("email")}>
               Email
-              <input className={inputClass} type="email" value={fields.email} onChange={(event) => setField("email", event.target.value)} />
+              <input
+                data-booking-field="email"
+                className={fieldInputClass("email")}
+                type="email"
+                value={fields.email}
+                onChange={(event) => setField("email", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.email)}
+              />
+              {fieldErrorMessage("email")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("emergencyName")}>
               Emergency Contact Name
-              <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
+              <input
+                data-booking-field="emergencyName"
+                className={fieldInputClass("emergencyName")}
+                value={fields.emergencyName}
+                onChange={(event) => setField("emergencyName", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.emergencyName)}
+              />
+              {fieldErrorMessage("emergencyName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("emergencyPhone")}>
               Emergency Contact Phone
-              <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
+              <input
+                data-booking-field="emergencyPhone"
+                className={fieldInputClass("emergencyPhone")}
+                type="tel"
+                value={fields.emergencyPhone}
+                onChange={(event) => setField("emergencyPhone", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.emergencyPhone)}
+              />
+              {fieldErrorMessage("emergencyPhone")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
+            <label className={fieldLabelClass("players")}>
               Number of Players Attending
-              <select className={inputClass} value={fields.players} onChange={(event) => setField("players", event.target.value)}>
+              <select
+                data-booking-field="players"
+                className={fieldInputClass("players")}
+                value={fields.players}
+                onChange={(event) => setField("players", event.target.value)}
+                aria-invalid={Boolean(fieldErrors.players)}
+              >
                 {playerOptions.map((count) => (
                   <option key={count} value={count}>
                     {count}
                   </option>
                 ))}
               </select>
+              {fieldErrorMessage("players")}
             </label>
             {selectedSlot ? (
               <p className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600 sm:col-span-2">
@@ -676,14 +862,17 @@ export function BookingForm() {
                 placeholder="Share player goals, scheduling details, or anything helpful for Coach Hugo"
               />
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+            <label className={fieldLabelClass("medicalNotes", "sm:col-span-2")}>
               Medical Notes/Injuries
               <textarea
-                className={`${inputClass} min-h-28 resize-y`}
+                data-booking-field="medicalNotes"
+                className={fieldInputClass("medicalNotes", `${inputClass} min-h-28 resize-y`)}
                 value={fields.medicalNotes}
                 onChange={(event) => setField("medicalNotes", event.target.value)}
                 placeholder="Share anything Coach Hugo should know before training"
+                aria-invalid={Boolean(fieldErrors.medicalNotes)}
               />
+              {fieldErrorMessage("medicalNotes")}
             </label>
             <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row">
               <button type="button" onClick={() => setStep("session")} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
@@ -710,7 +899,7 @@ export function BookingForm() {
               <header className="border-b border-slate-300 pb-5">
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Step 3</p>
                 <h3 className="mt-2 text-xl font-black leading-tight text-navy sm:text-2xl">
-                  Elite Soccer Training Participation Waiver & Release of Liability
+                  Elite Soccer Training CV Participation Waiver & Release of Liability
                 </h3>
                 <p className="mt-3 text-sm leading-6 text-slate-700">
                   Review the parent waiver, choose media consent, and sign electronically before secure payment.
@@ -736,14 +925,17 @@ export function BookingForm() {
                     ))}
                   </dl>
 
-                  <label className="mt-4 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
+                  <label className={`mt-4 grid gap-2 text-xs font-bold uppercase tracking-wide ${fieldErrors.medicalNotes ? "text-red-700" : "text-navy"}`}>
                     Medical Conditions / Allergies
                     <textarea
-                      className={`${inputClass} min-h-24 resize-y`}
+                      data-booking-field="medicalNotes"
+                      className={fieldInputClass("medicalNotes", `${inputClass} min-h-24 resize-y`)}
                       value={fields.medicalNotes}
                       onChange={(event) => setField("medicalNotes", event.target.value)}
                       placeholder="List medical conditions, allergies, injuries, or type None"
+                      aria-invalid={Boolean(fieldErrors.medicalNotes)}
                     />
+                    {fieldErrorMessage("medicalNotes")}
                   </label>
                 </section>
 
@@ -759,13 +951,19 @@ export function BookingForm() {
                     <h4 className="text-sm font-black uppercase tracking-wide text-navy">Media Consent</h4>
                   </div>
 
-                  <div className="border-b border-slate-300 py-4">
+                  <div
+                    data-booking-field="mediaConsent"
+                    tabIndex={-1}
+                    className={`border-b border-slate-300 py-4 outline-none ${
+                      fieldErrors.mediaConsent ? "rounded-md border border-red-300 bg-red-50 p-3" : ""
+                    }`}
+                  >
                     <div className="grid gap-3 sm:grid-cols-2">
                       {[
                         ["yes", "Yes, media use is approved"],
                         ["no", "No, media consent is declined"]
                       ].map(([value, label]) => (
-                        <label key={value} className="flex items-center gap-3 text-sm font-semibold text-navy">
+                        <label key={value} className={`flex items-center gap-3 text-sm font-semibold ${fieldErrors.mediaConsent ? "text-red-700" : "text-navy"}`}>
                           <input
                             className="h-4 w-4 border-slate-400 text-electric"
                             type="radio"
@@ -777,34 +975,47 @@ export function BookingForm() {
                         </label>
                       ))}
                     </div>
+                    {fieldErrorMessage("mediaConsent")}
                   </div>
 
                   <h4 className="mt-5 text-sm font-black uppercase tracking-wide text-navy">Electronic Agreement & Signature</h4>
                   <div className="mt-3 rounded-md border border-slate-300 bg-white p-4 text-sm font-semibold leading-6 text-slate-700">
                     <p>{refundCancellationReminder}</p>
                   </div>
-                  <label className="mt-3 flex items-start gap-3 text-sm font-semibold leading-6 text-slate-700">
+                  <label
+                    className={`mt-3 flex items-start gap-3 rounded-md text-sm font-semibold leading-6 ${
+                      fieldErrors.waiverAgreement ? "border border-red-300 bg-red-50 p-3 text-red-700" : "text-slate-700"
+                    }`}
+                  >
                     <input
+                      data-booking-field="waiverAgreement"
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
                       checked={fields.waiverAgreement}
                       type="checkbox"
                       onChange={(event) => setField("waiverAgreement", event.target.checked)}
                     />
                     <span>
-                      I have read and understand the Elite Soccer Training waiver, including assumption of risk, release
+                      I have read and understand the Elite Soccer Training CV waiver, including assumption of risk, release
                       of liability, medical authorization, media consent selection, cancellation policy,
                       parent/guardian responsibility, California governing law, and electronic signature consent.
                     </span>
                   </label>
+                  {fieldErrorMessage("waiverAgreement")}
 
-                  <label className="mt-5 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
+                  <label className={`mt-5 grid gap-2 text-xs font-bold uppercase tracking-wide ${fieldErrors.guardianSignature ? "text-red-700" : "text-navy"}`}>
                     Parent/Guardian Digital Signature
                     <input
-                      className="field-focus w-full border-0 border-b border-slate-400 bg-transparent px-0 py-3 text-base font-semibold text-slate-900 placeholder:text-slate-400"
+                      data-booking-field="guardianSignature"
+                      className={fieldInputClass(
+                        "guardianSignature",
+                        "field-focus w-full border-0 border-b border-slate-400 bg-transparent px-0 py-3 text-base font-semibold text-slate-900 placeholder:text-slate-400"
+                      )}
                       value={fields.guardianSignature}
                       onChange={(event) => setField("guardianSignature", event.target.value)}
                       placeholder="Type parent/guardian full legal name"
+                      aria-invalid={Boolean(fieldErrors.guardianSignature)}
                     />
+                    {fieldErrorMessage("guardianSignature")}
                   </label>
 
                   <div className="mt-5 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
@@ -866,7 +1077,7 @@ export function BookingForm() {
                 <p className="text-sm font-black uppercase text-electric">Confirm & Pay</p>
                 <div className="mt-4 grid gap-3 text-sm text-slate-700">
                   <div className="flex items-center justify-between gap-4">
-                    <span>Elite Soccer Training - Small Group Session</span>
+                    <span>Elite Soccer Training CV - Small Group Session</span>
                     <span className="font-black text-navy">{sessionPriceLabel}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">

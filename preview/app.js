@@ -2,7 +2,7 @@ const availabilityKey = "est-availability-v3";
 const blockedDaysKey = "est-blocked-days-v3";
 const bookingsKey = "est-bookings-v1";
 const adminAccessKey = "est-admin-access";
-const bookingNotificationEmail = "hugo.soccer87@gmail.com";
+const bookingNotificationEmail = "info@elitesoccertrainingcv.com";
 const slotCapacity = 6;
 const trainingGroups = [
   {
@@ -292,7 +292,7 @@ function renderWaiverPanel() {
       <div class="flow-form">
         <label>Emergency Contact Name <input data-field="emergencyName" value="${escapeHtml(fields.emergencyName)}" /></label>
         <label>Emergency Contact Phone <input data-field="emergencyPhone" type="tel" value="${escapeHtml(fields.emergencyPhone)}" /></label>
-        <label class="check-label full"><input data-field="waiverAgreement" type="checkbox" ${fields.waiverAgreement ? "checked" : ""} />I agree to the Elite Soccer Training waiver terms and understand participation includes physical activity, soccer movements, equipment, and risk of injury.</label>
+        <label class="check-label full"><input data-field="waiverAgreement" type="checkbox" ${fields.waiverAgreement ? "checked" : ""} />I agree to the Elite Soccer Training CV waiver terms and understand participation includes physical activity, soccer movements, equipment, and risk of injury.</label>
         <label class="full">Parent/Guardian Digital Signature <input data-field="guardianSignature" value="${escapeHtml(fields.guardianSignature)}" placeholder="Type parent/guardian full legal name" /></label>
         <div class="flow-actions full"><button class="ghost-button" type="button" data-back-details>Back</button><button class="primary-button" type="button" data-next-payment>Continue To Payment</button></div>
       </div>

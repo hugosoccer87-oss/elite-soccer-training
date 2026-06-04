@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     "small group soccer training",
     "elite soccer development",
     "youth soccer training",
-    "Elite Soccer Training"
+    "Elite Soccer Training CV"
   ],
   openGraph: {
     title: `${business.name} | Small Group Soccer Training`,

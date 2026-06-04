@@ -20,7 +20,7 @@ const coachCards = [
   {
     title: "Why EST Started",
     copy:
-      "Elite Soccer Training was created to give Coachella Valley players a focused, professional small group environment to grow, compete, and reach higher levels."
+      "Elite Soccer Training CV was created to give Coachella Valley players a focused, professional small group environment to grow, compete, and reach higher levels."
   }
 ];
 const testimonials = [
@@ -57,11 +57,11 @@ export default function HomePage() {
         <div className="section-shell relative z-10 py-16">
           <div className="max-w-3xl">
             <Image
-              src="/images/est-logo.png"
-              alt="Elite Soccer Training logo"
-              width={138}
-              height={127}
-              className="mb-7 h-24 w-28 object-contain"
+              src="/images/est-cv-logo.png"
+              alt="Elite Soccer Training CV logo"
+              width={128}
+              height={128}
+              className="mb-7 h-24 w-24 object-contain"
             />
             <p className="text-sm font-black uppercase text-electric">Coachella Valley</p>
             <h1 className="mt-4 text-5xl font-black leading-none text-balance sm:text-6xl lg:text-7xl">
@@ -116,7 +116,7 @@ export default function HomePage() {
           <div className="relative overflow-hidden rounded-lg">
             <Image
               src="/images/coach-hugo.jpg"
-              alt="Coach Hugo Chaparro, Elite Soccer Training"
+              alt="Coach Hugo Chaparro, Elite Soccer Training CV"
               width={900}
               height={610}
               className="aspect-[4/3] w-full object-cover object-[50%_24%]"
@@ -130,9 +130,9 @@ export default function HomePage() {
           </div>
           <div>
             <SectionHeader
-              eyebrow="The Elite Soccer Training Difference"
+              eyebrow="The Elite Soccer Training CV Difference"
               title="REAL DEVELOPMENT. REAL CONFIDENCE."
-              description="Elite Soccer Training uses technical repetition, game-realistic training, confidence building, speed of play, competitive standards, and small group attention to help youth players develop with purpose."
+              description="Elite Soccer Training CV uses technical repetition, game-realistic training, confidence building, speed of play, competitive standards, and small group attention to help youth players develop with purpose."
             />
             <div className="mt-8 grid gap-4">
               {coachCards.map((card) => (
@@ -195,7 +195,7 @@ export default function HomePage() {
           <SectionHeader
             eyebrow="Testimonials"
             title="PARENT REVIEWS"
-            description="Hear from families who trust Elite Soccer Training."
+            description="Hear from families who trust Elite Soccer Training CV."
           />
           <div className="mt-10 grid gap-5 lg:grid-cols-3">
             {testimonials.map((testimonial) => (

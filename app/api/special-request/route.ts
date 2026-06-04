@@ -39,7 +39,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: "Special request could not be sent. Please try again or contact Elite Soccer Training directly."
+        error: "Special request could not be sent. Please try again or contact Elite Soccer Training CV directly."
       },
       { status: 500 }
     );

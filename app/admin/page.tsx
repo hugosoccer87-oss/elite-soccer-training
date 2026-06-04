@@ -5,7 +5,7 @@ import { PageHero } from "@/components/PageHero";
 
 export const metadata: Metadata = {
   title: "Admin Availability",
-  description: "Manage Elite Soccer Training availability and booked slots.",
+  description: "Manage Elite Soccer Training CV availability and booked slots.",
   robots: {
     index: false,
     follow: false

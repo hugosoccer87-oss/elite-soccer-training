@@ -7,7 +7,7 @@ import { business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Contact Elite Soccer Training in the Coachella Valley."
+  description: "Contact Elite Soccer Training CV in the Coachella Valley."
 };
 
 export default function ContactPage() {

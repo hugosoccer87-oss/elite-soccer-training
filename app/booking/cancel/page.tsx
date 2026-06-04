@@ -4,7 +4,7 @@ import { PageHero } from "@/components/PageHero";
 
 export const metadata: Metadata = {
   title: "Booking Payment Canceled",
-  description: "Elite Soccer Training payment canceled."
+  description: "Elite Soccer Training CV payment canceled."
 };
 
 export default function BookingCancelPage() {

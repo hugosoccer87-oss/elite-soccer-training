@@ -24,7 +24,7 @@ const developmentCards = [
 
 export const metadata: Metadata = {
   title: "About Coach Hugo",
-  description: "Learn about Coach Hugo Chaparro and the player-development philosophy behind Elite Soccer Training."
+  description: "Learn about Coach Hugo Chaparro and the player-development philosophy behind Elite Soccer Training CV."
 };
 
 export default function AboutPage() {
@@ -41,7 +41,7 @@ export default function AboutPage() {
           <div className="relative overflow-hidden rounded-lg">
             <Image
               src="/images/coach-hugo.jpg"
-              alt="Coach Hugo Chaparro, Elite Soccer Training"
+              alt="Coach Hugo Chaparro, Elite Soccer Training CV"
               width={920}
               height={680}
               className="aspect-[4/3] w-full object-cover object-[50%_24%]"
@@ -65,7 +65,7 @@ export default function AboutPage() {
                 across the local community.
               </p>
               <p>
-                Elite Soccer Training was created as a way to give back to the game and help Coachella Valley youth
+                Elite Soccer Training CV was created as a way to give back to the game and help Coachella Valley youth
                 players develop, compete, and reach higher levels.
               </p>
               <p>

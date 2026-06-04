@@ -443,7 +443,7 @@ export async function createCalendarAvailabilitySlot(slot: TrainingSlot): Promis
     headers: calendarHeaders(token.accessToken),
     body: JSON.stringify({
       summary: `EST Availability: ${group.name}`,
-      description: `Available Elite Soccer Training session for ${group.name}.`,
+      description: `Available Elite Soccer Training CV session for ${group.name}.`,
       start: {
         dateTime: range.start,
         timeZone: calendarTimeZone

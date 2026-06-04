@@ -9,7 +9,7 @@ export function SiteFooter() {
       <div className="section-shell grid gap-10 py-12 md:grid-cols-[1.4fr_1fr_1fr]">
         <div>
           <div className="flex items-center gap-3">
-            <Image src="/images/est-logo.png" alt="" width={82} height={75} className="h-16 w-20 object-contain" />
+            <Image src="/images/est-cv-logo.png" alt="" width={80} height={80} className="h-16 w-16 object-contain" />
             <div>
               <p className="text-lg font-black">{business.name}</p>
               <p className="text-sm text-slate-300">Small group soccer training for 1-6 players</p>

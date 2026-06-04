@@ -15,7 +15,7 @@ function setupPage(refreshToken?: string) {
       </head>
       <body style="margin:0;background:#eef4fb;color:#06152b;font-family:Arial,sans-serif">
         <main style="max-width:760px;margin:60px auto;padding:32px;border:1px solid #d9e2ee;border-radius:10px;background:white">
-          <p style="margin:0 0 8px;color:#1783ff;font-size:13px;font-weight:900;text-transform:uppercase">Elite Soccer Training</p>
+          <p style="margin:0 0 8px;color:#1783ff;font-size:13px;font-weight:900;text-transform:uppercase">Elite Soccer Training CV</p>
           <h1 style="margin:0 0 16px;font-size:32px">Google Calendar setup</h1>
           <p style="line-height:1.6;color:#475569">Add this refresh token to Vercel as <strong>GOOGLE_REFRESH_TOKEN</strong>, then redeploy the site. The existing <strong>GOOGLE_CLIENT_ID</strong> and <strong>GOOGLE_CLIENT_SECRET</strong> variables stay in place.</p>
           ${tokenBlock}

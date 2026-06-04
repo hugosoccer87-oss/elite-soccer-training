@@ -125,7 +125,7 @@ export async function sendSpecialRequestEmail(payload: SpecialRequestPayload) {
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #d9e2ee;border-radius:10px;overflow:hidden">
           <tr>
             <td style="background:#06152b;padding:26px 28px;color:#ffffff">
-              <p style="margin:0 0 8px;color:#1783ff;font-size:13px;font-weight:900;text-transform:uppercase">Elite Soccer Training</p>
+              <p style="margin:0 0 8px;color:#1783ff;font-size:13px;font-weight:900;text-transform:uppercase">Elite Soccer Training CV</p>
               <h1 style="margin:0;font-size:28px;line-height:1.15">Special Training Request</h1>
               <p style="margin:12px 0 0;color:#dbeafe;line-height:1.6">A family submitted a custom training inquiry from the website.</p>
             </td>

@@ -5,7 +5,7 @@ import { business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "Book Training",
-  description: "Submit a small group soccer training request for Elite Soccer Training."
+  description: "Submit a small group soccer training request for Elite Soccer Training CV."
 };
 
 export default function BookingPage() {

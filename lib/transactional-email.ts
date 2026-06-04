@@ -240,7 +240,7 @@ function brandedEmailShell({ title, intro, body }: { title: string; intro: strin
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #d9e2ee;border-radius:10px;overflow:hidden">
           <tr>
             <td style="background:#06152b;padding:26px 28px;color:#ffffff">
-              <p style="margin:0 0 8px;color:#1783ff;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.02em">Elite Soccer Training</p>
+              <p style="margin:0 0 8px;color:#1783ff;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.02em">Elite Soccer Training CV</p>
               <h1 style="margin:0;font-size:28px;line-height:1.15">${escapeHtml(title)}</h1>
               <p style="margin:12px 0 0;color:#dbeafe;line-height:1.6">${escapeHtml(intro)}</p>
             </td>
@@ -269,7 +269,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     ["Booking ID", booking.id]
   ];
   const text = [
-    "Elite Soccer Training booking confirmed",
+    "Elite Soccer Training CV booking confirmed",
     "",
     `Hi ${booking.parentName},`,
     "",
@@ -297,7 +297,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     title: "Booking Confirmed",
     intro: "Your small group soccer training session is confirmed.",
     body: `
-      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(booking.parentName)}, your Elite Soccer Training session is confirmed. We look forward to training with ${escapeHtml(booking.playerName)}.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(booking.parentName)}, your Elite Soccer Training CV session is confirmed. We look forward to training with ${escapeHtml(booking.playerName)}.</p>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
         ${detailsRows(rows)}
       </table>
@@ -326,7 +326,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     from: process.env.EMAIL_FROM as string,
     to: booking.email,
     replyTo: business.email,
-    subject: "Elite Soccer Training booking confirmed",
+    subject: "Elite Soccer Training CV booking confirmed",
     text,
     html
   };

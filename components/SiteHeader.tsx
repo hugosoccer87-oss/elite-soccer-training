@@ -9,11 +9,11 @@ export function SiteHeader() {
       <div className="section-shell flex min-h-20 items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-3" aria-label={`${business.name} home`}>
           <Image
-            src="/images/est-logo.png"
-            alt="Elite Soccer Training logo"
-            width={74}
-            height={68}
-            className="h-14 w-16 object-contain"
+            src="/images/est-cv-logo.png"
+            alt="Elite Soccer Training CV logo"
+            width={72}
+            height={72}
+            className="h-14 w-14 object-contain"
             priority
           />
           <div className="hidden leading-tight sm:block">

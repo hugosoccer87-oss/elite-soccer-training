@@ -1,5 +1,5 @@
 export const business = {
-  name: "Elite Soccer Training",
+  name: "Elite Soccer Training CV",
   coach: "Hugo Chaparro",
   location: "Coachella Valley, California",
   email: "hugo.soccer87@gmail.com",
@@ -7,7 +7,7 @@ export const business = {
   phoneHref: "tel:3236848024",
   instagramHandle: "@elite_training06",
   instagramUrl: "https://www.instagram.com/elite_training06/",
-  tagline: "TRAIN WITH ELITE SOCCER TRAINING",
+  tagline: "TRAIN WITH ELITE SOCCER TRAINING CV",
   subheadline:
     "Small group soccer training in the Coachella Valley focused on technical development, confidence, speed of play, and game performance."
 };
@@ -85,7 +85,7 @@ export const groupSizeMessage =
   "Small group sessions are capped at 6 players to keep training focused, competitive, and personal.";
 
 export const refundCancellationReminder =
-  "Sessions are non-refundable. If Elite Soccer Training cancels due to weather, field conditions, or scheduling changes, families will receive a reschedule option.";
+  "Sessions are non-refundable. If Elite Soccer Training CV cancels due to weather, field conditions, or scheduling changes, families will receive a reschedule option.";
 
 export const coachHugoConfirmationNote =
-  "Thank you for trusting Elite Soccer Training. I'm excited to work with your athlete and help them continue developing with purpose, intensity, and confidence.";
+  "Thank you for trusting Elite Soccer Training CV. I'm excited to work with your athlete and help them continue developing with purpose, intensity, and confidence.";
