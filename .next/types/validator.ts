@@ -119,6 +119,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../app/reviews/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/reviews">> = Specific
+  const handler = {} as typeof import("../../app/reviews/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../app/services/page.tsx
 {
   type __IsExpected<Specific extends AppPageConfig<"/services">> = Specific
@@ -204,6 +213,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/google-calendar/callback">> = Specific
   const handler = {} as typeof import("../../app/api/google-calendar/callback/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/reviews/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/reviews">> = Specific
+  const handler = {} as typeof import("../../app/api/reviews/route.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

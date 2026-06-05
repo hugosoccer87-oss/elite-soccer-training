@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
+import { ParentReviewsSection } from "@/components/ParentReviewsSection";
 import { SectionHeader } from "@/components/SectionHeader";
 
 const developmentCards = [
@@ -105,6 +106,8 @@ export default function AboutPage() {
           ))}
         </div>
       </section>
+
+      <ParentReviewsSection background="white" showBookButton={false} />
 
       <section className="bg-white py-16 sm:py-20">
         <div className="section-shell flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
