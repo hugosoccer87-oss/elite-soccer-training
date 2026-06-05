@@ -145,7 +145,7 @@ export async function sendReviewSubmissionEmail(payload: ReviewSubmissionPayload
                   .join("")}
               </table>
               <p style="margin:22px 0 0;color:#64748b;font-size:13px">Website: ${escapeHtml(business.name)}</p>
-              <p style="margin:8px 0 0;color:#64748b;font-size:13px">Reviews are not published automatically. Add approved reviews to the approvedReviews list when ready.</p>
+              <p style="margin:8px 0 0;color:#64748b;font-size:13px">Reviews are not published automatically. Save approved testimonials manually when ready.</p>
             </td>
           </tr>
         </table>

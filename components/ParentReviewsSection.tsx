@@ -28,29 +28,37 @@ export function ParentReviewsSection({ background = "mist", showBookButton = tru
           </Link>
         </div>
 
-        <div className="mt-10 grid gap-5 lg:grid-cols-3">
-          {approvedReviews.map((testimonial) => (
-            <article key={`${testimonial.parentName}-${testimonial.playerLabel ?? "review"}`} className="panel p-6">
-              <div className="flex gap-1 text-electric" aria-label={`${testimonial.rating} out of 5 stars`}>
-                {Array.from({ length: 5 }).map((_, index) => (
-                  <StarIcon
-                    key={`${testimonial.parentName}-${index}`}
-                    className={`h-4 w-4 ${index < testimonial.rating ? "text-electric" : "text-slate-300"}`}
-                  />
-                ))}
-              </div>
-              <p className="mt-5 text-base font-semibold leading-7 text-slate-700">"{testimonial.review}"</p>
-              <div className="mt-6 border-t border-slate-200 pt-4">
-                <p className="text-sm font-black uppercase text-navy">{testimonial.parentName}</p>
-                {testimonial.playerLabel ? (
-                  <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
-                    {testimonial.playerLabel}
-                  </p>
-                ) : null}
-              </div>
-            </article>
-          ))}
-        </div>
+        {approvedReviews.length > 0 ? (
+          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+            {approvedReviews.map((testimonial) => (
+              <article key={testimonial.id} className="panel p-6">
+                <div className="flex gap-1 text-electric" aria-label={`${testimonial.rating} out of 5 stars`}>
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <StarIcon
+                      key={`${testimonial.id}-${index}`}
+                      className={`h-4 w-4 ${index < testimonial.rating ? "text-electric" : "text-slate-300"}`}
+                    />
+                  ))}
+                </div>
+                <p className="mt-5 text-base font-semibold leading-7 text-slate-700">"{testimonial.review}"</p>
+                <div className="mt-6 border-t border-slate-200 pt-4">
+                  <p className="text-sm font-black uppercase text-navy">{testimonial.parentName}</p>
+                  {testimonial.playerName || testimonial.playerAgeGroup ? (
+                    <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
+                      {[testimonial.playerName, testimonial.playerAgeGroup].filter(Boolean).join(" - ")}
+                    </p>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-10 rounded-lg border border-slate-200 bg-white p-6">
+            <p className="text-sm font-bold leading-6 text-slate-600">
+              Approved parent reviews will appear here after Coach Hugo reviews submitted testimonials.
+            </p>
+          </div>
+        )}
 
         {showBookButton ? (
           <Link

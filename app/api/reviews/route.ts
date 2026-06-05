@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   try {
     const result = await sendReviewSubmissionEmail(normalizedPayload);
 
-    console.info("[EST Reviews] Review submission email sent", {
+    console.info("[EST Reviews] Review submitted", {
       to: reviewRecipient,
       parentName,
       rating,

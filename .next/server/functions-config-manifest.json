@@ -1,8 +1,8 @@
 {
   "version": 1,
   "functions": {
-    "/api/reviews": {},
     "/api/stripe/verify-session": {},
+    "/api/reviews": {},
     "/api/stripe/webhook": {}
   }
 }
