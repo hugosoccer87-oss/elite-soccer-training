@@ -29,7 +29,7 @@ export function ParentReviewsSection({ background = "mist", showBookButton = tru
         </div>
 
         {approvedReviews.length > 0 ? (
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             {approvedReviews.map((testimonial) => (
               <article key={testimonial.id} className="panel p-6">
                 <div className="flex gap-1 text-electric" aria-label={`${testimonial.rating} out of 5 stars`}>
@@ -41,11 +41,23 @@ export function ParentReviewsSection({ background = "mist", showBookButton = tru
                   ))}
                 </div>
                 <p className="mt-5 text-base font-semibold leading-7 text-slate-700">"{testimonial.review}"</p>
+                {testimonial.fullReview ? (
+                  <details className="mt-4 group">
+                    <summary className="cursor-pointer list-none text-sm font-black uppercase text-electric transition hover:text-blue-600">
+                      Read more
+                    </summary>
+                    <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 text-sm leading-6 text-slate-600">
+                      {testimonial.fullReview.split("\n\n").map((paragraph) => (
+                        <p key={paragraph}>{paragraph}</p>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
                 <div className="mt-6 border-t border-slate-200 pt-4">
                   <p className="text-sm font-black uppercase text-navy">{testimonial.parentName}</p>
-                  {testimonial.playerName || testimonial.playerAgeGroup ? (
+                  {testimonial.subtitle || testimonial.playerName || testimonial.playerAgeGroup ? (
                     <p className="mt-1 text-xs font-bold uppercase tracking-wide text-slate-500">
-                      {[testimonial.playerName, testimonial.playerAgeGroup].filter(Boolean).join(" - ")}
+                      {testimonial.subtitle ?? [testimonial.playerName, testimonial.playerAgeGroup].filter(Boolean).join(" - ")}
                     </p>
                   ) : null}
                 </div>
