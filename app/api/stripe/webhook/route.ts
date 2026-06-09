@@ -83,14 +83,13 @@ export async function POST(request: Request) {
 
       const result = await confirmPaidBooking(booking);
 
-      if (result.calendarResult.status === "Created") {
-        console.info("[EST Stripe] Booking confirmed", {
-          eventId: event.id,
-          sessionId: session.id,
-          bookingId: booking.id,
-          calendarEventId: result.calendarResult.eventId
-        });
-      }
+      console.info("[EST Stripe] Booking confirmed", {
+        eventId: event.id,
+        sessionId: session.id,
+        bookingId: booking.id,
+        calendarStatus: result.calendarResult.status,
+        calendarEventId: result.calendarResult.eventId
+      });
 
       console.info("[EST Stripe] Paid booking processed", {
         eventId: event.id,

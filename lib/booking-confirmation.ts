@@ -21,16 +21,6 @@ export async function confirmPaidBooking(booking: BookingRecord) {
       calendarStatus: calendarResult.status,
       calendarMessage: calendarResult.message
     });
-
-    return {
-      booking: {
-        ...booking,
-        calendarStatus: calendarResult.status,
-        calendarMessage: calendarResult.message
-      },
-      calendarResult,
-      emailResult: null
-    };
   }
 
   const confirmedBooking: BookingRecord = {
@@ -38,12 +28,14 @@ export async function confirmPaidBooking(booking: BookingRecord) {
     calendarStatus: calendarResult.status,
     calendarMessage: calendarResult.message,
     calendarEventId: calendarResult.eventId,
-    calendarEventUrl: calendarResult.eventUrl
+    calendarEventUrl: calendarResult.eventUrl,
+    paymentStatus: "Paid"
   };
 
   console.info("[EST Stripe] Booking confirmed", {
     bookingId: booking.id,
     calendarEventId: calendarResult.eventId,
+    calendarStatus: calendarResult.status,
     calendarAlreadyExists: Boolean(calendarResult.alreadyExists)
   });
 
@@ -75,7 +67,13 @@ export async function confirmPaidBooking(booking: BookingRecord) {
   return {
     booking: {
       ...confirmedBooking,
-      notificationStatus: emailResult?.sent ? "Sent" : confirmedBooking.notificationStatus
+      notificationStatus: emailResult?.sent
+        ? "Sent"
+        : emailResult
+          ? emailResult.message?.includes("email configuration is missing")
+            ? "Email service not configured"
+            : "Email delivery needs attention"
+          : confirmedBooking.notificationStatus
     },
     calendarResult,
     emailResult

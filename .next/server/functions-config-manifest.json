@@ -1,8 +1,10 @@
 {
   "version": 1,
   "functions": {
+    "/api/admin/send-test-email": {},
+    "/api/admin/email-diagnostics": {},
     "/api/reviews": {},
-    "/api/stripe/webhook": {},
-    "/api/stripe/verify-session": {}
+    "/api/stripe/verify-session": {},
+    "/api/stripe/webhook": {}
   }
 }

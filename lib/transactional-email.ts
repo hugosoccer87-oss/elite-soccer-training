@@ -75,6 +75,8 @@ const emailDiagnosticsStore =
     lastEmailAttempt: null
   });
 
+export const emailProviderName = "Nodemailer SMTP";
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -110,6 +112,22 @@ export function getSmtpEnvironmentStatus() {
   };
 }
 
+export function getEmailEnvironmentDiagnostics() {
+  const status = getSmtpEnvironmentStatus();
+
+  return {
+    provider: emailProviderName,
+    smtpHostConfigured: status.smtpHostExists,
+    smtpPortConfigured: status.smtpPortExists,
+    smtpUserConfigured: status.smtpUserExists,
+    smtpPassConfigured: status.smtpPassExists,
+    emailFromConfigured: status.emailFromExists,
+    adminRecipientConfigured: Boolean(bookingNotificationEmail),
+    adminNotificationRecipient: bookingNotificationEmail,
+    lastEmailAttempt: emailDiagnosticsStore.lastEmailAttempt
+  };
+}
+
 export function isSmtpConfigured() {
   const status = getSmtpEnvironmentStatus();
 
@@ -124,6 +142,7 @@ export function isSmtpConfigured() {
 
 export function getEmailDiagnostics() {
   return {
+    provider: emailProviderName,
     smtpConfigured: isSmtpConfigured(),
     emailFromConfigured: Boolean(process.env.EMAIL_FROM),
     adminNotificationRecipient: bookingNotificationEmail,
@@ -141,14 +160,12 @@ function setLastEmailAttempt(status: Omit<EmailAttemptStatus, "checkedAt">) {
 function logSmtpEnvironment() {
   const status = getSmtpEnvironmentStatus();
 
-  console.info("[EST Email] SMTP environment check", {
-    "SMTP_HOST exists": status.smtpHostExists ? "yes" : "no",
-    "SMTP_PORT exists": status.smtpPortExists ? "yes" : "no",
-    "SMTP_USER exists": status.smtpUserExists ? "yes" : "no",
-    "SMTP_PASS exists": status.smtpPassExists ? "yes" : "no",
-    "EMAIL_FROM exists": status.emailFromExists ? "yes" : "no",
-    "SMTP secure": getSmtpConfig().port === 465 ? "true" : "false"
-  });
+  console.info(`[EST Email] Email provider: ${emailProviderName}`);
+  console.info(`[EST Email] SMTP_HOST configured: ${status.smtpHostExists ? "yes" : "no"}`);
+  console.info(`[EST Email] SMTP_PORT configured: ${status.smtpPortExists ? "yes" : "no"}`);
+  console.info(`[EST Email] SMTP_USER configured: ${status.smtpUserExists ? "yes" : "no"}`);
+  console.info(`[EST Email] SMTP_PASS configured: ${status.smtpPassExists ? "yes" : "no"}`);
+  console.info(`[EST Email] EMAIL_FROM configured: ${status.emailFromExists ? "yes" : "no"}`);
 }
 
 function validateSmtpConfig() {
@@ -262,6 +279,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     ["Program", booking.programName],
     ["Player", booking.playerName],
     ["Player Count", booking.players],
+    ["Payment Status", "Payment confirmed"],
     ["Payment", `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`],
     ["Location", business.location],
     ["Waiver", `${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}${booking.waiverAcceptedAt ? ` on ${formatWaiverAcceptedAt(booking)}` : ""}`],
@@ -276,6 +294,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     `Your session is confirmed for ${booking.sessionDate} at ${booking.sessionTime}.`,
     `Program: ${booking.programName}`,
     `Player count: ${booking.players}`,
+    "Payment status: Payment confirmed",
     `Payment: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
     `Location: ${business.location}`,
     `Waiver: ${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}`,
@@ -357,8 +376,8 @@ function adminEmail(booking: BookingRecord): EmailMessage {
   ];
   const text = rows.map(([label, value]) => `${label}: ${value}`).join("\n");
   const html = brandedEmailShell({
-    title: "New Booking Received",
-    intro: "A parent completed booking and a Google Calendar event was created.",
+    title: "New Paid Booking",
+    intro: "A parent completed payment for a training session.",
     body: `
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
         ${detailsRows(rows)}
@@ -370,10 +389,86 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     from: process.env.EMAIL_FROM as string,
     to: bookingNotificationEmail,
     replyTo: booking.email,
-    subject: `New EST booking: ${booking.playerName} - ${booking.programName}`,
+    subject: `New paid EST booking: ${booking.playerName} - ${booking.programName}`,
     text,
     html
   };
+}
+
+export async function sendAdminTestEmail() {
+  try {
+    logSmtpEnvironment();
+
+    const transport = await createTransport();
+    const now = new Date().toLocaleString("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: "America/Los_Angeles"
+    });
+    const message: EmailMessage = {
+      from: process.env.EMAIL_FROM as string,
+      to: bookingNotificationEmail,
+      subject: "Elite Soccer Training CV test email",
+      text: [
+        "Elite Soccer Training CV test email",
+        "",
+        `Sent at: ${now}`,
+        "If you received this, SMTP email sending is working."
+      ].join("\n"),
+      html: brandedEmailShell({
+        title: "Test Email",
+        intro: "SMTP email sending is working for Elite Soccer Training CV.",
+        body: `
+          <p style="margin:0;color:#334155;line-height:1.7">This is a test email from the protected admin email test route.</p>
+          <p style="margin:16px 0 0;color:#334155;line-height:1.7"><strong>Sent at:</strong> ${escapeHtml(now)}</p>
+        `
+      })
+    };
+
+    console.info("[EST Email] Preparing admin notification email", {
+      testEmail: true
+    });
+    console.info("[EST Email] Admin recipient:", {
+      to: bookingNotificationEmail,
+      testEmail: true
+    });
+
+    const result = await transport.sendMail(message);
+
+    setLastEmailAttempt({
+      smtpConfigured: isSmtpConfigured(),
+      emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+      adminNotificationRecipient: bookingNotificationEmail,
+      adminStatus: "sent",
+      customerStatus: "not_attempted",
+      message: "Admin test email sent successfully."
+    });
+
+    console.info("[EST Email] Admin email sent successfully", {
+      to: bookingNotificationEmail,
+      messageId: result.messageId,
+      testEmail: true
+    });
+
+    return result;
+  } catch (error) {
+    setLastEmailAttempt({
+      smtpConfigured: isSmtpConfigured(),
+      emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+      adminNotificationRecipient: bookingNotificationEmail,
+      adminStatus: "failed",
+      customerStatus: "not_attempted",
+      message: error instanceof Error ? error.message : "Admin test email failed."
+    });
+
+    console.error("[EST Email] Admin email failed:", {
+      to: bookingNotificationEmail,
+      error: error instanceof Error ? error.message : String(error),
+      testEmail: true
+    });
+
+    throw error;
+  }
 }
 
 export async function sendBookingTransactionalEmails(booking: BookingRecord): Promise<EmailResult> {
@@ -388,17 +483,39 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
   };
 
   logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Booking confirmed, but confirmation emails were not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      bookingId: booking.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message
+    };
+  }
+
   console.info("[EST Email] Preparing customer confirmation email", {
     bookingId: booking.id
   });
-  console.info("[EST Email] Customer email recipient:", {
+  console.info("[EST Email] Customer recipient:", {
     bookingId: booking.id,
     to: customer.to
   });
   console.info("[EST Email] Preparing admin notification email", {
     bookingId: booking.id
   });
-  console.info("[EST Email] Admin email recipient:", {
+  console.info("[EST Email] Admin recipient:", {
     bookingId: booking.id,
     to: admin.to
   });
@@ -414,13 +531,13 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
     const adminSent = adminResult.status === "fulfilled";
 
     if (customerSent) {
-      console.info("[EST Email] Customer confirmation sent", {
+      console.info("[EST Email] Customer email sent successfully", {
         to: customer.to,
         bookingId: booking.id,
         messageId: customerResult.value.messageId
       });
     } else {
-      console.error("[EST Email] Customer confirmation failed", {
+      console.error("[EST Email] Customer email failed:", {
         to: customer.to,
         bookingId: booking.id,
         error: customerResult.reason instanceof Error ? customerResult.reason.message : String(customerResult.reason)
@@ -428,13 +545,13 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
     }
 
     if (adminSent) {
-      console.info("[EST Email] Admin notification sent", {
+      console.info("[EST Email] Admin email sent successfully", {
         to: admin.to,
         bookingId: booking.id,
         messageId: adminResult.value.messageId
       });
     } else {
-      console.error("[EST Email] Admin notification failed", {
+      console.error("[EST Email] Admin email failed:", {
         to: admin.to,
         bookingId: booking.id,
         error: adminResult.reason instanceof Error ? adminResult.reason.message : String(adminResult.reason)
@@ -455,12 +572,12 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
       message: customerSent && adminSent ? undefined : "One or more transactional emails failed to send."
     };
   } catch (error) {
-    console.error("[EST Email] Customer confirmation failed", {
+    console.error("[EST Email] Customer email failed:", {
       to: customer.to,
       bookingId: booking.id,
       error: error instanceof Error ? error.message : String(error)
     });
-    console.error("[EST Email] Admin notification failed", {
+    console.error("[EST Email] Admin email failed:", {
       to: admin.to,
       bookingId: booking.id,
       error: error instanceof Error ? error.message : String(error)
