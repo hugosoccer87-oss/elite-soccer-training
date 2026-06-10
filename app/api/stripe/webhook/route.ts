@@ -153,8 +153,25 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (message.includes("confirm_paid_booking") || message.includes("schema cache")) {
+      console.error("[EST Stripe] Supabase confirm_paid_booking RPC failed", {
+        error: message,
+        fix: "Run supabase/fix-confirm-paid-booking.sql in Supabase SQL Editor, then resend checkout.session.completed from Stripe."
+      });
+
+      return NextResponse.json(
+        {
+          error: "Supabase confirm_paid_booking RPC is missing or unavailable.",
+          details: message
+        },
+        { status: 500 }
+      );
+    }
+
     console.error("[EST Stripe] Webhook processing failed", {
-      error: error instanceof Error ? error.message : String(error)
+      error: message
     });
 
     return NextResponse.json({ error: "Webhook processing failed." }, { status: 400 });

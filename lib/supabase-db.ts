@@ -544,15 +544,29 @@ export async function markBookingPaidAndSaveWaiver(
     amountPaid?: number;
   }
 ) {
-  await supabaseRequest<BookingRow[]>("rpc/confirm_paid_booking", {
-    method: "POST",
-    body: JSON.stringify({
-      p_booking_id: booking.id,
-      p_stripe_checkout_session_id: payment.checkoutSessionId || null,
-      p_stripe_payment_intent_id: payment.paymentIntentId || null,
-      p_amount_paid: payment.amountPaid ?? Number(booking.players || 1) * sessionUnitAmountCents
-    })
-  });
+  try {
+    await supabaseRequest<BookingRow[]>("rpc/confirm_paid_booking", {
+      method: "POST",
+      body: JSON.stringify({
+        p_booking_id: booking.id,
+        p_stripe_checkout_session_id: payment.checkoutSessionId || null,
+        p_stripe_payment_intent_id: payment.paymentIntentId || null,
+        p_amount_paid: payment.amountPaid ?? Number(booking.players || 1) * sessionUnitAmountCents
+      })
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (message.includes("confirm_paid_booking") || message.includes("schema cache")) {
+      console.error("[EST Supabase] confirm_paid_booking RPC failed", {
+        bookingId: booking.id,
+        error: message,
+        fix: "Run supabase/fix-confirm-paid-booking.sql in Supabase SQL Editor, then resend the Stripe webhook event."
+      });
+    }
+
+    throw error;
+  }
 
   await supabaseRequest<WaiverRow[]>("waivers", {
     method: "POST",

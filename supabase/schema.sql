@@ -97,6 +97,10 @@ begin
 end;
 $$;
 
+grant execute on function public.confirm_paid_booking(uuid, text, text, integer) to service_role;
+
+notify pgrst, 'reload schema';
+
 drop trigger if exists training_sessions_set_updated_at on public.training_sessions;
 create trigger training_sessions_set_updated_at
 before update on public.training_sessions
