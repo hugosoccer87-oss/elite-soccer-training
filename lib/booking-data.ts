@@ -232,38 +232,50 @@ export function sortTrainingSlots(slots: TrainingSlot[]) {
   });
 }
 
-export function getPublicAvailability({
-  slots,
-  blockedDays,
-  selectedGroupId,
-  selectedDate,
-  now = new Date()
-}: {
-  slots: TrainingSlot[];
-  blockedDays: string[];
-  selectedGroupId?: TrainingGroupId | "";
-  selectedDate?: string;
-  now?: Date;
-}) {
-  const normalizedSlots = slots.map(normalizeTrainingSlot);
-  const futureSlots = normalizedSlots.filter((slot) => isSlotInFuture(slot, now));
-  const activeSlots = futureSlots.filter((slot) => isSlotActive(slot, blockedDays));
-  const groupSlots = activeSlots.filter((slot) => !selectedGroupId || slot.groupId === selectedGroupId);
-  const capacitySlots = groupSlots.filter((slot) => getRemainingSpots(slot) > 0);
-  const shownSlots = selectedDate ? capacitySlots.filter((slot) => slot.dateIso === selectedDate) : capacitySlots;
+export function getAvailableSessions(
+  sessions: TrainingSlot[],
+  selectedProgram?: TrainingGroupId | "",
+  options: {
+    blockedDays?: string[];
+    now?: Date;
+  } = {}
+) {
+  const blockedDays = options.blockedDays ?? [];
+  const now = options.now ?? new Date();
+  const normalizedSessions = sessions.map(normalizeTrainingSlot);
+  const activeSessions = normalizedSessions.filter((slot) => isSlotActive(slot, blockedDays));
+  const futureSessions = activeSessions.filter((slot) => isSlotInFuture(slot, now));
+  const sessionsWithRemainingSpots = futureSessions.filter((slot) => getRemainingSpots(slot) > 0);
+  const finalSessions = sessionsWithRemainingSpots.filter((slot) => !selectedProgram || slot.groupId === selectedProgram);
 
   return {
-    openSlots: sortTrainingSlots(capacitySlots),
-    shownSlots: sortTrainingSlots(shownSlots),
+    sessions: sortTrainingSlots(finalSessions),
     debug: {
-      totalSessionsLoaded: normalizedSlots.length,
-      sessionsAfterFutureDateFilter: futureSlots.length,
-      sessionsAfterActiveEnabledFilter: activeSlots.length,
-      sessionsAfterGroupFilter: groupSlots.length,
-      sessionsAfterCapacityFilter: capacitySlots.length,
-      finalSessionsShown: shownSlots.length
+      totalSessionsLoaded: normalizedSessions.length,
+      activeSessions: activeSessions.length,
+      futureSessions: futureSessions.length,
+      sessionsWithRemainingSpots: sessionsWithRemainingSpots.length,
+      selectedProgram: selectedProgram ? getTrainingGroup(selectedProgram).name : "all",
+      finalSessionsShown: finalSessions.length
     }
   };
+}
+
+export function formatSessionDate(dateIso: string) {
+  const [year, month, day] = dateIso.split("-").map(Number);
+
+  if (!year || !month || !day) {
+    return dateIso;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC"
+  }).format(date);
 }
 
 export function getTrainingGroup(groupId: TrainingGroupId) {

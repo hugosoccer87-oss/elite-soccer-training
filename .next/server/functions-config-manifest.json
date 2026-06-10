@@ -2,8 +2,8 @@
   "version": 1,
   "functions": {
     "/api/admin/bookings": {},
-    "/api/admin/email-diagnostics": {},
     "/api/admin/send-test-email": {},
+    "/api/admin/email-diagnostics": {},
     "/api/reviews": {},
     "/api/stripe/webhook": {},
     "/api/stripe/verify-session": {}

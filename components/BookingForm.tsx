@@ -8,7 +8,8 @@ import {
   availabilityStorageKey,
   blockedDaysStorageKey,
   defaultTrainingSlots,
-  getPublicAvailability,
+  formatSessionDate,
+  getAvailableSessions,
   getRemainingSpots,
   getTrainingGroup,
   isAgeInGroup,
@@ -224,10 +225,10 @@ export function BookingForm() {
   const [slots, setSlots] = useState<TrainingSlot[]>(defaultTrainingSlots);
   const [blockedDays, setBlockedDays] = useState<string[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<TrainingGroupId | "">("");
-  const [selectedDate, setSelectedDate] = useState("");
   const [selectedSlotId, setSelectedSlotId] = useState("");
   const [isSpecialRequest, setIsSpecialRequest] = useState(false);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(true);
+  const [showAvailabilityDebug, setShowAvailabilityDebug] = useState(false);
   const [fields, setFields] = useState<BookingFields>(initialFields);
   const [fieldErrors, setFieldErrors] = useState<BookingFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -266,24 +267,25 @@ export function BookingForm() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setShowAvailabilityDebug(new URLSearchParams(window.location.search).get("debugAvailability") === "1");
+  }, []);
+
   const availability = useMemo(
     () =>
-      getPublicAvailability({
-        slots,
-        blockedDays,
-        selectedGroupId,
-        selectedDate
+      getAvailableSessions(slots, selectedGroupId, {
+        blockedDays
       }),
-    [slots, blockedDays, selectedGroupId, selectedDate]
+    [slots, blockedDays, selectedGroupId]
   );
-  const openSlots = availability.openSlots;
+  const availableSessions = availability.sessions;
 
   useEffect(() => {
-    if (openSlots.length === 0) {
-      if (selectedDate) {
-        setSelectedDate("");
-      }
-
+    if (availableSessions.length === 0) {
       if (selectedSlotId) {
         setSelectedSlotId("");
       }
@@ -291,56 +293,23 @@ export function BookingForm() {
       return;
     }
 
-    const hasSelectedDate = selectedDate && openSlots.some((slot) => slot.dateIso === selectedDate);
-    const hasSelectedSlot = selectedSlotId && openSlots.some((slot) => slot.id === selectedSlotId);
-
-    if (!hasSelectedDate) {
-      setSelectedDate(openSlots[0].dateIso);
-    }
+    const hasSelectedSlot = selectedSlotId && availableSessions.some((slot) => slot.id === selectedSlotId);
 
     if (selectedSlotId && !hasSelectedSlot) {
       setSelectedSlotId("");
     }
-  }, [openSlots, selectedDate, selectedSlotId]);
+  }, [availableSessions, selectedSlotId]);
 
-  const dates = useMemo(() => {
-    const uniqueDates = new Map<string, TrainingSlot>();
-    openSlots.forEach((slot) => {
-      if (!uniqueDates.has(slot.dateIso)) {
-        uniqueDates.set(slot.dateIso, slot);
-      }
-    });
-    return Array.from(uniqueDates.values());
-  }, [openSlots]);
-
-  const selectedSlot = openSlots.find((slot) => slot.id === selectedSlotId);
+  const selectedSlot = availableSessions.find((slot) => slot.id === selectedSlotId);
   const selectedGroup = selectedGroupId ? getTrainingGroup(selectedGroupId) : null;
   const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.groupId) : selectedGroup;
   const displaySlot = selectedSlot;
-  const dateSlots = availability.shownSlots;
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
   const publicStepLabel = publicStepLabels[publicStepNumber - 1];
   const progressWidth = `${(publicStepNumber / publicStepLabels.length) * 100}%`;
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
-      return;
-    }
-
-    const viewportWidth = window.innerWidth;
-    const isMobile = window.matchMedia("(max-width: 767px)").matches;
-
-    console.info("[EST Booking Debug] Availability filters", {
-      isMobile,
-      viewportWidth,
-      selectedTrainingGroup: selectedGroupId || "none",
-      selectedDate: selectedDate || "none",
-      ...availability.debug
-    });
-  }, [availability.debug, selectedDate, selectedGroupId]);
 
   function clearFieldError(field: BookingFieldErrorKey) {
     setFieldErrors((current) => {
@@ -399,16 +368,9 @@ export function BookingForm() {
   }
 
   function selectGroup(groupId: TrainingGroupId | "") {
-    const nextGroupSlot = getPublicAvailability({
-      slots,
-      blockedDays,
-      selectedGroupId: groupId
-    }).openSlots[0];
-
     setIsSpecialRequest(false);
     setSelectedGroupId(groupId);
     setSelectedSlotId("");
-    setSelectedDate(nextGroupSlot?.dateIso ?? "");
     clearFieldError("session");
     setError("");
   }
@@ -707,7 +669,7 @@ export function BookingForm() {
                   onClick={() => setStep("session")}
                   className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
                 >
-                  Choose Date & Time
+                  View Available Sessions
                 </button>
               </>
             )}
@@ -725,7 +687,32 @@ export function BookingForm() {
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
             </div>
 
-            {dates.length > 0 ? (
+            {showAvailabilityDebug ? (
+              <div className="rounded-lg border border-dashed border-electric/50 bg-blue-50 p-4 text-xs text-slate-700">
+                <p className="font-black uppercase text-navy">Availability Debug</p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <p><span className="font-black text-navy">Total sessions loaded:</span> {availability.debug.totalSessionsLoaded}</p>
+                  <p><span className="font-black text-navy">Active sessions:</span> {availability.debug.activeSessions}</p>
+                  <p><span className="font-black text-navy">Future sessions:</span> {availability.debug.futureSessions}</p>
+                  <p><span className="font-black text-navy">Sessions with remaining spots:</span> {availability.debug.sessionsWithRemainingSpots}</p>
+                  <p><span className="font-black text-navy">Selected program:</span> {availability.debug.selectedProgram}</p>
+                  <p><span className="font-black text-navy">Final sessions shown:</span> {availability.debug.finalSessionsShown}</p>
+                </div>
+                <div className="mt-3 grid gap-1">
+                  {availableSessions.length > 0 ? (
+                    availableSessions.map((slot) => (
+                      <p key={slot.id}>
+                        {slot.dateIso} {slot.time} / {getTrainingGroup(slot.groupId).name} / {getRemainingSpots(slot)} spots
+                      </p>
+                    ))
+                  ) : (
+                    <p>No final sessions.</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {availableSessions.length > 0 ? (
               <div
                 data-booking-field="session"
                 tabIndex={-1}
@@ -733,30 +720,8 @@ export function BookingForm() {
                   fieldErrors.session ? "border border-red-300 bg-red-50 p-3" : ""
                 }`}
               >
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {dates.map((slot) => (
-                    <button
-                      key={slot.dateIso}
-                      type="button"
-                      onClick={() => {
-                        setSelectedDate(slot.dateIso);
-                        setSelectedSlotId("");
-                        clearFieldError("session");
-                      }}
-                      className={`rounded-lg border p-4 text-left transition ${
-                        selectedDate === slot.dateIso
-                          ? "border-electric bg-electric text-white shadow-lg shadow-electric/20"
-                          : "border-slate-200 bg-white text-navy hover:border-electric"
-                      }`}
-                    >
-                      <span className="block text-xs font-black uppercase opacity-80">{slot.dayLabel}</span>
-                      <span className="mt-1 block text-lg font-black">{slot.dateLabel}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {dateSlots.map((slot) => {
+                <div className="grid gap-3">
+                  {availableSessions.map((slot) => {
                     const slotGroup = getTrainingGroup(slot.groupId);
                     const isSelected = selectedSlotId === slot.id;
 
@@ -778,22 +743,27 @@ export function BookingForm() {
                             : "border-slate-200 bg-white text-navy hover:border-electric"
                         }`}
                       >
-                        <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
-                          {slot.dateLabel}
-                        </span>
-                        <span className="mt-1 block text-lg font-black">{slot.time}</span>
-                        <span className="mt-2 block text-sm font-bold opacity-90">
-                          {slotGroup.name} · {slotGroup.ages}
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
-                        <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(getRemainingSpots(slot))}</span>
-                        <span
-                          className={`mt-4 inline-flex rounded-md px-3 py-2 text-xs font-black uppercase ${
-                            isSelected ? "bg-electric text-white" : "bg-mist text-navy"
-                          }`}
-                        >
-                          {isSelected ? "Selected" : "Select Session"}
-                        </span>
+                        <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                          <div>
+                            <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
+                              {formatSessionDate(slot.dateIso)}
+                            </span>
+                            <span className="mt-1 block text-2xl font-black">{slot.time}</span>
+                            <span className="mt-2 block text-sm font-bold opacity-90">
+                              {slotGroup.name}: {slotGroup.ages}
+                            </span>
+                            <span className="mt-1 block text-sm font-semibold opacity-80">{business.location}</span>
+                            <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
+                            <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(getRemainingSpots(slot))}</span>
+                          </div>
+                          <span
+                            className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
+                              isSelected ? "bg-electric text-white" : "bg-mist text-navy"
+                            }`}
+                          >
+                            {isSelected ? "Selected" : "Select Session"}
+                          </span>
+                        </div>
                       </button>
                     );
                   })}
@@ -810,7 +780,7 @@ export function BookingForm() {
                 ) : (
                   <>
                     <p className="font-black text-navy">
-                      No open sessions are available for this selection. Please check another training group or date.
+                      No open sessions are available right now. Please check back soon or submit a Special Training Request.
                     </p>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
                       You can also call <a className="font-black underline" href={business.phoneHref}>{business.phone}</a> for schedule help.
