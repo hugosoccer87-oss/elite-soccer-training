@@ -7,6 +7,7 @@ The site includes Google Calendar API routes for Elite Soccer Training bookings 
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_REFRESH_TOKEN`
+- `GOOGLE_CALENDAR_ID` set to `info@elitesoccertrainingcv.com`
 
 Optional:
 
@@ -26,4 +27,4 @@ Optional:
 7. Add it to Vercel as `GOOGLE_REFRESH_TOKEN`.
 8. Redeploy.
 
-After that, admin-created availability can sync to Google Calendar, full sessions are hidden from booking, and confirmed bookings create 60-minute events on your primary Google Calendar.
+After that, confirmed paid bookings create 60-minute events on the calendar set by `GOOGLE_CALENDAR_ID`. If `GOOGLE_CALENDAR_ID` is missing, the site falls back to `primary`.

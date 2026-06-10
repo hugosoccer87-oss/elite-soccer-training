@@ -19,6 +19,22 @@ type AdminDiagnostics = {
     urlConfigured: boolean;
     serviceRoleKeyConfigured: boolean;
   };
+  googleCalendar?: {
+    googleCalendarConfigured: boolean;
+    googleCalendarId: string;
+    googleServiceAccountEmail: string;
+    hasGoogleClientId: boolean;
+    hasGoogleClientSecret: boolean;
+    hasGoogleRefreshToken: boolean;
+    lastCalendarEventCreationResult: {
+      checkedAt: string;
+      bookingId?: string;
+      status: string;
+      calendarId: string;
+      eventId?: string;
+      message?: string;
+    } | null;
+  };
   lastEmailAttempt: {
     checkedAt: string;
     bookingId?: string;
@@ -400,6 +416,30 @@ export function AdminAvailability() {
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Stripe key mode</p>
               <p className="mt-1 font-black text-navy">{diagnostics.stripeKeyMode}</p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Google Calendar configured</p>
+              <p className="mt-1 font-black text-navy">{diagnostics.googleCalendar?.googleCalendarConfigured ? "yes" : "no"}</p>
+              <p className="mt-1 break-words text-xs font-bold text-slate-500">
+                Calendar: {diagnostics.googleCalendar?.googleCalendarId || "primary"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Google client email</p>
+              <p className="mt-1 break-words font-black text-navy">
+                {diagnostics.googleCalendar?.googleServiceAccountEmail || "not configured"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Last calendar event</p>
+              <p className="mt-1 font-black text-navy">
+                {diagnostics.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"}
+              </p>
+              {diagnostics.googleCalendar?.lastCalendarEventCreationResult?.message ? (
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  {diagnostics.googleCalendar.lastCalendarEventCreationResult.message}
+                </p>
+              ) : null}
             </div>
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Webhook secret</p>

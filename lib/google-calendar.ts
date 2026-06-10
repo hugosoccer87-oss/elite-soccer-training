@@ -15,7 +15,8 @@ const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleTokenEndpoint = "https://oauth2.googleapis.com/token";
 const googleCalendarEndpoint = "https://www.googleapis.com/calendar/v3";
 const calendarTimeZone = process.env.GOOGLE_CALENDAR_TIME_ZONE ?? "America/Los_Angeles";
-const calendarId = "primary";
+const fallbackCalendarId = "primary";
+const calendarId = getCalendarId();
 
 type GoogleCalendarEvent = {
   id?: string;
@@ -32,6 +33,15 @@ type GoogleCalendarEvent = {
 
 type GoogleCalendarListResponse = {
   items?: GoogleCalendarEvent[];
+};
+
+type LastCalendarEventCreationResult = {
+  checkedAt: string;
+  bookingId?: string;
+  status: CalendarSyncStatus;
+  calendarId: string;
+  eventId?: string;
+  message?: string;
 };
 
 export type CalendarBookingResult = {
@@ -56,6 +66,64 @@ export type CalendarBookingsResult = {
   message?: string;
 };
 
+const calendarDiagnosticsStore =
+  (globalThis as typeof globalThis & {
+    __estCalendarDiagnostics?: {
+      lastCalendarEventCreationResult: LastCalendarEventCreationResult | null;
+    };
+  }).__estCalendarDiagnostics ?? {
+    lastCalendarEventCreationResult: null
+  };
+
+(globalThis as typeof globalThis & {
+  __estCalendarDiagnostics?: {
+    lastCalendarEventCreationResult: LastCalendarEventCreationResult | null;
+  };
+}).__estCalendarDiagnostics = calendarDiagnosticsStore;
+
+function getCalendarId() {
+  return process.env.GOOGLE_CALENDAR_ID?.trim() || fallbackCalendarId;
+}
+
+function getGoogleServiceAccountEmail() {
+  return (
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+    process.env.GOOGLE_CLIENT_EMAIL ||
+    process.env.GOOGLE_SERVICE_ACCOUNT_CLIENT_EMAIL ||
+    ""
+  ).trim();
+}
+
+function setLastCalendarEventCreationResult(result: Omit<LastCalendarEventCreationResult, "checkedAt">) {
+  calendarDiagnosticsStore.lastCalendarEventCreationResult = {
+    checkedAt: new Date().toISOString(),
+    ...result
+  };
+}
+
+export function recordCalendarEventCreationFailure(bookingId: string, message: string) {
+  setLastCalendarEventCreationResult({
+    bookingId,
+    status: "Failed",
+    calendarId,
+    message
+  });
+}
+
+export function getGoogleCalendarDiagnostics() {
+  const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+
+  return {
+    googleCalendarConfigured: isGoogleCalendarConfigured(),
+    googleCalendarId: getCalendarId(),
+    googleServiceAccountEmail: getGoogleServiceAccountEmail(),
+    hasGoogleClientId: Boolean(clientId),
+    hasGoogleClientSecret: Boolean(clientSecret),
+    hasGoogleRefreshToken: Boolean(refreshToken),
+    lastCalendarEventCreationResult: calendarDiagnosticsStore.lastCalendarEventCreationResult
+  };
+}
+
 function getGoogleClientConfig() {
   return {
     clientId: process.env.GOOGLE_CLIENT_ID,
@@ -79,7 +147,8 @@ function getCalendarEnvDiagnostics() {
     hasGoogleClientId: Boolean(clientId),
     hasGoogleClientSecret: Boolean(clientSecret),
     hasGoogleRefreshToken: Boolean(refreshToken),
-    calendarId,
+    calendarId: getCalendarId(),
+    googleServiceAccountEmail: getGoogleServiceAccountEmail(),
     calendarTimeZone
   };
 }
@@ -789,8 +858,16 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     programName: booking.programName,
     paymentStatus: booking.paymentStatus
   });
+  console.info("[EST Calendar] Calendar ID:", calendarId);
+  console.info("[EST Calendar] Service account email:", getGoogleServiceAccountEmail() || "not configured");
 
   if (!isGoogleCalendarConfigured()) {
+    setLastCalendarEventCreationResult({
+      bookingId: booking.id,
+      status: "Google Calendar not configured",
+      calendarId,
+      message: "Google Calendar credentials are missing."
+    });
     console.error("[EST Calendar] Calendar event creation failed", {
       bookingId: booking.id,
       reason: "Google Calendar credentials are missing",
@@ -811,6 +888,12 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   const token = await getGoogleAccessToken();
 
   if (!token.accessToken) {
+    setLastCalendarEventCreationResult({
+      bookingId: booking.id,
+      status: "Failed",
+      calendarId,
+      message: token.error ?? "Could not connect to Google Calendar."
+    });
     console.error("[EST Calendar] Calendar event creation failed", {
       bookingId: booking.id,
       reason: token.error ?? "Could not connect to Google Calendar."
@@ -821,6 +904,13 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   const existingEvent = await findExistingBookingEvent(booking.id, token.accessToken);
 
   if (existingEvent?.id) {
+    setLastCalendarEventCreationResult({
+      bookingId: booking.id,
+      status: "Created",
+      calendarId,
+      eventId: existingEvent.id,
+      message: "Calendar event already exists."
+    });
     logCalendarInfo("Google Calendar booking event already exists", {
       bookingId: booking.id,
       eventId: existingEvent.id,
@@ -844,6 +934,12 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   const dateIso = resolveBookingDateIso(booking);
 
   if (!dateIso) {
+    setLastCalendarEventCreationResult({
+      bookingId: booking.id,
+      status: "Failed",
+      calendarId,
+      message: "Google Calendar event could not be created because the booking is missing a session date."
+    });
     logCalendarError("Booking event creation failed because sessionDateIso is missing", {
       bookingId: booking.id,
       sessionId: booking.sessionId,
@@ -898,6 +994,12 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
 
   if (!response.ok) {
     const message = await googleErrorMessage(response, "Could not create the Google Calendar booking event");
+    setLastCalendarEventCreationResult({
+      bookingId: booking.id,
+      status: "Failed",
+      calendarId,
+      message
+    });
     console.error("[EST Calendar] Calendar event creation failed", {
       bookingId: booking.id,
       reason: message
@@ -906,6 +1008,13 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   }
 
   const event = (await response.json()) as GoogleCalendarEvent;
+  setLastCalendarEventCreationResult({
+    bookingId: booking.id,
+    status: "Created",
+    calendarId,
+    eventId: event.id,
+    message: "Calendar event created successfully."
+  });
   logCalendarInfo("Google Calendar booking event created", {
     bookingId: booking.id,
     eventId: event.id,

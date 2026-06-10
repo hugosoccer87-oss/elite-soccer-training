@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { adminSessionCookie, getAdminSessionValue } from "@/lib/admin-auth";
+import { getGoogleCalendarDiagnostics } from "@/lib/google-calendar";
 import { getLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import { getStripeKeyMode, hasStripeWebhookSecret } from "@/lib/stripe";
 import { getSupabaseDiagnostics } from "@/lib/supabase-db";
@@ -28,6 +29,7 @@ export async function GET() {
     webhookSecretExists: hasStripeWebhookSecret(),
     lastPaymentVerificationResult: getLastPaymentVerificationResult(),
     supabase: getSupabaseDiagnostics(),
+    googleCalendar: getGoogleCalendarDiagnostics(),
     ...getEmailDiagnostics()
   });
 }

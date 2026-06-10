@@ -1,5 +1,9 @@
 import { type BookingRecord } from "@/lib/booking-data";
-import { createBookingCalendarEvent } from "@/lib/google-calendar";
+import {
+  createBookingCalendarEvent,
+  recordCalendarEventCreationFailure,
+  type CalendarBookingResult
+} from "@/lib/google-calendar";
 import {
   logEmailStatus,
   markBookingPaidAndSaveWaiver,
@@ -27,7 +31,22 @@ export async function confirmPaidBooking(
 
   await markBookingPaidAndSaveWaiver(booking, payment);
 
-  const calendarResult = await createBookingCalendarEvent(booking);
+  let calendarResult: CalendarBookingResult;
+
+  try {
+    calendarResult = await createBookingCalendarEvent(booking);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Google Calendar event creation failed.";
+    console.error("[EST Calendar] Calendar event creation failed", {
+      bookingId: booking.id,
+      reason: message
+    });
+    recordCalendarEventCreationFailure(booking.id, message);
+    calendarResult = {
+      status: "Failed",
+      message
+    };
+  }
 
   if (calendarResult.status !== "Created") {
     console.error("[EST Booking] Paid booking calendar confirmation failed", {
