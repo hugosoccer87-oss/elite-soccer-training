@@ -5,23 +5,14 @@ import { CalendarIcon, ShieldIcon } from "./Icons";
 import { SignaturePad } from "./SignaturePad";
 import { SpecialRequestForm } from "./SpecialRequestForm";
 import {
-  availabilityStorageKey,
-  blockedDaysStorageKey,
-  defaultTrainingSlots,
-  formatSessionDate,
-  getAvailableSessions,
-  getRemainingSpots,
   getTrainingGroup,
   isAgeInGroup,
-  isPublicSlotAvailable,
-  normalizeTrainingSlot,
   slotCapacity,
   trainingGroups,
   type BookingRecord,
-  type CalendarSyncStatus,
-  type TrainingGroupId,
-  type TrainingSlot
+  type TrainingGroupId
 } from "@/lib/booking-data";
+import type { PublicAvailabilityResponse, PublicAvailableSession } from "@/lib/public-availability";
 import {
   bookingArrivalInstructions,
   business,
@@ -80,46 +71,6 @@ type StripeCheckoutResult = {
   error?: string;
 };
 
-function readSlots() {
-  if (typeof window === "undefined") {
-    return defaultTrainingSlots;
-  }
-
-  const stored = window.localStorage.getItem(availabilityStorageKey);
-
-  if (!stored) {
-    window.localStorage.setItem(availabilityStorageKey, JSON.stringify(defaultTrainingSlots));
-    return defaultTrainingSlots;
-  }
-
-  try {
-    const normalizedSlots = (JSON.parse(stored) as TrainingSlot[]).map(normalizeTrainingSlot);
-    window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
-    return normalizedSlots;
-  } catch {
-    window.localStorage.setItem(availabilityStorageKey, JSON.stringify(defaultTrainingSlots));
-    return defaultTrainingSlots;
-  }
-}
-
-function readBlockedDays() {
-  if (typeof window === "undefined") {
-    return [] as string[];
-  }
-
-  try {
-    return JSON.parse(window.localStorage.getItem(blockedDaysStorageKey) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
-
-function saveSlots(nextSlots: TrainingSlot[]) {
-  const normalizedSlots = nextSlots.map(normalizeTrainingSlot);
-  window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
-  return normalizedSlots;
-}
-
 async function createStripeCheckout(booking: BookingRecord) {
   try {
     const response = await fetch("/api/stripe/checkout", {
@@ -145,9 +96,9 @@ async function createStripeCheckout(booking: BookingRecord) {
   }
 }
 
-async function readSyncedSlots() {
+async function readAvailableSessions() {
   try {
-    const response = await fetch(`/api/google-calendar/availability?fresh=${Date.now()}`, {
+    const response = await fetch(`/api/availability?fresh=${Date.now()}`, {
       cache: "no-store",
       headers: {
         "Cache-Control": "no-cache"
@@ -158,16 +109,12 @@ async function readSyncedSlots() {
       return null;
     }
 
-    const result = (await response.json()) as { status?: CalendarSyncStatus; slots?: TrainingSlot[] };
+    const result = (await response.json()) as PublicAvailabilityResponse;
 
-    if (result.status === "Synced") {
-      return (result.slots ?? []).map(normalizeTrainingSlot);
-    }
+    return result;
   } catch {
     return null;
   }
-
-  return null;
 }
 
 function spotsLabel(count: number) {
@@ -222,8 +169,9 @@ const waiverSections = [
 
 export function BookingForm() {
   const [step, setStep] = useState<BookingStep>("program");
-  const [slots, setSlots] = useState<TrainingSlot[]>(defaultTrainingSlots);
-  const [blockedDays, setBlockedDays] = useState<string[]>([]);
+  const [apiSessions, setApiSessions] = useState<PublicAvailableSession[]>([]);
+  const [availabilityStatus, setAvailabilityStatus] = useState("Loading");
+  const [availabilityError, setAvailabilityError] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<TrainingGroupId | "">("");
   const [selectedSlotId, setSelectedSlotId] = useState("");
   const [isSpecialRequest, setIsSpecialRequest] = useState(false);
@@ -235,27 +183,24 @@ export function BookingForm() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const fallbackSlots = readSlots();
-    const fallbackBlockedDays = readBlockedDays();
     let active = true;
 
-    readSyncedSlots().then((syncedSlots) => {
+    readAvailableSessions().then((result) => {
       if (!active) {
         return;
       }
 
-      if (syncedSlots) {
-        const normalizedSlots = saveSlots(syncedSlots);
-        const nextBlockedDays = readBlockedDays();
-
-        setSlots(normalizedSlots);
-        setBlockedDays(nextBlockedDays);
-        setSelectedSlotId("");
+      if (!result) {
+        setApiSessions([]);
+        setAvailabilityStatus("Failed");
+        setAvailabilityError("Availability could not be loaded.");
         return;
       }
 
-      setSlots(fallbackSlots);
-      setBlockedDays(fallbackBlockedDays);
+      setApiSessions(result.sessions);
+      setAvailabilityStatus(result.status);
+      setAvailabilityError(result.message ?? "");
+      setSelectedSlotId("");
     }).finally(() => {
       if (active) {
         setIsLoadingAvailability(false);
@@ -275,14 +220,13 @@ export function BookingForm() {
     setShowAvailabilityDebug(new URLSearchParams(window.location.search).get("debugAvailability") === "1");
   }, []);
 
-  const availability = useMemo(
+  const availableSessions = useMemo(
     () =>
-      getAvailableSessions(slots, selectedGroupId, {
-        blockedDays
-      }),
-    [slots, blockedDays, selectedGroupId]
+      selectedGroupId
+        ? apiSessions.filter((session) => session.trainingGroupId === selectedGroupId)
+        : apiSessions,
+    [apiSessions, selectedGroupId]
   );
-  const availableSessions = availability.sessions;
 
   useEffect(() => {
     if (availableSessions.length === 0) {
@@ -302,12 +246,12 @@ export function BookingForm() {
 
   const selectedSlot = availableSessions.find((slot) => slot.id === selectedSlotId);
   const selectedGroup = selectedGroupId ? getTrainingGroup(selectedGroupId) : null;
-  const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.groupId) : selectedGroup;
+  const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.trainingGroupId) : selectedGroup;
   const displaySlot = selectedSlot;
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
   const publicStepLabel = publicStepLabels[publicStepNumber - 1];
   const progressWidth = `${(publicStepNumber / publicStepLabels.length) * 100}%`;
-  const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
+  const selectedRemainingSpots = selectedSlot ? selectedSlot.remainingSpots : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
 
@@ -445,7 +389,7 @@ export function BookingForm() {
 
     if (!fields.players.trim()) {
       nextErrors.players = "Select the number of players attending.";
-    } else if (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > getRemainingSpots(selectedSlot)) {
+    } else if (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > selectedSlot.remainingSpots) {
       nextErrors.players = `This session has ${spotsLabel(selectedRemainingSpots)}. Adjust the player count before continuing.`;
     }
 
@@ -502,20 +446,20 @@ export function BookingForm() {
     }
 
     const requestedPlayers = Number(fields.players);
-    const latestSlots = readSlots();
-    const latestBlockedDays = readBlockedDays();
-    const latestSlot = latestSlots.find((slot) => slot.id === selectedSlot.id);
-    const latestRemainingSpots = latestSlot ? getRemainingSpots(latestSlot) : 0;
+    const latestAvailability = await readAvailableSessions();
+    const latestSlot = latestAvailability?.sessions.find((slot) => slot.id === selectedSlot.id);
+    const latestRemainingSpots = latestSlot?.remainingSpots ?? 0;
 
     if (
       !latestSlot ||
-      latestSlot.groupId !== selectedSlot.groupId ||
-      !isPublicSlotAvailable(latestSlot, latestBlockedDays) ||
+      latestSlot.trainingGroupId !== selectedSlot.trainingGroupId ||
       !Number.isInteger(requestedPlayers) ||
       requestedPlayers < 1 ||
       requestedPlayers > latestRemainingSpots
     ) {
-      setSlots(readSlots());
+      setApiSessions(latestAvailability?.sessions ?? []);
+      setAvailabilityStatus(latestAvailability?.status ?? "Failed");
+      setAvailabilityError(latestAvailability?.message ?? "");
       setStep("session");
       setError("That session no longer has enough spots. Please choose another available time.");
       return;
@@ -540,12 +484,12 @@ export function BookingForm() {
       waiverAcceptedAt: bookingTimestamp,
       waiverVersion,
       mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined",
-      programId: latestSlot.groupId,
-      programName: getTrainingGroup(latestSlot.groupId).name,
+      programId: latestSlot.trainingGroupId,
+      programName: latestSlot.trainingGroup,
       sessionId: selectedSlot.id,
-      sessionDateIso: latestSlot.dateIso,
+      sessionDateIso: latestSlot.date,
       sessionDate: latestSlot.dateLabel,
-      sessionTime: latestSlot.time,
+      sessionTime: latestSlot.startTime,
       sessionDurationMinutes: 60,
       sessionCalendarEventId: latestSlot.calendarEventId,
       paymentStatus: "pending_payment",
@@ -584,7 +528,7 @@ export function BookingForm() {
               <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
                 <p className="font-black text-white">Selected Session</p>
                 <p className="mt-1 text-slate-200">
-                  {displaySlot.dateLabel} at {displaySlot.time}
+                  {displaySlot.dateLabel} at {displaySlot.startTime}
                 </p>
                 <p className="mt-1 text-slate-300">{displaySlot.duration}</p>
                 <p className="mt-2 text-xs font-bold uppercase text-electric">{groupSizeMessage}</p>
@@ -691,22 +635,22 @@ export function BookingForm() {
               <div className="rounded-lg border border-dashed border-electric/50 bg-blue-50 p-4 text-xs text-slate-700">
                 <p className="font-black uppercase text-navy">Availability Debug</p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <p><span className="font-black text-navy">Total sessions loaded:</span> {availability.debug.totalSessionsLoaded}</p>
-                  <p><span className="font-black text-navy">Active sessions:</span> {availability.debug.activeSessions}</p>
-                  <p><span className="font-black text-navy">Future sessions:</span> {availability.debug.futureSessions}</p>
-                  <p><span className="font-black text-navy">Sessions with remaining spots:</span> {availability.debug.sessionsWithRemainingSpots}</p>
-                  <p><span className="font-black text-navy">Selected program:</span> {availability.debug.selectedProgram}</p>
-                  <p><span className="font-black text-navy">Final sessions shown:</span> {availability.debug.finalSessionsShown}</p>
+                  <p><span className="font-black text-navy">API request status:</span> {availabilityStatus}</p>
+                  <p><span className="font-black text-navy">Total sessions returned by /api/availability:</span> {apiSessions.length}</p>
+                  <p><span className="font-black text-navy">Selected training group:</span> {selectedGroup ? selectedGroup.name : "All available training groups"}</p>
+                  <p><span className="font-black text-navy">Sessions after group filter:</span> {availableSessions.length}</p>
+                  <p><span className="font-black text-navy">Final sessions rendered:</span> {availableSessions.length}</p>
                 </div>
+                {availabilityError ? <p className="mt-3 font-bold text-red-700">{availabilityError}</p> : null}
                 <div className="mt-3 grid gap-1">
-                  {availableSessions.length > 0 ? (
-                    availableSessions.map((slot) => (
+                  {apiSessions.length > 0 ? (
+                    apiSessions.map((slot) => (
                       <p key={slot.id}>
-                        {slot.dateIso} {slot.time} / {getTrainingGroup(slot.groupId).name} / {getRemainingSpots(slot)} spots
+                        {slot.id} / {slot.date} / {slot.startTime} / {slot.trainingGroup} / {slot.remainingSpots} spots
                       </p>
                     ))
                   ) : (
-                    <p>No final sessions.</p>
+                    <p>No sessions returned by /api/availability.</p>
                   )}
                 </div>
               </div>
@@ -722,7 +666,6 @@ export function BookingForm() {
               >
                 <div className="grid gap-3">
                   {availableSessions.map((slot) => {
-                    const slotGroup = getTrainingGroup(slot.groupId);
                     const isSelected = selectedSlotId === slot.id;
 
                     return (
@@ -734,7 +677,7 @@ export function BookingForm() {
                           clearFieldError("session");
                           setFields((current) => ({
                             ...current,
-                            players: String(Math.min(Number(current.players) || 1, getRemainingSpots(slot)))
+                            players: String(Math.min(Number(current.players) || 1, slot.remainingSpots))
                           }));
                         }}
                         className={`rounded-lg border p-4 text-left transition ${
@@ -746,15 +689,15 @@ export function BookingForm() {
                         <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
                           <div>
                             <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
-                              {formatSessionDate(slot.dateIso)}
+                              {slot.dayLabel}, {slot.dateLabel}
                             </span>
-                            <span className="mt-1 block text-2xl font-black">{slot.time}</span>
+                            <span className="mt-1 block text-2xl font-black">{slot.startTime}</span>
                             <span className="mt-2 block text-sm font-bold opacity-90">
-                              {slotGroup.name}: {slotGroup.ages}
+                              {slot.trainingGroup}: {slot.trainingGroupAges}
                             </span>
-                            <span className="mt-1 block text-sm font-semibold opacity-80">{business.location}</span>
+                            <span className="mt-1 block text-sm font-semibold opacity-80">{slot.location}</span>
                             <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
-                            <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(getRemainingSpots(slot))}</span>
+                            <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(slot.remainingSpots)}</span>
                           </div>
                           <span
                             className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
@@ -918,7 +861,7 @@ export function BookingForm() {
             </label>
             {selectedSlot ? (
               <p className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600 sm:col-span-2">
-                {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {selectedSlot.time}. {groupSizeMessage}
+                {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {selectedSlot.startTime}. {groupSizeMessage}
               </p>
             ) : null}
             <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
@@ -1129,7 +1072,7 @@ export function BookingForm() {
               </p>
               {selectedSlot ? (
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
-                  <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.time}</p>
+                  <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.startTime}</p>
                   <p>{fields.players} player(s) attending</p>
                   <p>{bookingGroup?.name ?? "Selected training group"}</p>
                   <p className="mt-2 text-xs font-bold uppercase text-slate-500">{groupSizeMessage}</p>

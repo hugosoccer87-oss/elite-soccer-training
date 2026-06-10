@@ -200,6 +200,24 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../app/api/availability/debug/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/availability/debug">> = Specific
+  const handler = {} as typeof import("../../app/api/availability/debug/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/availability/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/availability">> = Specific
+  const handler = {} as typeof import("../../app/api/availability/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../app/api/bookings/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/bookings">> = Specific
