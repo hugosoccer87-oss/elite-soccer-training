@@ -91,8 +91,11 @@ function readBookings() {
 
 async function readSyncedSlots() {
   try {
-    const response = await fetch("/api/google-calendar/availability", {
-      cache: "no-store"
+    const response = await fetch(`/api/google-calendar/availability?fresh=${Date.now()}`, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache"
+      }
     });
 
     if (!response.ok) {

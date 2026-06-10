@@ -5,10 +5,20 @@ import {
 } from "@/lib/google-calendar";
 import { type TrainingSlot } from "@/lib/booking-data";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, no-cache, max-age=0, must-revalidate",
+  Pragma: "no-cache"
+};
+
 export async function GET() {
   const result = await listCalendarAvailabilitySlots();
 
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: noStoreHeaders
+  });
 }
 
 export async function POST(request: Request) {
@@ -20,5 +30,8 @@ export async function POST(request: Request) {
 
   const result = await createCalendarAvailabilitySlot(slot);
 
-  return NextResponse.json(result, { status: result.status === "Failed" ? 500 : 200 });
+  return NextResponse.json(result, {
+    status: result.status === "Failed" ? 500 : 200,
+    headers: noStoreHeaders
+  });
 }
