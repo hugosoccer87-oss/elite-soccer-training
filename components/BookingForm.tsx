@@ -8,11 +8,11 @@ import {
   availabilityStorageKey,
   blockedDaysStorageKey,
   defaultTrainingSlots,
+  getPublicAvailability,
   getRemainingSpots,
   getTrainingGroup,
   isAgeInGroup,
   isPublicSlotAvailable,
-  isSlotInFuture,
   normalizeTrainingSlot,
   slotCapacity,
   trainingGroups,
@@ -231,24 +231,27 @@ export function BookingForm() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const currentSlots = readSlots();
-    const currentBlockedDays = readBlockedDays();
+    const fallbackSlots = readSlots();
+    const fallbackBlockedDays = readBlockedDays();
     let active = true;
 
-    setSlots(currentSlots);
-    setBlockedDays(currentBlockedDays);
-
     readSyncedSlots().then((syncedSlots) => {
-      if (!active || !syncedSlots) {
+      if (!active) {
         return;
       }
 
-      const normalizedSlots = saveSlots(syncedSlots);
-      const nextBlockedDays = readBlockedDays();
+      if (syncedSlots) {
+        const normalizedSlots = saveSlots(syncedSlots);
+        const nextBlockedDays = readBlockedDays();
 
-      setSlots(normalizedSlots);
-      setBlockedDays(nextBlockedDays);
-      setSelectedSlotId("");
+        setSlots(normalizedSlots);
+        setBlockedDays(nextBlockedDays);
+        setSelectedSlotId("");
+        return;
+      }
+
+      setSlots(fallbackSlots);
+      setBlockedDays(fallbackBlockedDays);
     }).finally(() => {
       if (active) {
         setIsLoadingAvailability(false);
@@ -260,13 +263,17 @@ export function BookingForm() {
     };
   }, []);
 
-  const openSlots = useMemo(
+  const availability = useMemo(
     () =>
-      slots
-        .filter((slot) => (!selectedGroupId || slot.groupId === selectedGroupId) && isPublicSlotAvailable(slot, blockedDays))
-        .sort((a, b) => `${a.dateIso} ${a.time}`.localeCompare(`${b.dateIso} ${b.time}`)),
-    [slots, blockedDays, selectedGroupId]
+      getPublicAvailability({
+        slots,
+        blockedDays,
+        selectedGroupId,
+        selectedDate
+      }),
+    [slots, blockedDays, selectedGroupId, selectedDate]
   );
+  const openSlots = availability.openSlots;
 
   useEffect(() => {
     if (openSlots.length === 0) {
@@ -307,7 +314,7 @@ export function BookingForm() {
   const selectedGroup = selectedGroupId ? getTrainingGroup(selectedGroupId) : null;
   const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.groupId) : selectedGroup;
   const displaySlot = selectedSlot;
-  const dateSlots = openSlots.filter((slot) => slot.dateIso === selectedDate);
+  const dateSlots = availability.shownSlots;
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
   const publicStepLabel = publicStepLabels[publicStepNumber - 1];
   const progressWidth = `${(publicStepNumber / publicStepLabels.length) * 100}%`;
@@ -320,22 +327,17 @@ export function BookingForm() {
       return;
     }
 
-    const futureSlots = slots.filter((slot) => isSlotInFuture(slot));
-    const dateFilteredSlots = futureSlots.filter((slot) => !selectedDate || slot.dateIso === selectedDate);
-    const programSlots = dateFilteredSlots.filter((slot) => !selectedGroupId || slot.groupId === selectedGroupId);
-    const capacitySlots = programSlots.filter((slot) => isPublicSlotAvailable(slot, blockedDays));
+    const viewportWidth = window.innerWidth;
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
 
     console.info("[EST Booking Debug] Availability filters", {
-      mobile: isMobile,
+      isMobile,
+      viewportWidth,
       selectedTrainingGroup: selectedGroupId || "none",
       selectedDate: selectedDate || "none",
-      totalSessionsLoaded: slots.length,
-      sessionsAfterDateFilter: dateFilteredSlots.length,
-      sessionsAfterProgramFilter: programSlots.length,
-      sessionsAfterCapacityFilter: capacitySlots.length
+      ...availability.debug
     });
-  }, [blockedDays, selectedDate, selectedGroupId, slots]);
+  }, [availability.debug, selectedDate, selectedGroupId]);
 
   function clearFieldError(field: BookingFieldErrorKey) {
     setFieldErrors((current) => {
@@ -394,9 +396,11 @@ export function BookingForm() {
   }
 
   function selectGroup(groupId: TrainingGroupId | "") {
-    const nextGroupSlot = slots.find(
-      (slot) => (!groupId || slot.groupId === groupId) && isPublicSlotAvailable(slot, blockedDays)
-    );
+    const nextGroupSlot = getPublicAvailability({
+      slots,
+      blockedDays,
+      selectedGroupId: groupId
+    }).openSlots[0];
 
     setIsSpecialRequest(false);
     setSelectedGroupId(groupId);

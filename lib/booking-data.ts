@@ -140,6 +140,10 @@ export function isSlotAvailable(slot: TrainingSlot, blockedDays: string[]) {
   return slot.status === "open" && !blockedDays.includes(slot.dateIso) && getRemainingSpots(slot) > 0;
 }
 
+export function isSlotActive(slot: TrainingSlot, blockedDays: string[]) {
+  return slot.status === "open" && !blockedDays.includes(slot.dateIso);
+}
+
 function getPacificNowParts(now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Los_Angeles",
@@ -180,7 +184,15 @@ function parseSlotTimeMinutes(value: string) {
   return normalizedHour * 60 + minute;
 }
 
+function isIsoDateString(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 export function isSlotInFuture(slot: TrainingSlot, now = new Date()) {
+  if (!isIsoDateString(slot.dateIso)) {
+    return false;
+  }
+
   const current = getPacificNowParts(now);
 
   if (slot.dateIso > current.dateIso) {
@@ -197,7 +209,61 @@ export function isSlotInFuture(slot: TrainingSlot, now = new Date()) {
 }
 
 export function isPublicSlotAvailable(slot: TrainingSlot, blockedDays: string[], now = new Date()) {
-  return isSlotAvailable(slot, blockedDays) && isSlotInFuture(slot, now);
+  return isSlotActive(slot, blockedDays) && isSlotInFuture(slot, now) && getRemainingSpots(slot) > 0;
+}
+
+function sortSlotValue(slot: TrainingSlot) {
+  return {
+    dateIso: slot.dateIso,
+    minutes: parseSlotTimeMinutes(slot.time) ?? 0
+  };
+}
+
+export function sortTrainingSlots(slots: TrainingSlot[]) {
+  return [...slots].sort((left, right) => {
+    const leftValue = sortSlotValue(left);
+    const rightValue = sortSlotValue(right);
+
+    if (leftValue.dateIso !== rightValue.dateIso) {
+      return leftValue.dateIso.localeCompare(rightValue.dateIso);
+    }
+
+    return leftValue.minutes - rightValue.minutes;
+  });
+}
+
+export function getPublicAvailability({
+  slots,
+  blockedDays,
+  selectedGroupId,
+  selectedDate,
+  now = new Date()
+}: {
+  slots: TrainingSlot[];
+  blockedDays: string[];
+  selectedGroupId?: TrainingGroupId | "";
+  selectedDate?: string;
+  now?: Date;
+}) {
+  const normalizedSlots = slots.map(normalizeTrainingSlot);
+  const futureSlots = normalizedSlots.filter((slot) => isSlotInFuture(slot, now));
+  const activeSlots = futureSlots.filter((slot) => isSlotActive(slot, blockedDays));
+  const groupSlots = activeSlots.filter((slot) => !selectedGroupId || slot.groupId === selectedGroupId);
+  const capacitySlots = groupSlots.filter((slot) => getRemainingSpots(slot) > 0);
+  const shownSlots = selectedDate ? capacitySlots.filter((slot) => slot.dateIso === selectedDate) : capacitySlots;
+
+  return {
+    openSlots: sortTrainingSlots(capacitySlots),
+    shownSlots: sortTrainingSlots(shownSlots),
+    debug: {
+      totalSessionsLoaded: normalizedSlots.length,
+      sessionsAfterFutureDateFilter: futureSlots.length,
+      sessionsAfterActiveEnabledFilter: activeSlots.length,
+      sessionsAfterGroupFilter: groupSlots.length,
+      sessionsAfterCapacityFilter: capacitySlots.length,
+      finalSessionsShown: shownSlots.length
+    }
+  };
 }
 
 export function getTrainingGroup(groupId: TrainingGroupId) {
