@@ -176,6 +176,39 @@ async function readAdminDiagnostics() {
   }
 }
 
+async function readSyncedBookings() {
+  try {
+    const response = await fetch("/api/admin/bookings", {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const result = (await response.json()) as { status?: CalendarSyncStatus; bookings?: BookingRecord[] };
+
+    if (result.status === "Synced") {
+      return result.bookings ?? [];
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function mergeBookings(localBookings: BookingRecord[], syncedBookings: BookingRecord[]) {
+  const bookingMap = new Map<string, BookingRecord>();
+
+  localBookings.forEach((booking) => bookingMap.set(booking.id, booking));
+  syncedBookings.forEach((booking) => bookingMap.set(booking.id, booking));
+
+  return Array.from(bookingMap.values()).sort((a, b) =>
+    `${b.sessionDateIso} ${b.sessionTime}`.localeCompare(`${a.sessionDateIso} ${a.sessionTime}`)
+  );
+}
+
 function formatDateParts(dateIso: string) {
   const date = new Date(`${dateIso}T00:00:00`);
   return {
@@ -189,6 +222,64 @@ function formatTime(value: string) {
   const suffix = hourValue >= 12 ? "PM" : "AM";
   const hour = hourValue % 12 || 12;
   return `${hour}:${String(minuteValue).padStart(2, "0")} ${suffix}`;
+}
+
+function formatWaiverTimestamp(value: string) {
+  if (!value) {
+    return "Not recorded";
+  }
+
+  return new Date(value).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Los_Angeles"
+  });
+}
+
+function waiverRecordText(booking: BookingRecord) {
+  return [
+    "Elite Soccer Training CV - Waiver Record",
+    "",
+    `Booking ID: ${booking.id}`,
+    `Training Group: ${booking.programName}`,
+    `Session: ${booking.sessionDate} at ${booking.sessionTime}`,
+    "",
+    "Participant Information",
+    `Parent/Guardian Name: ${booking.parentName}`,
+    `Player Name: ${booking.playerName}`,
+    `Player Age: ${booking.playerAge}`,
+    `Parent Phone: ${booking.phone}`,
+    `Parent Email: ${booking.email}`,
+    `Emergency Contact: ${booking.emergencyName} - ${booking.emergencyPhone}`,
+    `Medical Conditions/Allergies/Notes: ${booking.medicalNotes || "None"}`,
+    "",
+    "Signed Waiver",
+    `Waiver Signed: ${booking.waiverAccepted ? "Yes" : "Not recorded"}`,
+    `Typed Signature: ${booking.guardianSignature || "Not recorded"}`,
+    `Signed Timestamp: ${formatWaiverTimestamp(booking.waiverAcceptedAt)}`,
+    `Waiver Version: ${booking.waiverVersion || "Not recorded"}`,
+    `Media Consent: ${booking.mediaConsent || "Not recorded"}`,
+    `IP Address: ${booking.ipAddress || "Not collected"}`,
+    "",
+    "Booking Notes",
+    `Notes: ${booking.notes || "None"}`,
+    `Payment Status: ${booking.paymentStatus}`,
+    `Calendar Status: ${booking.calendarStatus ?? "Ready"}`
+  ].join("\n");
+}
+
+function downloadWaiverRecord(booking: BookingRecord) {
+  const blob = new Blob([waiverRecordText(booking)], { type: "text/plain;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeBookingId = booking.id.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+
+  link.href = url;
+  link.download = `waiver-record-${safeBookingId}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 export function AdminAvailability() {
@@ -207,9 +298,10 @@ export function AdminAvailability() {
   useEffect(() => {
     const loadedSlots = readSlots();
     const loadedBlockedDays = readBlockedDays();
+    const loadedBookings = readBookings();
     setSlots(loadedSlots);
     setBlockedDays(loadedBlockedDays);
-    setBookings(readBookings());
+    setBookings(loadedBookings);
     window.localStorage.setItem(availabilityStorageKey, JSON.stringify(loadedSlots));
 
     let active = true;
@@ -222,6 +314,16 @@ export function AdminAvailability() {
       const normalizedSlots = syncedSlots.map(normalizeTrainingSlot);
       setSlots(normalizedSlots);
       window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
+    });
+
+    readSyncedBookings().then((syncedBookings) => {
+      if (!active || !syncedBookings) {
+        return;
+      }
+
+      const mergedBookings = mergeBookings(loadedBookings, syncedBookings);
+      setBookings(mergedBookings);
+      window.localStorage.setItem(bookingsStorageKey, JSON.stringify(mergedBookings));
     });
 
     readAdminDiagnostics().then((result) => {
@@ -400,7 +502,15 @@ export function AdminAvailability() {
   }
 
   function refreshBookings() {
-    setBookings(readBookings());
+    const localBookings = readBookings();
+    setBookings(localBookings);
+    void readSyncedBookings().then((syncedBookings) => {
+      if (syncedBookings) {
+        const mergedBookings = mergeBookings(localBookings, syncedBookings);
+        setBookings(mergedBookings);
+        window.localStorage.setItem(bookingsStorageKey, JSON.stringify(mergedBookings));
+      }
+    });
     void readAdminDiagnostics().then(setDiagnostics);
     setNotice("Bookings refreshed.");
   }
@@ -650,7 +760,7 @@ export function AdminAvailability() {
                   <p>
                     <span className="font-black text-navy">Waiver:</span>{" "}
                     {booking.waiverAccepted ? "Accepted" : "Not recorded"}
-                    {booking.waiverAcceptedAt ? ` on ${new Date(booking.waiverAcceptedAt).toLocaleString("en-US")}` : ""}
+                    {booking.waiverAcceptedAt ? ` on ${formatWaiverTimestamp(booking.waiverAcceptedAt)}` : ""}
                   </p>
                   <p><span className="font-black text-navy">Media Consent:</span> {booking.mediaConsent || "Not recorded"}</p>
                   <p><span className="font-black text-navy">Signature:</span> {booking.guardianSignature || "Not recorded"}</p>
@@ -663,6 +773,32 @@ export function AdminAvailability() {
                       </a>
                     </p>
                   ) : null}
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-mist p-4 lg:col-span-2">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                    <div>
+                      <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
+                      <h5 className="mt-1 font-black text-navy">
+                        Signed waiver for {booking.playerName}
+                      </h5>
+                      <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                        <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiverAccepted ? "Yes" : "Not recorded"}</p>
+                        <p><span className="font-black text-navy">Typed Signature:</span> {booking.guardianSignature || "Not recorded"}</p>
+                        <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiverAcceptedAt)}</p>
+                        <p><span className="font-black text-navy">IP Address:</span> {booking.ipAddress || "Not collected"}</p>
+                        <p><span className="font-black text-navy">Media Consent:</span> {booking.mediaConsent || "Not recorded"}</p>
+                        <p><span className="font-black text-navy">Emergency:</span> {booking.emergencyName} - {booking.emergencyPhone}</p>
+                        <p className="sm:col-span-2"><span className="font-black text-navy">Medical:</span> {booking.medicalNotes || "None"}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => downloadWaiverRecord(booking)}
+                      className="rounded-md border border-navy px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
+                    >
+                      Download Waiver Record
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}

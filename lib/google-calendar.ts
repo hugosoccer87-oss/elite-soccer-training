@@ -50,6 +50,12 @@ export type CalendarAvailabilityResult = {
   message?: string;
 };
 
+export type CalendarBookingsResult = {
+  status: CalendarSyncStatus;
+  bookings: BookingRecord[];
+  message?: string;
+};
+
 function getGoogleClientConfig() {
   return {
     clientId: process.env.GOOGLE_CLIENT_ID,
@@ -297,24 +303,114 @@ function getDurationMinutes(startDateTime?: string, endDateTime?: string) {
 
 function bookingDescription(booking: BookingRecord) {
   return [
-    `Program: ${booking.programName}`,
-    `Player: ${booking.playerName}`,
-    `Parent/Guardian: ${booking.parentName}`,
-    `Phone: ${booking.phone}`,
-    `Email: ${booking.email}`,
+    `Parent/guardian name: ${booking.parentName}`,
+    `Parent email: ${booking.email}`,
+    `Parent phone: ${booking.phone}`,
+    `Player name: ${booking.playerName}`,
+    `Player age: ${booking.playerAge}`,
+    `Training group: ${booking.programName}`,
+    `Session date/time: ${booking.sessionDate} at ${booking.sessionTime}`,
     `Number of players: ${booking.players}`,
+    `Payment status: Paid`,
     `Payment amount: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
+    `Waiver status: ${booking.waiverAccepted ? "Signed" : "Not recorded"}`,
+    `Typed waiver signature: ${booking.guardianSignature || "Not recorded"}`,
+    `Waiver signed date/time: ${booking.waiverAcceptedAt || "Not recorded"}`,
+    `Waiver version: ${booking.waiverVersion || "Not recorded"}`,
+    `Media consent: ${booking.mediaConsent || "Not recorded"}`,
     `Notes: ${booking.notes || "None"}`,
     `Medical notes/injuries: ${booking.medicalNotes || "None"}`,
     `Emergency contact: ${booking.emergencyName} - ${booking.emergencyPhone}`,
-    `Payment status: ${booking.paymentStatus}`,
-    `Waiver accepted: ${booking.waiverAccepted ? "Yes" : "Not recorded"}`,
-    `Waiver accepted at: ${booking.waiverAcceptedAt || "Not recorded"}`,
-    `Waiver version: ${booking.waiverVersion || "Not recorded"}`,
-    `Media consent: ${booking.mediaConsent || "Not recorded"}`,
-    `Digital signature: ${booking.guardianSignature || "Not recorded"}`,
+    `IP address: ${booking.ipAddress || "Not collected"}`,
+    `Reminder: Please arrive 15 minutes early and bring plenty of water.`,
     `Booking ID: ${booking.id}`
   ].join("\n");
+}
+
+function descriptionRows(description = "") {
+  return description.split("\n").reduce<Record<string, string>>((current, line) => {
+    const separatorIndex = line.indexOf(":");
+
+    if (separatorIndex === -1) {
+      return current;
+    }
+
+    const label = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (label) {
+      current[label] = value;
+    }
+
+    return current;
+  }, {});
+}
+
+function splitEmergencyContact(value = "") {
+  const [name, ...phoneParts] = value.split(" - ");
+
+  return {
+    emergencyName: name?.trim() || "",
+    emergencyPhone: phoneParts.join(" - ").trim()
+  };
+}
+
+function splitSessionDateTime(value = "") {
+  const [date, ...timeParts] = value.split(" at ");
+
+  return {
+    sessionDate: date?.trim() || "",
+    sessionTime: timeParts.join(" at ").trim()
+  };
+}
+
+function eventToBookingRecord(event: GoogleCalendarEvent): BookingRecord | null {
+  const properties = event.extendedProperties?.private ?? {};
+
+  if (!event.id || properties.estType !== "booking") {
+    return null;
+  }
+
+  const rows = descriptionRows(event.description);
+  const emergency = splitEmergencyContact(rows["Emergency contact"]);
+  const session = splitSessionDateTime(rows["Session date/time"]);
+  const programId = trainingGroups.some((group) => group.id === properties.programId)
+    ? (properties.programId as TrainingGroupId)
+    : "future-elite";
+
+  return {
+    id: properties.estBookingId || rows["Booking ID"] || event.id,
+    createdAt: "",
+    parentName: rows["Parent/guardian name"] || "",
+    playerName: rows["Player name"] || event.summary?.replace("Elite Soccer Training CV - Paid Booking:", "").trim() || "",
+    playerAge: rows["Player age"] || "",
+    phone: rows["Parent phone"] || "",
+    email: rows["Parent email"] || "",
+    players: rows["Number of players"] || "1",
+    notes: rows["Notes"] === "None" ? "" : rows["Notes"] || "",
+    medicalNotes: rows["Medical notes/injuries"] === "None" ? "" : rows["Medical notes/injuries"] || "",
+    emergencyName: emergency.emergencyName,
+    emergencyPhone: emergency.emergencyPhone,
+    guardianSignature: rows["Typed waiver signature"] === "Not recorded" ? "" : rows["Typed waiver signature"] || "",
+    waiverAccepted: rows["Waiver status"] === "Signed",
+    waiverAcceptedAt: rows["Waiver signed date/time"] === "Not recorded" ? "" : rows["Waiver signed date/time"] || "",
+    waiverVersion: rows["Waiver version"] === "Not recorded" ? "" : rows["Waiver version"] || "",
+    ipAddress: rows["IP address"] === "Not collected" ? "" : rows["IP address"] || "",
+    mediaConsent: rows["Media consent"] === "Declined" ? "Declined" : "Granted",
+    programId,
+    programName: rows["Training group"] || getTrainingGroup(programId).name,
+    sessionId: properties.estSessionId || "",
+    sessionDateIso: event.start?.dateTime?.slice(0, 10) || "",
+    sessionDate: session.sessionDate,
+    sessionTime: session.sessionTime,
+    sessionDurationMinutes: getDurationMinutes(event.start?.dateTime, event.end?.dateTime),
+    sessionCalendarEventId: properties.estAvailabilityEventId || undefined,
+    paymentStatus: "Paid",
+    notificationStatus: "Sent",
+    calendarStatus: "Created",
+    calendarEventId: event.id,
+    calendarEventUrl: event.htmlLink
+  };
 }
 
 async function findExistingBookingEvent(bookingId: string, accessToken: string) {
@@ -410,6 +506,50 @@ export async function listCalendarAvailabilitySlots(): Promise<CalendarAvailabil
   const slots = (data.items ?? []).map(eventToTrainingSlot).filter(Boolean) as TrainingSlot[];
 
   return { status: "Synced", slots };
+}
+
+export async function listCalendarBookingEvents(): Promise<CalendarBookingsResult> {
+  if (!isGoogleCalendarConfigured()) {
+    logCalendarError("Booking list sync skipped because Google Calendar is not configured", getCalendarEnvDiagnostics());
+    return {
+      status: "Google Calendar not configured",
+      bookings: [],
+      message: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+    };
+  }
+
+  const token = await getGoogleAccessToken();
+
+  if (!token.accessToken) {
+    return { status: "Failed", bookings: [], message: token.error ?? "Could not connect to Google Calendar." };
+  }
+
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  const params = new URLSearchParams({
+    timeMin: oneYearAgo.toISOString(),
+    maxResults: "250",
+    singleEvents: "true",
+    orderBy: "startTime",
+    privateExtendedProperty: "estType=booking"
+  });
+  const response = await fetch(
+    `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+    {
+      headers: calendarHeaders(token.accessToken),
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    return { status: "Failed", bookings: [], message: await googleErrorMessage(response, "Could not load Google Calendar bookings") };
+  }
+
+  const data = (await response.json()) as GoogleCalendarListResponse;
+  const bookings = (data.items ?? []).map(eventToBookingRecord).filter(Boolean) as BookingRecord[];
+
+  return { status: "Synced", bookings };
 }
 
 export async function createCalendarAvailabilitySlot(slot: TrainingSlot): Promise<CalendarAvailabilityResult> {
@@ -643,7 +783,21 @@ async function reserveAvailabilityForBooking(booking: BookingRecord, accessToken
 }
 
 export async function createBookingCalendarEvent(booking: BookingRecord): Promise<CalendarBookingResult> {
+  console.info("[EST Calendar] Starting calendar event creation", {
+    bookingId: booking.id,
+    playerName: booking.playerName,
+    programName: booking.programName,
+    paymentStatus: booking.paymentStatus
+  });
+
   if (!isGoogleCalendarConfigured()) {
+    console.error("[EST Calendar] Calendar event creation failed", {
+      bookingId: booking.id,
+      reason: "Google Calendar credentials are missing",
+      hasGoogleClientId: Boolean(process.env.GOOGLE_CLIENT_ID),
+      hasGoogleClientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET),
+      hasGoogleRefreshToken: Boolean(process.env.GOOGLE_REFRESH_TOKEN)
+    });
     logCalendarError("Booking event creation skipped because Google Calendar is not configured", {
       ...getCalendarEnvDiagnostics(),
       bookingId: booking.id
@@ -657,6 +811,10 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   const token = await getGoogleAccessToken();
 
   if (!token.accessToken) {
+    console.error("[EST Calendar] Calendar event creation failed", {
+      bookingId: booking.id,
+      reason: token.error ?? "Could not connect to Google Calendar."
+    });
     return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
   }
 
@@ -667,6 +825,11 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
       bookingId: booking.id,
       eventId: existingEvent.id,
       eventUrl: existingEvent.htmlLink
+    });
+    console.info("[EST Calendar] Calendar event created successfully", {
+      bookingId: booking.id,
+      eventId: existingEvent.id,
+      alreadyExists: true
     });
 
     return {
@@ -680,6 +843,10 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   const reservation = await reserveAvailabilityForBooking(booking, token.accessToken);
 
   if (reservation.status === "Unavailable" || reservation.status === "Failed") {
+    console.error("[EST Calendar] Calendar event creation failed", {
+      bookingId: booking.id,
+      reason: reservation.message ?? reservation.status
+    });
     return reservation;
   }
 
@@ -692,6 +859,10 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
       sessionId: booking.sessionId,
       sessionDate: booking.sessionDate,
       sessionTime: booking.sessionTime
+    });
+    console.error("[EST Calendar] Calendar event creation failed", {
+      bookingId: booking.id,
+      reason: "Missing session date"
     });
 
     return {
@@ -713,7 +884,7 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     method: "POST",
     headers: calendarHeaders(token.accessToken),
     body: JSON.stringify({
-      summary: `EST Booking: ${booking.programName} - ${booking.playerName}`,
+      summary: `Elite Soccer Training CV - Paid Booking: ${booking.playerName}`,
       description: bookingDescription(booking),
       start: {
         dateTime: range.start,
@@ -736,11 +907,21 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   });
 
   if (!response.ok) {
-    return { status: "Failed", message: await googleErrorMessage(response, "Could not create the Google Calendar booking event") };
+    const message = await googleErrorMessage(response, "Could not create the Google Calendar booking event");
+    console.error("[EST Calendar] Calendar event creation failed", {
+      bookingId: booking.id,
+      reason: message
+    });
+    return { status: "Failed", message };
   }
 
   const event = (await response.json()) as GoogleCalendarEvent;
   logCalendarInfo("Google Calendar booking event created", {
+    bookingId: booking.id,
+    eventId: event.id,
+    eventUrl: event.htmlLink
+  });
+  console.info("[EST Calendar] Calendar event created successfully", {
     bookingId: booking.id,
     eventId: event.id,
     eventUrl: event.htmlLink

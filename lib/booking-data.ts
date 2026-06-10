@@ -51,6 +51,7 @@ export type BookingRecord = {
   waiverAccepted: boolean;
   waiverAcceptedAt: string;
   waiverVersion: string;
+  ipAddress?: string;
   mediaConsent: "Granted" | "Declined";
   programId: TrainingGroupId;
   programName: string;

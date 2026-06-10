@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { type BookingRecord } from "@/lib/booking-data";
 import { createStripeCheckoutSession } from "@/lib/stripe";
 
+function getRequestIpAddress(request: Request) {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  const vercelForwardedFor = request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim();
+
+  return forwardedFor || realIp || vercelForwardedFor || "";
+}
+
 export async function POST(request: Request) {
   const rawBooking = (await request.json().catch(() => null)) as BookingRecord | null;
 
@@ -19,6 +27,7 @@ export async function POST(request: Request) {
     ...rawBooking,
     players: String(playerCount),
     sessionDurationMinutes: 60,
+    ipAddress: getRequestIpAddress(request) || rawBooking.ipAddress,
     paymentStatus: "pending_payment",
     notificationStatus: "Ready",
     calendarStatus: "Ready",

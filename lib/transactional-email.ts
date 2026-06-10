@@ -368,11 +368,13 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     ["Medical Notes/Injuries", booking.medicalNotes || "None"],
     ["Emergency Contact", `${booking.emergencyName} - ${booking.emergencyPhone}`],
     ["Payment Status", booking.paymentStatus],
-    ["Waiver Accepted", booking.waiverAccepted ? "Yes" : "Not recorded"],
-    ["Waiver Accepted At", formatWaiverAcceptedAt(booking)],
+    ["Waiver Signed", booking.waiverAccepted ? "Yes" : "Not recorded"],
+    ["Typed Waiver Signature", booking.guardianSignature || "Not recorded"],
+    ["Signed Timestamp", formatWaiverAcceptedAt(booking)],
+    ["IP Address", booking.ipAddress || "Not collected"],
     ["Waiver Version", booking.waiverVersion || "Not recorded"],
     ["Media Consent", booking.mediaConsent || "Not recorded"],
-    ["Digital Signature", booking.guardianSignature || "Not recorded"]
+    ["Waiver Record", "Signed waiver details are included in this email and the admin booking record."]
   ];
   const text = rows.map(([label, value]) => `${label}: ${value}`).join("\n");
   const html = brandedEmailShell({
