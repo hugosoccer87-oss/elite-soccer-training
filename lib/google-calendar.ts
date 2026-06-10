@@ -840,16 +840,6 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     };
   }
 
-  const reservation = await reserveAvailabilityForBooking(booking, token.accessToken);
-
-  if (reservation.status === "Unavailable" || reservation.status === "Failed") {
-    console.error("[EST Calendar] Calendar event creation failed", {
-      bookingId: booking.id,
-      reason: reservation.message ?? reservation.status
-    });
-    return reservation;
-  }
-
   const durationMinutes = booking.sessionDurationMinutes || 60;
   const dateIso = resolveBookingDateIso(booking);
 

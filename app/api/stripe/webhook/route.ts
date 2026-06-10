@@ -81,7 +81,11 @@ export async function POST(request: Request) {
         paymentStatus: session.payment_status
       });
 
-      const result = await confirmPaidBooking(booking);
+      const result = await confirmPaidBooking(booking, {
+        checkoutSessionId: session.id,
+        paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+        amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+      });
 
       console.info("[EST Stripe] Booking confirmed", {
         eventId: event.id,

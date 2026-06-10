@@ -4,6 +4,8 @@
     "/api/admin/bookings": {},
     "/api/admin/email-diagnostics": {},
     "/api/admin/send-test-email": {},
+    "/api/admin/sessions": {},
+    "/api/admin/sessions/[id]": {},
     "/api/availability/debug": {},
     "/api/availability": {},
     "/api/reviews": {},

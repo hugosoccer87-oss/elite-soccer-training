@@ -14,7 +14,6 @@ export async function GET() {
   const result = await getServerAvailabilityDebug();
 
   return NextResponse.json(result, {
-    headers: noStoreHeaders,
-    status: result.status === "Failed" ? 500 : 200
+    headers: noStoreHeaders
   });
 }

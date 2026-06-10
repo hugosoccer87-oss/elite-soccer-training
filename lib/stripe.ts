@@ -16,6 +16,8 @@ export type StripeCheckoutSession = {
   status?: string;
   metadata?: Record<string, string>;
   client_reference_id?: string;
+  payment_intent?: string | null;
+  amount_total?: number | null;
 };
 
 export type StripeEvent = {

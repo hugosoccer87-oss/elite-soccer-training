@@ -12,7 +12,11 @@ import {
   type BookingRecord,
   type TrainingGroupId
 } from "@/lib/booking-data";
-import type { PublicAvailabilityResponse, PublicAvailableSession } from "@/lib/public-availability";
+import type {
+  PublicAvailabilityDebugResponse,
+  PublicAvailabilityResponse,
+  PublicAvailableSession
+} from "@/lib/public-availability";
 import {
   bookingArrivalInstructions,
   business,
@@ -117,6 +121,21 @@ async function readAvailableSessions() {
   }
 }
 
+async function readAvailabilityDebug() {
+  try {
+    const response = await fetch(`/api/availability/debug?fresh=${Date.now()}`, {
+      cache: "no-store",
+      headers: {
+        "Cache-Control": "no-cache"
+      }
+    });
+
+    return (await response.json()) as PublicAvailabilityDebugResponse;
+  } catch {
+    return null;
+  }
+}
+
 function spotsLabel(count: number) {
   return `${count} ${count === 1 ? "spot" : "spots"} remaining`;
 }
@@ -177,6 +196,7 @@ export function BookingForm() {
   const [isSpecialRequest, setIsSpecialRequest] = useState(false);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(true);
   const [showAvailabilityDebug, setShowAvailabilityDebug] = useState(false);
+  const [availabilityDebug, setAvailabilityDebug] = useState<PublicAvailabilityDebugResponse | null>(null);
   const [fields, setFields] = useState<BookingFields>(initialFields);
   const [fieldErrors, setFieldErrors] = useState<BookingFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -217,7 +237,12 @@ export function BookingForm() {
       return;
     }
 
-    setShowAvailabilityDebug(new URLSearchParams(window.location.search).get("debugAvailability") === "1");
+    const shouldShowDebug = new URLSearchParams(window.location.search).get("debugAvailability") === "1";
+    setShowAvailabilityDebug(shouldShowDebug);
+
+    if (shouldShowDebug) {
+      void readAvailabilityDebug().then(setAvailabilityDebug);
+    }
   }, []);
 
   const availableSessions = useMemo(
@@ -637,20 +662,25 @@ export function BookingForm() {
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <p><span className="font-black text-navy">API request status:</span> {availabilityStatus}</p>
                   <p><span className="font-black text-navy">Total sessions returned by /api/availability:</span> {apiSessions.length}</p>
+                  <p><span className="font-black text-navy">Supabase configured:</span> {availabilityDebug?.supabaseConfigured ? "yes" : "no"}</p>
+                  <p><span className="font-black text-navy">All sessions loaded:</span> {availabilityDebug?.summary?.allSessionsLoaded ?? "loading"}</p>
+                  <p><span className="font-black text-navy">Open future sessions:</span> {availabilityDebug?.summary?.openFutureSessions ?? "loading"}</p>
+                  <p><span className="font-black text-navy">Sessions with remaining spots:</span> {availabilityDebug?.summary?.sessionsWithRemainingSpots ?? "loading"}</p>
                   <p><span className="font-black text-navy">Selected training group:</span> {selectedGroup ? selectedGroup.name : "All available training groups"}</p>
                   <p><span className="font-black text-navy">Sessions after group filter:</span> {availableSessions.length}</p>
                   <p><span className="font-black text-navy">Final sessions rendered:</span> {availableSessions.length}</p>
                 </div>
                 {availabilityError ? <p className="mt-3 font-bold text-red-700">{availabilityError}</p> : null}
                 <div className="mt-3 grid gap-1">
-                  {apiSessions.length > 0 ? (
-                    apiSessions.map((slot) => (
+                  {(availabilityDebug?.loadedSessions?.length ?? 0) > 0 ? (
+                    availabilityDebug?.loadedSessions.map((slot) => (
                       <p key={slot.id}>
-                        {slot.id} / {slot.date} / {slot.startTime} / {slot.trainingGroup} / {slot.remainingSpots} spots
+                        {slot.id} / {slot.date} / {slot.time} / {slot.trainingGroup} / {slot.remainingSpots} spots /{" "}
+                        {slot.included ? "included" : `removed: ${slot.removedReasons.join(", ")}`}
                       </p>
                     ))
                   ) : (
-                    <p>No sessions returned by /api/availability.</p>
+                    <p>No sessions returned by /api/availability/debug.</p>
                   )}
                 </div>
               </div>

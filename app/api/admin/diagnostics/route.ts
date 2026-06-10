@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { adminSessionCookie, getAdminSessionValue } from "@/lib/admin-auth";
 import { getLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import { getStripeKeyMode, hasStripeWebhookSecret } from "@/lib/stripe";
+import { getSupabaseDiagnostics } from "@/lib/supabase-db";
 import { getEmailDiagnostics } from "@/lib/transactional-email";
 
 export async function GET() {
@@ -26,6 +27,7 @@ export async function GET() {
     stripeKeyMode: getStripeKeyMode(),
     webhookSecretExists: hasStripeWebhookSecret(),
     lastPaymentVerificationResult: getLastPaymentVerificationResult(),
+    supabase: getSupabaseDiagnostics(),
     ...getEmailDiagnostics()
   });
 }

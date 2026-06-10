@@ -1,24 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  availabilityStorageKey,
-  bookingNotificationEmail,
-  bookingsStorageKey,
-  blockedDaysStorageKey,
-  defaultTrainingSlots,
-  getRemainingSpots,
-  getTrainingGroup,
-  isSlotAvailable,
-  normalizeTrainingSlot,
-  slotCapacity,
-  trainingGroups,
-  type BookingRecord,
-  type CalendarSyncStatus,
-  type TrainingGroupId,
-  type SlotStatus,
-  type TrainingSlot
-} from "@/lib/booking-data";
+import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
+import { business } from "@/lib/site-data";
+import type { AdminBookingRecord, AdminTrainingSession } from "@/lib/supabase-db";
 
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
@@ -29,6 +14,11 @@ type AdminDiagnostics = {
   smtpConfigured: boolean;
   emailFromConfigured: boolean;
   adminNotificationRecipient: string;
+  supabase?: {
+    configured: boolean;
+    urlConfigured: boolean;
+    serviceRoleKeyConfigured: boolean;
+  };
   lastEmailAttempt: {
     checkedAt: string;
     bookingId?: string;
@@ -52,115 +42,108 @@ type AdminDiagnostics = {
   } | null;
 };
 
-function readSlots() {
-  if (typeof window === "undefined") {
-    return defaultTrainingSlots;
-  }
+type SessionsResponse = {
+  status?: string;
+  sessions?: AdminTrainingSession[];
+  error?: string;
+};
 
-  try {
-    const stored = window.localStorage.getItem(availabilityStorageKey);
-    return stored ? (JSON.parse(stored) as TrainingSlot[]).map(normalizeTrainingSlot) : defaultTrainingSlots;
-  } catch {
-    return defaultTrainingSlots;
-  }
+function formatDateTime(value: string, timeZone = "America/Los_Angeles") {
+  const date = new Date(value);
+
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
 }
 
-function readBlockedDays() {
-  if (typeof window === "undefined") {
-    return [] as string[];
-  }
-
-  try {
-    return JSON.parse(window.localStorage.getItem(blockedDaysStorageKey) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
-
-function readBookings() {
-  if (typeof window === "undefined") {
-    return [] as BookingRecord[];
-  }
-
-  try {
-    return JSON.parse(window.localStorage.getItem(bookingsStorageKey) ?? "[]") as BookingRecord[];
-  } catch {
-    return [];
-  }
-}
-
-async function readSyncedSlots() {
-  try {
-    const response = await fetch(`/api/google-calendar/availability?fresh=${Date.now()}`, {
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache"
+function formatDateOnly(value: string, timeZone = "America/Los_Angeles") {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  })
+    .formatToParts(date)
+    .reduce<Record<string, string>>((current, part) => {
+      if (part.type !== "literal") {
+        current[part.type] = part.value;
       }
-    });
 
-    if (!response.ok) {
-      return null;
-    }
+      return current;
+    }, {});
 
-    const result = (await response.json()) as { status?: CalendarSyncStatus; slots?: TrainingSlot[] };
-
-    if (result.status === "Synced") {
-      return (result.slots ?? []).map(normalizeTrainingSlot);
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-async function createSyncedSlot(slot: TrainingSlot) {
-  try {
-    const response = await fetch("/api/google-calendar/availability", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(slot)
-    });
-    return (await response.json()) as { status?: CalendarSyncStatus; slot?: TrainingSlot; message?: string };
-  } catch {
-    return { status: "Failed" as const };
+function formatWaiverTimestamp(value?: string | null) {
+  if (!value) {
+    return "Not recorded";
   }
+
+  return new Date(value).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Los_Angeles"
+  });
 }
 
-async function updateSyncedSlot(slot: TrainingSlot, updates: Partial<Pick<TrainingSlot, "status" | "bookedPlayers" | "capacity">>) {
-  if (!slot.calendarEventId) {
-    return { status: "Ready" as const };
-  }
-
-  try {
-    const response = await fetch(`/api/google-calendar/availability/${encodeURIComponent(slot.calendarEventId)}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(updates)
-    });
-    return (await response.json()) as { status?: CalendarSyncStatus; slot?: TrainingSlot; message?: string };
-  } catch {
-    return { status: "Failed" as const };
-  }
+function bookingProgramLabel(booking: AdminBookingRecord) {
+  return trainingGroups.find((group) => group.id === booking.training_group)?.name ?? booking.training_group;
 }
 
-async function deleteSyncedSlot(slot: TrainingSlot) {
-  if (!slot.calendarEventId) {
-    return { status: "Ready" as const };
-  }
+function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTrainingSession) {
+  const waiver = booking.waiver;
 
-  try {
-    const response = await fetch(`/api/google-calendar/availability/${encodeURIComponent(slot.calendarEventId)}`, {
-      method: "DELETE"
-    });
-    return (await response.json()) as { status?: CalendarSyncStatus; message?: string };
-  } catch {
-    return { status: "Failed" as const };
-  }
+  return [
+    "Elite Soccer Training CV - Waiver Record",
+    "",
+    `Booking ID: ${booking.id}`,
+    `Training Group: ${bookingProgramLabel(booking)}`,
+    `Session: ${session ? formatDateTime(session.start_datetime, session.timezone) : "Not recorded"}`,
+    "",
+    "Participant Information",
+    `Parent/Guardian Name: ${booking.parent_name}`,
+    `Player Name: ${booking.player_name}`,
+    `Player Age: ${booking.player_age}`,
+    `Parent Phone: ${booking.parent_phone}`,
+    `Parent Email: ${booking.parent_email}`,
+    `Emergency Contact: ${booking.emergency_name || "Not recorded"} - ${booking.emergency_phone || "Not recorded"}`,
+    `Medical Conditions/Allergies/Notes: ${booking.medical_notes || waiver?.emergency_medical_notes || "None"}`,
+    "",
+    "Signed Waiver",
+    `Waiver Signed: ${waiver?.waiver_signed ? "Yes" : "Not recorded"}`,
+    `Typed Signature: ${waiver?.typed_signature || "Not recorded"}`,
+    `Signed Timestamp: ${formatWaiverTimestamp(waiver?.signed_at)}`,
+    `Media Consent: ${waiver?.media_consent || "Not recorded"}`,
+    `IP Address: ${waiver?.ip_address || "Not collected"}`,
+    "",
+    "Booking Notes",
+    `Notes: ${booking.notes || "None"}`,
+    `Payment Status: ${booking.status}`,
+    `Stripe Checkout Session: ${booking.stripe_checkout_session_id || "Not recorded"}`,
+    `Stripe Payment Intent: ${booking.stripe_payment_intent_id || "Not recorded"}`,
+    `Google Calendar Event ID: ${booking.calendarEvent?.google_calendar_event_id || "Not recorded"}`
+  ].join("\n");
+}
+
+function downloadWaiverRecord(booking: AdminBookingRecord, session?: AdminTrainingSession) {
+  const blob = new Blob([bookingWaiverRecordText(booking, session)], { type: "text/plain;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeBookingId = booking.id.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+
+  link.href = url;
+  link.download = `waiver-record-${safeBookingId}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 async function readAdminDiagnostics() {
@@ -179,343 +162,198 @@ async function readAdminDiagnostics() {
   }
 }
 
-async function readSyncedBookings() {
-  try {
-    const response = await fetch("/api/admin/bookings", {
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      return null;
+async function readAdminSessions() {
+  const response = await fetch(`/api/admin/sessions?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
     }
-
-    const result = (await response.json()) as { status?: CalendarSyncStatus; bookings?: BookingRecord[] };
-
-    if (result.status === "Synced") {
-      return result.bookings ?? [];
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
-function mergeBookings(localBookings: BookingRecord[], syncedBookings: BookingRecord[]) {
-  const bookingMap = new Map<string, BookingRecord>();
-
-  localBookings.forEach((booking) => bookingMap.set(booking.id, booking));
-  syncedBookings.forEach((booking) => bookingMap.set(booking.id, booking));
-
-  return Array.from(bookingMap.values()).sort((a, b) =>
-    `${b.sessionDateIso} ${b.sessionTime}`.localeCompare(`${a.sessionDateIso} ${a.sessionTime}`)
-  );
-}
-
-function formatDateParts(dateIso: string) {
-  const date = new Date(`${dateIso}T00:00:00`);
-  return {
-    dateLabel: date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
-    dayLabel: date.toLocaleDateString("en-US", { weekday: "long" })
-  };
-}
-
-function formatTime(value: string) {
-  const [hourValue, minuteValue] = value.split(":").map(Number);
-  const suffix = hourValue >= 12 ? "PM" : "AM";
-  const hour = hourValue % 12 || 12;
-  return `${hour}:${String(minuteValue).padStart(2, "0")} ${suffix}`;
-}
-
-function formatWaiverTimestamp(value: string) {
-  if (!value) {
-    return "Not recorded";
-  }
-
-  return new Date(value).toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "America/Los_Angeles"
   });
-}
+  const result = (await response.json().catch(() => ({}))) as SessionsResponse;
 
-function waiverRecordText(booking: BookingRecord) {
-  return [
-    "Elite Soccer Training CV - Waiver Record",
-    "",
-    `Booking ID: ${booking.id}`,
-    `Training Group: ${booking.programName}`,
-    `Session: ${booking.sessionDate} at ${booking.sessionTime}`,
-    "",
-    "Participant Information",
-    `Parent/Guardian Name: ${booking.parentName}`,
-    `Player Name: ${booking.playerName}`,
-    `Player Age: ${booking.playerAge}`,
-    `Parent Phone: ${booking.phone}`,
-    `Parent Email: ${booking.email}`,
-    `Emergency Contact: ${booking.emergencyName} - ${booking.emergencyPhone}`,
-    `Medical Conditions/Allergies/Notes: ${booking.medicalNotes || "None"}`,
-    "",
-    "Signed Waiver",
-    `Waiver Signed: ${booking.waiverAccepted ? "Yes" : "Not recorded"}`,
-    `Typed Signature: ${booking.guardianSignature || "Not recorded"}`,
-    `Signed Timestamp: ${formatWaiverTimestamp(booking.waiverAcceptedAt)}`,
-    `Waiver Version: ${booking.waiverVersion || "Not recorded"}`,
-    `Media Consent: ${booking.mediaConsent || "Not recorded"}`,
-    `IP Address: ${booking.ipAddress || "Not collected"}`,
-    "",
-    "Booking Notes",
-    `Notes: ${booking.notes || "None"}`,
-    `Payment Status: ${booking.paymentStatus}`,
-    `Calendar Status: ${booking.calendarStatus ?? "Ready"}`
-  ].join("\n");
-}
+  if (!response.ok) {
+    throw new Error(result.error || "Training sessions could not be loaded.");
+  }
 
-function downloadWaiverRecord(booking: BookingRecord) {
-  const blob = new Blob([waiverRecordText(booking)], { type: "text/plain;charset=utf-8" });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const safeBookingId = booking.id.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-
-  link.href = url;
-  link.download = `waiver-record-${safeBookingId}.txt`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
+  return result.sessions ?? [];
 }
 
 export function AdminAvailability() {
-  const [slots, setSlots] = useState<TrainingSlot[]>(defaultTrainingSlots);
-  const [blockedDays, setBlockedDays] = useState<string[]>([]);
-  const [bookings, setBookings] = useState<BookingRecord[]>([]);
+  const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>(trainingGroups[0].id);
-  const [newDate, setNewDate] = useState("2026-06-16");
+  const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
-  const [newCapacity, setNewCapacity] = useState("6");
-  const [newDuration] = useState("60");
-  const [blockDate, setBlockDate] = useState("2026-06-18");
+  const [newCapacity, setNewCapacity] = useState(String(slotCapacity));
+  const [newLocation, setNewLocation] = useState(business.location);
+  const [blockDate, setBlockDate] = useState("");
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null);
 
+  async function refreshAdminData(message?: string) {
+    try {
+      setError("");
+      const [nextSessions, nextDiagnostics] = await Promise.all([readAdminSessions(), readAdminDiagnostics()]);
+      setSessions(nextSessions);
+      setDiagnostics(nextDiagnostics);
+      if (message) {
+        setNotice(message);
+      }
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Admin data could not be loaded.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   useEffect(() => {
-    const loadedSlots = readSlots();
-    const loadedBlockedDays = readBlockedDays();
-    const loadedBookings = readBookings();
-    setSlots(loadedSlots);
-    setBlockedDays(loadedBlockedDays);
-    setBookings(loadedBookings);
-    window.localStorage.setItem(availabilityStorageKey, JSON.stringify(loadedSlots));
-
-    let active = true;
-
-    readSyncedSlots().then((syncedSlots) => {
-      if (!active || !syncedSlots) {
-        return;
-      }
-
-      const normalizedSlots = syncedSlots.map(normalizeTrainingSlot);
-      setSlots(normalizedSlots);
-      window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
-    });
-
-    readSyncedBookings().then((syncedBookings) => {
-      if (!active || !syncedBookings) {
-        return;
-      }
-
-      const mergedBookings = mergeBookings(loadedBookings, syncedBookings);
-      setBookings(mergedBookings);
-      window.localStorage.setItem(bookingsStorageKey, JSON.stringify(mergedBookings));
-    });
-
-    readAdminDiagnostics().then((result) => {
-      if (active) {
-        setDiagnostics(result);
-      }
-    });
-
-    return () => {
-      active = false;
-    };
+    void refreshAdminData();
   }, []);
 
   const counts = useMemo(
     () => ({
-      open: slots.filter((slot) => isSlotAvailable(slot, blockedDays)).length,
-      booked: slots.filter((slot) => slot.status !== "blocked" && !blockedDays.includes(slot.dateIso) && getRemainingSpots(slot) === 0).length,
-      blocked: slots.filter((slot) => slot.status === "blocked" || blockedDays.includes(slot.dateIso)).length,
-      bookings: bookings.length
+      open: sessions.filter((session) => session.status === "open" && session.remainingSpots > 0).length,
+      full: sessions.filter((session) => session.status === "open" && session.remainingSpots <= 0).length,
+      unavailable: sessions.filter((session) => session.status !== "open").length,
+      bookings: sessions.reduce((total, session) => total + session.paidBookings.length, 0)
     }),
-    [slots, blockedDays, bookings]
+    [sessions]
   );
 
-  function saveSlots(nextSlots: TrainingSlot[]) {
-    const normalizedSlots = nextSlots.map(normalizeTrainingSlot);
-    setSlots(normalizedSlots);
-    window.localStorage.setItem(availabilityStorageKey, JSON.stringify(normalizedSlots));
-  }
-
-  function saveBlockedDays(nextBlockedDays: string[]) {
-    setBlockedDays(nextBlockedDays);
-    window.localStorage.setItem(blockedDaysStorageKey, JSON.stringify(nextBlockedDays));
-  }
-
-  async function addSlot() {
-    const normalizedTime = newTime.replace(":", "");
-    const id = `${newGroupId}-${newDate}-${normalizedTime}`;
-
-    if (slots.some((slot) => slot.id === id)) {
-      setNotice("That date and time already exists.");
+  async function addSession() {
+    if (!newDate || !newTime) {
+      setError("Choose a date and start time before adding a session.");
       return;
     }
 
-    const labels = formatDateParts(newDate);
-    const capacity = Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity));
-    const duration = 60;
-    const newSlot: TrainingSlot = {
-      id,
-      groupId: newGroupId,
-      dateIso: newDate,
-      dateLabel: labels.dateLabel,
-      dayLabel: labels.dayLabel,
-      time: formatTime(newTime),
-      duration: `${duration} min`,
-      capacity,
-      bookedPlayers: 0,
-      status: "open" as SlotStatus,
-      calendarStatus: "Ready"
-    };
-    const nextSlots = [
-      ...slots,
-      newSlot
-    ].sort((a, b) => `${a.dateIso} ${a.time}`.localeCompare(`${b.dateIso} ${b.time}`));
+    setIsSaving(true);
+    setError("");
+    setNotice("");
 
-    saveSlots(nextSlots);
-    setNotice("Availability added locally.");
-
-    const syncResult = await createSyncedSlot(newSlot);
-
-    if (syncResult.slot) {
-      saveSlots(
-        nextSlots.map((slot) => (slot.id === newSlot.id ? normalizeTrainingSlot(syncResult.slot as TrainingSlot) : slot))
-      );
-    }
-
-    setNotice(
-      syncResult.status === "Synced"
-        ? "Availability added and synced to Google Calendar."
-        : "Availability added locally. Connect Google Calendar to sync it online."
-    );
-  }
-
-  async function setSlotStatus(slotId: string, status: SlotStatus) {
-    const currentSlot = slots.find((slot) => slot.id === slotId);
-    const nextSlots = slots.map((slot) => {
-        if (slot.id !== slotId) {
-          return slot;
-        }
-
-        if (status === "open") {
-          return { ...slot, status, bookedPlayers: getRemainingSpots(slot) === 0 ? 0 : slot.bookedPlayers };
-        }
-
-        return { ...slot, status };
+    try {
+      const response = await fetch("/api/admin/sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          trainingGroup: newGroupId,
+          date: newDate,
+          time: newTime,
+          capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
+          location: newLocation
+        })
       });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
 
-    saveSlots(nextSlots);
-
-    if (currentSlot) {
-      const nextSlot = nextSlots.find((slot) => slot.id === slotId);
-      const syncResult = await updateSyncedSlot(currentSlot, {
-        status,
-        ...(nextSlot && status === "open" ? { bookedPlayers: nextSlot.bookedPlayers } : {})
-      });
-      setNotice(
-        syncResult.status === "Synced"
-          ? status === "open"
-            ? "Slot reopened and synced to Google Calendar."
-            : `Slot marked ${status} and synced to Google Calendar.`
-          : status === "open"
-            ? "Slot reopened locally."
-            : `Slot marked ${status} locally.`
-      );
-      return;
-    }
-
-    setNotice(status === "open" ? "Slot reopened." : `Slot marked ${status}.`);
-  }
-
-  async function removeSlot(slotId: string) {
-    const currentSlot = slots.find((slot) => slot.id === slotId);
-    saveSlots(slots.filter((slot) => slot.id !== slotId));
-
-    if (currentSlot) {
-      const syncResult = await deleteSyncedSlot(currentSlot);
-      setNotice(
-        syncResult.status === "Synced"
-          ? "Slot removed from availability and Google Calendar."
-          : "Slot removed locally."
-      );
-      return;
-    }
-
-    setNotice("Slot removed from availability.");
-  }
-
-  async function blockDay() {
-    const nextBlockedDays = Array.from(new Set([...blockedDays, blockDate]));
-    const affectedSlots = slots.filter((slot) => slot.dateIso === blockDate);
-    saveBlockedDays(nextBlockedDays);
-    saveSlots(slots.map((slot) => (slot.dateIso === blockDate ? { ...slot, status: "blocked" } : slot)));
-    await Promise.all(affectedSlots.map((slot) => updateSyncedSlot(slot, { status: "blocked" })));
-    setNotice("Unavailable day blocked and hidden from parent booking.");
-  }
-
-  async function unblockDay(day: string) {
-    const affectedSlots = slots.filter((slot) => slot.dateIso === day);
-    saveBlockedDays(blockedDays.filter((blockedDay) => blockedDay !== day));
-    saveSlots(
-      slots.map((slot) =>
-        slot.dateIso === day && slot.status === "blocked"
-          ? { ...slot, status: getRemainingSpots(slot) === 0 ? "booked" : "open" }
-        : slot
-      )
-    );
-    await Promise.all(
-      affectedSlots.map((slot) =>
-        updateSyncedSlot(slot, { status: getRemainingSpots(slot) === 0 ? "booked" : "open" })
-      )
-    );
-    setNotice("Day reopened.");
-  }
-
-  async function removeBookedSlots() {
-    const fullSlots = slots.filter((slot) => slot.status === "booked" || getRemainingSpots(slot) === 0);
-    saveSlots(slots.filter((slot) => slot.status !== "booked" && getRemainingSpots(slot) > 0));
-    await Promise.all(fullSlots.map(deleteSyncedSlot));
-    setNotice("Full sessions removed from the admin list.");
-  }
-
-  async function resetSchedule() {
-    await Promise.all(slots.map(deleteSyncedSlot));
-    saveSlots(defaultTrainingSlots);
-    saveBlockedDays([]);
-    setNotice("Schedule cleared. Add new time blocks to publish availability.");
-  }
-
-  function refreshBookings() {
-    const localBookings = readBookings();
-    setBookings(localBookings);
-    void readSyncedBookings().then((syncedBookings) => {
-      if (syncedBookings) {
-        const mergedBookings = mergeBookings(localBookings, syncedBookings);
-        setBookings(mergedBookings);
-        window.localStorage.setItem(bookingsStorageKey, JSON.stringify(mergedBookings));
+      if (!response.ok) {
+        throw new Error(result.error || "The session could not be added.");
       }
-    });
-    void readAdminDiagnostics().then(setDiagnostics);
-    setNotice("Bookings refreshed.");
+
+      await refreshAdminData("Training session added to Supabase availability.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "The session could not be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function updateSession(id: string, updates: { status?: "open" | "closed" | "cancelled"; capacity?: number; location?: string }) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/sessions/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(updates)
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "The session could not be updated.");
+      }
+
+      await refreshAdminData("Training session updated.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "The session could not be updated.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeSession(id: string) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/sessions/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "The session could not be deleted.");
+      }
+
+      await refreshAdminData("Training session deleted.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "The session could not be deleted.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function closeSessionsOnDate() {
+    if (!blockDate) {
+      setError("Choose a date before closing sessions.");
+      return;
+    }
+
+    const sessionsForDate = sessions.filter((session) => formatDateOnly(session.start_datetime, session.timezone) === blockDate);
+
+    if (sessionsForDate.length === 0) {
+      setNotice("No sessions exist for that date.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      await Promise.all(sessionsForDate.map((session) => updateSession(session.id, { status: "closed" })));
+      await refreshAdminData("All sessions on that date were closed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function editCapacity(session: AdminTrainingSession) {
+    const nextCapacity = window.prompt("Set session capacity. Max is 6 players.", String(session.capacity));
+
+    if (nextCapacity === null) {
+      return;
+    }
+
+    const parsedCapacity = Math.min(slotCapacity, Math.max(1, Number(nextCapacity) || session.capacity));
+    void updateSession(session.id, { capacity: parsedCapacity });
+  }
+
+  function editLocation(session: AdminTrainingSession) {
+    const nextLocation = window.prompt("Set session location.", session.location || business.location);
+
+    if (nextLocation === null) {
+      return;
+    }
+
+    void updateSession(session.id, { location: nextLocation.trim() || business.location });
   }
 
   return (
@@ -526,15 +364,15 @@ export function AdminAvailability() {
             <p className="text-sm font-black uppercase text-electric">Admin Availability</p>
             <h2 className="mt-2 text-3xl font-black text-navy">Manage program booking slots.</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Add separate Future Elite and Elite Performance time blocks, then track the six-player capacity for each
-              session.
+              Add Future Elite and Elite Performance sessions, then track the six-player capacity and paid bookings from
+              Supabase.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
             {[
               ["Open", counts.open],
-              ["Booked", counts.booked],
-              ["Blocked", counts.blocked],
+              ["Full", counts.full],
+              ["Unavailable", counts.unavailable],
               ["Bookings", counts.bookings]
             ].map(([label, value]) => (
               <div key={label} className="rounded-lg border border-slate-200 bg-mist p-4">
@@ -545,10 +383,20 @@ export function AdminAvailability() {
           </div>
         </div>
 
+        {isLoading ? <p className="mt-5 rounded-md bg-mist p-3 text-sm font-bold text-slate-600">Loading Supabase sessions...</p> : null}
         {notice ? <p className="mt-5 rounded-md bg-field/10 p-3 text-sm font-bold text-field">{notice}</p> : null}
+        {error ? <p className="mt-5 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
 
         {diagnostics ? (
           <div className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">Supabase configured</p>
+              <p className="mt-1 font-black text-navy">{diagnostics.supabase?.configured ? "yes" : "no"}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                URL: {diagnostics.supabase?.urlConfigured ? "yes" : "no"} / Service role:{" "}
+                {diagnostics.supabase?.serviceRoleKeyConfigured ? "yes" : "no"}
+              </p>
+            </div>
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Stripe key mode</p>
               <p className="mt-1 font-black text-navy">{diagnostics.stripeKeyMode}</p>
@@ -566,12 +414,6 @@ export function AdminAvailability() {
                     : "not verified"
                   : "none yet"}
               </p>
-              {diagnostics.lastPaymentVerificationResult ? (
-                <p className="mt-1 text-xs font-bold text-slate-500">
-                  {diagnostics.lastPaymentVerificationResult.paymentStatus || "no payment status"} /{" "}
-                  {diagnostics.lastPaymentVerificationResult.sessionStatus || "no session status"}
-                </p>
-              ) : null}
             </div>
             <div>
               <p className="text-xs font-black uppercase text-slate-500">SMTP configured</p>
@@ -591,9 +433,6 @@ export function AdminAvailability() {
                   ? `Customer ${diagnostics.lastEmailAttempt.customerStatus} / Admin ${diagnostics.lastEmailAttempt.adminStatus}`
                   : "none yet"}
               </p>
-              {diagnostics.lastEmailAttempt?.message ? (
-                <p className="mt-1 text-xs font-bold text-slate-500">{diagnostics.lastEmailAttempt.message}</p>
-              ) : null}
             </div>
           </div>
         ) : null}
@@ -601,7 +440,7 @@ export function AdminAvailability() {
 
       <section className="grid gap-5 lg:grid-cols-2">
         <div className="panel p-5 sm:p-6">
-          <h3 className="text-xl font-black text-navy">Add Available Slot</h3>
+          <h3 className="text-xl font-black text-navy">Add Available Session</h3>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
               Program
@@ -618,7 +457,7 @@ export function AdminAvailability() {
               <input className={inputClass} type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
-              Time
+              Start Time
               <input className={inputClass} type="time" value={newTime} onChange={(event) => setNewTime(event.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
@@ -634,185 +473,181 @@ export function AdminAvailability() {
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Duration
-              <input
-                className={inputClass}
-                type="number"
-                min="60"
-                max="60"
-                value={newDuration}
-                readOnly
-              />
+              <input className={inputClass} type="number" min="60" max="60" value="60" readOnly />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+              Location
+              <input className={inputClass} value={newLocation} onChange={(event) => setNewLocation(event.target.value)} />
             </label>
           </div>
           <button
             type="button"
-            onClick={addSlot}
-            className="mt-5 rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25"
+            disabled={isSaving}
+            onClick={addSession}
+            className="mt-5 rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Add Slot
+            Add Session
           </button>
         </div>
 
         <div className="panel p-5 sm:p-6">
-          <h3 className="text-xl font-black text-navy">Block Unavailable Day</h3>
+          <h3 className="text-xl font-black text-navy">Close Unavailable Day</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            This closes existing sessions on that date. Parents only see open Supabase sessions with remaining spots.
+          </p>
           <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
             Date
             <input className={inputClass} type="date" value={blockDate} onChange={(event) => setBlockDate(event.target.value)} />
           </label>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button type="button" onClick={blockDay} className="rounded-md bg-navy px-6 py-3 text-sm font-black uppercase text-white">
-              Block Day
-            </button>
-            <button type="button" onClick={removeBookedSlots} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
-              Remove Booked Slots
-            </button>
-            <button type="button" onClick={resetSchedule} className="rounded-md border border-slate-300 px-6 py-3 text-sm font-black text-navy">
-              Clear Schedule
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {blockedDays.length > 0 ? (
-        <section className="panel p-5 sm:p-6">
-          <h3 className="text-xl font-black text-navy">Blocked Days</h3>
-          <div className="mt-4 flex flex-wrap gap-3">
-            {blockedDays.map((day) => (
-              <button key={day} type="button" onClick={() => unblockDay(day)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-bold text-navy">
-                {formatDateParts(day).dateLabel} - Reopen
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className="panel overflow-hidden">
-        <div className="border-b border-slate-200 p-5 sm:p-6">
-          <h3 className="text-xl font-black text-navy">Schedule Slots</h3>
-          <p className="mt-2 text-sm text-slate-600">Full and blocked sessions stay off the parent booking calendar.</p>
-        </div>
-        <div className="grid divide-y divide-slate-200">
-          {slots.map((slot) => {
-            const remainingSpots = getRemainingSpots(slot);
-            const statusLabel = blockedDays.includes(slot.dateIso)
-              ? "blocked day"
-              : remainingSpots === 0
-                ? "full"
-                : `${remainingSpots} ${remainingSpots === 1 ? "spot" : "spots"} remaining`;
-
-            return (
-              <div key={slot.id} className="grid gap-4 p-5 sm:grid-cols-[1fr_auto] sm:items-center">
-                <div>
-                  <p className="text-xs font-black uppercase text-electric">{getTrainingGroup(slot.groupId).name}</p>
-                  <p className="font-black text-navy">
-                    {slot.dateLabel} at {slot.time}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {slot.duration} - {slot.bookedPlayers}/{slot.capacity} players booked - {statusLabel}
-                  </p>
-                  <p className="mt-1 text-xs font-bold uppercase text-slate-500">
-                    {slot.calendarEventId ? "Google Calendar synced" : "Local availability"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setSlotStatus(slot.id, "open")} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                    Open
-                  </button>
-                  <button type="button" onClick={() => setSlotStatus(slot.id, "blocked")} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                    Block
-                  </button>
-                  <button type="button" onClick={() => removeSlot(slot.id)} className="rounded-md border border-red-200 px-3 py-2 text-xs font-black text-red-700">
-                    Remove
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={closeSessionsOnDate}
+            className="mt-5 rounded-md bg-navy px-6 py-3 text-sm font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Close Day
+          </button>
         </div>
       </section>
 
       <section className="panel overflow-hidden">
         <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
           <div>
-            <h3 className="text-xl font-black text-navy">Bookings Dashboard</h3>
-            <p className="mt-2 text-sm text-slate-600">Owner notifications are prepared for {bookingNotificationEmail}.</p>
+            <h3 className="text-xl font-black text-navy">Supabase Sessions</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              These are the only sessions that can appear on the public booking page.
+            </p>
           </div>
-          <button type="button" onClick={refreshBookings} className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black text-navy">
+          <button type="button" onClick={() => void refreshAdminData("Sessions refreshed.")} className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black text-navy">
             Refresh
           </button>
         </div>
-        {bookings.length > 0 ? (
+        {sessions.length > 0 ? (
           <div className="grid divide-y divide-slate-200">
-            {bookings.map((booking) => (
-              <article key={booking.id} className="grid gap-4 p-5 lg:grid-cols-[1fr_1fr]">
-                <div>
-                  <p className="text-xs font-black uppercase text-electric">{booking.programName}</p>
-                  <h4 className="mt-1 text-lg font-black text-navy">{booking.playerName}</h4>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {booking.sessionDate} at {booking.sessionTime} - {booking.players} player(s)
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">Payment: {booking.paymentStatus}</p>
-                </div>
-                <div className="grid gap-1 text-sm text-slate-600">
-                  <p><span className="font-black text-navy">Parent:</span> {booking.parentName}</p>
-                  <p><span className="font-black text-navy">Phone:</span> {booking.phone}</p>
-                  <p><span className="font-black text-navy">Email:</span> {booking.email}</p>
-                  <p><span className="font-black text-navy">Emergency:</span> {booking.emergencyName} - {booking.emergencyPhone}</p>
-                  <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
-                  <p><span className="font-black text-navy">Medical:</span> {booking.medicalNotes || "None"}</p>
-                  <p>
-                    <span className="font-black text-navy">Waiver:</span>{" "}
-                    {booking.waiverAccepted ? "Accepted" : "Not recorded"}
-                    {booking.waiverAcceptedAt ? ` on ${formatWaiverTimestamp(booking.waiverAcceptedAt)}` : ""}
-                  </p>
-                  <p><span className="font-black text-navy">Media Consent:</span> {booking.mediaConsent || "Not recorded"}</p>
-                  <p><span className="font-black text-navy">Signature:</span> {booking.guardianSignature || "Not recorded"}</p>
-                  <p><span className="font-black text-navy">Email Status:</span> {booking.notificationStatus}</p>
-                  <p><span className="font-black text-navy">Calendar:</span> {booking.calendarStatus ?? "Ready"}</p>
-                  {booking.calendarEventUrl ? (
-                    <p>
-                      <a className="font-black text-electric underline" href={booking.calendarEventUrl}>
-                        View Google Calendar event
-                      </a>
-                    </p>
-                  ) : null}
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-mist p-4 lg:col-span-2">
-                  <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+            {sessions.map((session) => {
+              const group = trainingGroups.find((item) => item.id === session.training_group);
+              const isFull = session.remainingSpots <= 0;
+
+              return (
+                <article key={session.id} className="grid gap-5 p-5">
+                  <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
                     <div>
-                      <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
-                      <h5 className="mt-1 font-black text-navy">
-                        Signed waiver for {booking.playerName}
-                      </h5>
-                      <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
-                        <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiverAccepted ? "Yes" : "Not recorded"}</p>
-                        <p><span className="font-black text-navy">Typed Signature:</span> {booking.guardianSignature || "Not recorded"}</p>
-                        <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiverAcceptedAt)}</p>
-                        <p><span className="font-black text-navy">IP Address:</span> {booking.ipAddress || "Not collected"}</p>
-                        <p><span className="font-black text-navy">Media Consent:</span> {booking.mediaConsent || "Not recorded"}</p>
-                        <p><span className="font-black text-navy">Emergency:</span> {booking.emergencyName} - {booking.emergencyPhone}</p>
-                        <p className="sm:col-span-2"><span className="font-black text-navy">Medical:</span> {booking.medicalNotes || "None"}</p>
+                      <p className="text-xs font-black uppercase text-electric">
+                        {group?.name ?? session.title} {group ? `(${group.ages})` : ""}
+                      </p>
+                      <h4 className="mt-1 text-lg font-black text-navy">
+                        {formatDateTime(session.start_datetime, session.timezone)}
+                      </h4>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {session.location || business.location} - {session.paidPlayers}/{session.capacity} players booked -{" "}
+                        {isFull ? "full" : `${session.remainingSpots} ${session.remainingSpots === 1 ? "spot" : "spots"} remaining`}
+                      </p>
+                      <p className="mt-1 text-xs font-black uppercase text-slate-500">Status: {session.status}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => void updateSession(session.id, { status: "open" })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
+                        Open
+                      </button>
+                      <button type="button" onClick={() => void updateSession(session.id, { status: "closed" })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
+                        Close
+                      </button>
+                      <button type="button" onClick={() => void updateSession(session.id, { status: "cancelled" })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
+                        Cancel
+                      </button>
+                      <button type="button" onClick={() => editCapacity(session)} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
+                        Capacity
+                      </button>
+                      <button type="button" onClick={() => editLocation(session)} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
+                        Location
+                      </button>
+                      <button type="button" onClick={() => void removeSession(session.id)} className="rounded-md border border-red-200 px-3 py-2 text-xs font-black text-red-700">
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  {session.paidBookings.length > 0 ? (
+                    <div className="rounded-lg border border-slate-200 bg-mist p-4">
+                      <p className="text-xs font-black uppercase text-electric">Paid Bookings</p>
+                      <div className="mt-3 grid gap-4">
+                        {session.paidBookings.map((booking) => (
+                          <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                              <div>
+                                <h5 className="font-black text-navy">{booking.player_name}</h5>
+                                <p className="mt-1 text-sm text-slate-600">
+                                  {booking.player_count} player(s) - Payment: {booking.status}
+                                </p>
+                                <p className="mt-1 text-sm text-slate-600">Amount paid: ${(booking.amount_paid / 100).toFixed(2)}</p>
+                              </div>
+                              <div className="grid gap-1 text-sm text-slate-600">
+                                <p><span className="font-black text-navy">Parent:</span> {booking.parent_name}</p>
+                                <p><span className="font-black text-navy">Phone:</span> {booking.parent_phone}</p>
+                                <p><span className="font-black text-navy">Email:</span> {booking.parent_email}</p>
+                                <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
+                                <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
+                                <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
+                                <p><span className="font-black text-navy">Calendar Event ID:</span> {booking.calendarEvent?.google_calendar_event_id || "Not recorded"}</p>
+                                <p>
+                                  <span className="font-black text-navy">Email Logs:</span>{" "}
+                                  {booking.emailLogs.length > 0
+                                    ? booking.emailLogs.map((log) => `${log.email_type}: ${log.status}`).join(" / ")
+                                    : "No email logs yet"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4">
+                              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                                <div>
+                                  <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
+                                  <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                                    <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiver?.waiver_signed ? "Yes" : "Not recorded"}</p>
+                                    <p><span className="font-black text-navy">Typed Signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
+                                    <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
+                                    <p><span className="font-black text-navy">IP Address:</span> {booking.waiver?.ip_address || "Not collected"}</p>
+                                    <p><span className="font-black text-navy">Media Consent:</span> {booking.waiver?.media_consent || "Not recorded"}</p>
+                                    <p className="sm:col-span-2"><span className="font-black text-navy">Medical:</span> {booking.waiver?.emergency_medical_notes || booking.medical_notes || "None"}</p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadWaiverRecord(booking, session)}
+                                  className="rounded-md border border-navy px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
+                                >
+                                  Download Waiver Record
+                                </button>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => downloadWaiverRecord(booking)}
-                      className="rounded-md border border-navy px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
-                    >
-                      Download Waiver Record
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
+                  ) : (
+                    <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                      No paid bookings for this session yet.
+                    </p>
+                  )}
+                </article>
+              );
+            })}
           </div>
         ) : (
           <div className="p-5 sm:p-6">
             <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
-              No bookings yet.
+              No Supabase sessions yet. Add the first available session above.
             </p>
           </div>
         )}
+      </section>
+
+      <section className="panel overflow-hidden">
+        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+          <div>
+            <h3 className="text-xl font-black text-navy">Email Notifications</h3>
+            <p className="mt-2 text-sm text-slate-600">Owner notifications are sent to {bookingNotificationEmail}.</p>
+          </div>
+        </div>
       </section>
     </div>
   );

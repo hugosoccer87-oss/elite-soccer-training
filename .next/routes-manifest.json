@@ -20,6 +20,14 @@
   },
   "dynamicRoutes": [
     {
+      "page": "/api/admin/sessions/[id]",
+      "regex": "^/api/admin/sessions/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/admin/sessions/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/google-calendar/availability/[eventId]",
       "regex": "^/api/google\\-calendar/availability/([^/]+?)(?:/)?$",
       "routeKeys": {

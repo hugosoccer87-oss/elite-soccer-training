@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { type BookingRecord } from "@/lib/booking-data";
 import { createStripeCheckoutSession } from "@/lib/stripe";
+import { attachStripeCheckoutSession, createPendingBooking } from "@/lib/supabase-db";
 
 function getRequestIpAddress(request: Request) {
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
@@ -13,7 +14,7 @@ function getRequestIpAddress(request: Request) {
 export async function POST(request: Request) {
   const rawBooking = (await request.json().catch(() => null)) as BookingRecord | null;
 
-  if (!rawBooking?.id || !rawBooking?.email || !rawBooking?.players || !rawBooking?.waiverAccepted) {
+  if (!rawBooking?.sessionId || !rawBooking?.email || !rawBooking?.players || !rawBooking?.waiverAccepted) {
     return NextResponse.json({ error: "Invalid checkout payload." }, { status: 400 });
   }
 
@@ -23,20 +24,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Player count must be between 1 and 6." }, { status: 400 });
   }
 
-  const booking: BookingRecord = {
-    ...rawBooking,
-    players: String(playerCount),
-    sessionDurationMinutes: 60,
-    ipAddress: getRequestIpAddress(request) || rawBooking.ipAddress,
-    paymentStatus: "pending_payment",
-    notificationStatus: "Ready",
-    calendarStatus: "Ready",
-    calendarMessage: undefined,
-    calendarEventId: undefined,
-    calendarEventUrl: undefined
-  };
-
   try {
+    const { booking } = await createPendingBooking(
+      {
+        ...rawBooking,
+        players: String(playerCount),
+        sessionDurationMinutes: 60,
+        paymentStatus: "pending_payment",
+        notificationStatus: "Ready",
+        calendarStatus: "Ready",
+        calendarMessage: undefined,
+        calendarEventId: undefined,
+        calendarEventUrl: undefined
+      },
+      getRequestIpAddress(request) || rawBooking.ipAddress
+    );
+
     console.info("[EST Stripe] Creating checkout session", {
       bookingId: booking.id,
       playerName: booking.playerName,
@@ -45,6 +48,7 @@ export async function POST(request: Request) {
     });
 
     const session = await createStripeCheckoutSession(booking);
+    await attachStripeCheckoutSession(booking.id, session.id);
 
     console.info("[EST Stripe] Checkout session created", {
       bookingId: booking.id,
@@ -62,7 +66,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("[EST Stripe] Failed to create Checkout session", {
-      bookingId: booking.id,
+      bookingId: rawBooking.id || rawBooking.sessionId,
       error: error instanceof Error ? error.message : String(error)
     });
 
