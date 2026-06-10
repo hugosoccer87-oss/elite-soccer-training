@@ -139,6 +139,66 @@ export function isSlotAvailable(slot: TrainingSlot, blockedDays: string[]) {
   return slot.status === "open" && !blockedDays.includes(slot.dateIso) && getRemainingSpots(slot) > 0;
 }
 
+function getPacificNowParts(now: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  })
+    .formatToParts(now)
+    .reduce<Record<string, string>>((current, part) => {
+      if (part.type !== "literal") {
+        current[part.type] = part.value;
+      }
+
+      return current;
+    }, {});
+
+  return {
+    dateIso: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour) * 60 + Number(parts.minute)
+  };
+}
+
+function parseSlotTimeMinutes(value: string) {
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const suffix = match[3].toUpperCase();
+  const normalizedHour = suffix === "PM" && hour !== 12 ? hour + 12 : suffix === "AM" && hour === 12 ? 0 : hour;
+
+  return normalizedHour * 60 + minute;
+}
+
+export function isSlotInFuture(slot: TrainingSlot, now = new Date()) {
+  const current = getPacificNowParts(now);
+
+  if (slot.dateIso > current.dateIso) {
+    return true;
+  }
+
+  if (slot.dateIso < current.dateIso) {
+    return false;
+  }
+
+  const slotMinutes = parseSlotTimeMinutes(slot.time);
+
+  return slotMinutes === null ? true : slotMinutes > current.minutes;
+}
+
+export function isPublicSlotAvailable(slot: TrainingSlot, blockedDays: string[], now = new Date()) {
+  return isSlotAvailable(slot, blockedDays) && isSlotInFuture(slot, now);
+}
+
 export function getTrainingGroup(groupId: TrainingGroupId) {
   return trainingGroups.find((group) => group.id === groupId) ?? trainingGroups[0];
 }

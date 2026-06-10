@@ -11,7 +11,8 @@ import {
   getRemainingSpots,
   getTrainingGroup,
   isAgeInGroup,
-  isSlotAvailable,
+  isPublicSlotAvailable,
+  isSlotInFuture,
   normalizeTrainingSlot,
   slotCapacity,
   trainingGroups,
@@ -219,12 +220,11 @@ export function BookingForm() {
   const [step, setStep] = useState<BookingStep>("program");
   const [slots, setSlots] = useState<TrainingSlot[]>(defaultTrainingSlots);
   const [blockedDays, setBlockedDays] = useState<string[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<TrainingGroupId>(trainingGroups[0].id);
-  const [selectedDate, setSelectedDate] = useState(
-    defaultTrainingSlots.find((slot) => slot.groupId === trainingGroups[0].id)?.dateIso ?? ""
-  );
+  const [selectedGroupId, setSelectedGroupId] = useState<TrainingGroupId | "">("");
+  const [selectedDate, setSelectedDate] = useState("");
   const [selectedSlotId, setSelectedSlotId] = useState("");
   const [isSpecialRequest, setIsSpecialRequest] = useState(false);
+  const [isLoadingAvailability, setIsLoadingAvailability] = useState(true);
   const [fields, setFields] = useState<BookingFields>(initialFields);
   const [fieldErrors, setFieldErrors] = useState<BookingFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -233,15 +233,10 @@ export function BookingForm() {
   useEffect(() => {
     const currentSlots = readSlots();
     const currentBlockedDays = readBlockedDays();
-    const firstOpenSlot = currentSlots.find(
-      (slot) => slot.groupId === selectedGroupId && isSlotAvailable(slot, currentBlockedDays)
-    );
-
     let active = true;
 
     setSlots(currentSlots);
     setBlockedDays(currentBlockedDays);
-    setSelectedDate(firstOpenSlot?.dateIso ?? "");
 
     readSyncedSlots().then((syncedSlots) => {
       if (!active || !syncedSlots) {
@@ -250,25 +245,53 @@ export function BookingForm() {
 
       const normalizedSlots = saveSlots(syncedSlots);
       const nextBlockedDays = readBlockedDays();
-      const nextFirstOpenSlot = normalizedSlots.find(
-        (slot) => slot.groupId === selectedGroupId && isSlotAvailable(slot, nextBlockedDays)
-      );
 
       setSlots(normalizedSlots);
       setBlockedDays(nextBlockedDays);
-      setSelectedDate(nextFirstOpenSlot?.dateIso ?? "");
       setSelectedSlotId("");
+    }).finally(() => {
+      if (active) {
+        setIsLoadingAvailability(false);
+      }
     });
 
     return () => {
       active = false;
     };
-  }, [selectedGroupId]);
+  }, []);
 
   const openSlots = useMemo(
-    () => slots.filter((slot) => slot.groupId === selectedGroupId && isSlotAvailable(slot, blockedDays)),
+    () =>
+      slots
+        .filter((slot) => (!selectedGroupId || slot.groupId === selectedGroupId) && isPublicSlotAvailable(slot, blockedDays))
+        .sort((a, b) => `${a.dateIso} ${a.time}`.localeCompare(`${b.dateIso} ${b.time}`)),
     [slots, blockedDays, selectedGroupId]
   );
+
+  useEffect(() => {
+    if (openSlots.length === 0) {
+      if (selectedDate) {
+        setSelectedDate("");
+      }
+
+      if (selectedSlotId) {
+        setSelectedSlotId("");
+      }
+
+      return;
+    }
+
+    const hasSelectedDate = selectedDate && openSlots.some((slot) => slot.dateIso === selectedDate);
+    const hasSelectedSlot = selectedSlotId && openSlots.some((slot) => slot.id === selectedSlotId);
+
+    if (!hasSelectedDate) {
+      setSelectedDate(openSlots[0].dateIso);
+    }
+
+    if (selectedSlotId && !hasSelectedSlot) {
+      setSelectedSlotId("");
+    }
+  }, [openSlots, selectedDate, selectedSlotId]);
 
   const dates = useMemo(() => {
     const uniqueDates = new Map<string, TrainingSlot>();
@@ -281,7 +304,8 @@ export function BookingForm() {
   }, [openSlots]);
 
   const selectedSlot = openSlots.find((slot) => slot.id === selectedSlotId);
-  const selectedGroup = getTrainingGroup(selectedGroupId);
+  const selectedGroup = selectedGroupId ? getTrainingGroup(selectedGroupId) : null;
+  const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.groupId) : selectedGroup;
   const displaySlot = selectedSlot;
   const dateSlots = openSlots.filter((slot) => slot.dateIso === selectedDate);
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
@@ -290,6 +314,28 @@ export function BookingForm() {
   const selectedRemainingSpots = selectedSlot ? getRemainingSpots(selectedSlot) : slotCapacity;
   const playerOptions = Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = formatCurrencyFromCents(getSessionTotalCents(fields.players));
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
+      return;
+    }
+
+    const futureSlots = slots.filter((slot) => isSlotInFuture(slot));
+    const dateFilteredSlots = futureSlots.filter((slot) => !selectedDate || slot.dateIso === selectedDate);
+    const programSlots = dateFilteredSlots.filter((slot) => !selectedGroupId || slot.groupId === selectedGroupId);
+    const capacitySlots = programSlots.filter((slot) => isPublicSlotAvailable(slot, blockedDays));
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+
+    console.info("[EST Booking Debug] Availability filters", {
+      mobile: isMobile,
+      selectedTrainingGroup: selectedGroupId || "none",
+      selectedDate: selectedDate || "none",
+      totalSessionsLoaded: slots.length,
+      sessionsAfterDateFilter: dateFilteredSlots.length,
+      sessionsAfterProgramFilter: programSlots.length,
+      sessionsAfterCapacityFilter: capacitySlots.length
+    });
+  }, [blockedDays, selectedDate, selectedGroupId, slots]);
 
   function clearFieldError(field: BookingFieldErrorKey) {
     setFieldErrors((current) => {
@@ -347,8 +393,10 @@ export function BookingForm() {
     setError("");
   }
 
-  function selectGroup(groupId: TrainingGroupId) {
-    const nextGroupSlot = slots.find((slot) => slot.groupId === groupId && isSlotAvailable(slot, blockedDays));
+  function selectGroup(groupId: TrainingGroupId | "") {
+    const nextGroupSlot = slots.find(
+      (slot) => (!groupId || slot.groupId === groupId) && isPublicSlotAvailable(slot, blockedDays)
+    );
 
     setIsSpecialRequest(false);
     setSelectedGroupId(groupId);
@@ -367,7 +415,7 @@ export function BookingForm() {
       return;
     }
 
-    selectGroup(value as TrainingGroupId);
+    selectGroup(value as TrainingGroupId | "");
   }
 
   function requireSchedule() {
@@ -403,8 +451,8 @@ export function BookingForm() {
 
       if (!Number.isInteger(playerAge)) {
         nextErrors.playerAge = "Enter a valid whole-number age.";
-      } else if (!isAgeInGroup(playerAge, selectedGroupId)) {
-        nextErrors.playerAge = `${selectedGroup.name} is for ${selectedGroup.ages}. Choose the correct training group.`;
+      } else if (bookingGroup && !isAgeInGroup(playerAge, bookingGroup.id)) {
+        nextErrors.playerAge = `${bookingGroup.name} is for ${bookingGroup.ages}. Choose the correct training group.`;
       }
     }
 
@@ -492,8 +540,8 @@ export function BookingForm() {
 
     if (
       !latestSlot ||
-      latestSlot.groupId !== selectedGroupId ||
-      !isSlotAvailable(latestSlot, latestBlockedDays) ||
+      latestSlot.groupId !== selectedSlot.groupId ||
+      !isPublicSlotAvailable(latestSlot, latestBlockedDays) ||
       !Number.isInteger(requestedPlayers) ||
       requestedPlayers < 1 ||
       requestedPlayers > latestRemainingSpots
@@ -523,8 +571,8 @@ export function BookingForm() {
       waiverAcceptedAt: bookingTimestamp,
       waiverVersion,
       mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined",
-      programId: selectedGroupId,
-      programName: selectedGroup.name,
+      programId: latestSlot.groupId,
+      programName: getTrainingGroup(latestSlot.groupId).name,
       sessionId: selectedSlot.id,
       sessionDateIso: latestSlot.dateIso,
       sessionDate: latestSlot.dateLabel,
@@ -598,7 +646,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Select the best training group first. Exact player age is collected later for Coach Hugo's records.
+                Select a training group to narrow the schedule, or view all open training times first. Exact player age is collected later for Coach Hugo's records.
               </p>
             </div>
 
@@ -609,6 +657,7 @@ export function BookingForm() {
                 value={isSpecialRequest ? specialTrainingRequestValue : selectedGroupId}
                 onChange={(event) => selectTrainingGroup(event.target.value)}
               >
+                <option value="">All Available Training Groups</option>
                 {trainingGroups.map((group) => (
                   <option key={group.id} value={group.id}>
                     {group.name}: {group.ages}
@@ -624,16 +673,27 @@ export function BookingForm() {
               </div>
             ) : (
               <>
-                <div className="rounded-lg border border-slate-200 bg-mist p-5">
-                  <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
-                  <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
-                  <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-2">
-                    {selectedGroup.focus.map((item) => (
-                      <p key={item}>{item}</p>
-                    ))}
+                {selectedGroup ? (
+                  <div className="rounded-lg border border-slate-200 bg-mist p-5">
+                    <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
+                    <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+                    <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-2">
+                      {selectedGroup.focus.map((item) => (
+                        <p key={item}>{item}</p>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-mist p-5">
+                    <p className="text-xs font-black uppercase text-electric">Available Sessions</p>
+                    <h4 className="mt-2 text-2xl font-black text-navy">Choose from open training times</h4>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      View all open Future Elite and Elite Performance sessions, or select a group above to narrow the schedule.
+                    </p>
+                    <p className="mt-3 text-sm font-bold text-slate-700">{groupSizeMessage}</p>
+                  </div>
+                )}
 
                 <button
                   type="button"
@@ -652,7 +712,9 @@ export function BookingForm() {
             <div>
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
-              <p className="mt-2 text-sm font-bold text-slate-600">{selectedGroup.ages}</p>
+              <p className="mt-2 text-sm font-bold text-slate-600">
+                {selectedGroup ? selectedGroup.ages : "All available training groups"}
+              </p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
             </div>
 
@@ -687,38 +749,67 @@ export function BookingForm() {
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {dateSlots.map((slot) => (
-                    <button
-                      key={slot.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedSlotId(slot.id);
-                        clearFieldError("session");
-                        setFields((current) => ({
-                          ...current,
-                          players: String(Math.min(Number(current.players) || 1, getRemainingSpots(slot)))
-                        }));
-                      }}
-                      className={`rounded-lg border p-4 text-left transition ${
-                        selectedSlotId === slot.id
-                          ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
-                          : "border-slate-200 bg-white text-navy hover:border-electric"
-                      }`}
-                    >
-                      <span className="block text-xl font-black">{slot.time}</span>
-                      <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
-                      <span className="mt-2 block text-xs font-black uppercase text-electric">{spotsLabel(getRemainingSpots(slot))}</span>
-                    </button>
-                  ))}
+                  {dateSlots.map((slot) => {
+                    const slotGroup = getTrainingGroup(slot.groupId);
+                    const isSelected = selectedSlotId === slot.id;
+
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSlotId(slot.id);
+                          clearFieldError("session");
+                          setFields((current) => ({
+                            ...current,
+                            players: String(Math.min(Number(current.players) || 1, getRemainingSpots(slot)))
+                          }));
+                        }}
+                        className={`rounded-lg border p-4 text-left transition ${
+                          isSelected
+                            ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
+                            : "border-slate-200 bg-white text-navy hover:border-electric"
+                        }`}
+                      >
+                        <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
+                          {slot.dateLabel}
+                        </span>
+                        <span className="mt-1 block text-lg font-black">{slot.time}</span>
+                        <span className="mt-2 block text-sm font-bold opacity-90">
+                          {slotGroup.name} · {slotGroup.ages}
+                        </span>
+                        <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
+                        <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(getRemainingSpots(slot))}</span>
+                        <span
+                          className={`mt-4 inline-flex rounded-md px-3 py-2 text-xs font-black uppercase ${
+                            isSelected ? "bg-electric text-white" : "bg-mist text-navy"
+                          }`}
+                        >
+                          {isSelected ? "Selected" : "Select Session"}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
                 {fieldErrorMessage("session")}
               </div>
             ) : (
               <div data-booking-field="session" tabIndex={-1} className="rounded-lg border border-slate-200 bg-mist p-6 outline-none">
-                <p className="font-black text-navy">No open training slots are currently available.</p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Check back soon or call <a className="font-black underline" href={business.phoneHref}>{business.phone}</a> for schedule help.
-                </p>
+                {isLoadingAvailability ? (
+                  <>
+                    <p className="font-black text-navy">Loading available sessions...</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">Checking the latest open training times.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-black text-navy">
+                      No open sessions are available for this selection. Please check another training group or date.
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      You can also call <a className="font-black underline" href={business.phoneHref}>{business.phone}</a> for schedule help.
+                    </p>
+                  </>
+                )}
                 {fieldErrorMessage("session")}
               </div>
             )}
@@ -1063,7 +1154,7 @@ export function BookingForm() {
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
                   <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.time}</p>
                   <p>{fields.players} player(s) attending</p>
-                  <p>{selectedGroup.name}</p>
+                  <p>{bookingGroup?.name ?? "Selected training group"}</p>
                   <p className="mt-2 text-xs font-bold uppercase text-slate-500">{groupSizeMessage}</p>
                   <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
                     {fields.players} x {sessionPriceLabel} = {paymentTotal}
