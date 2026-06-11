@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { business } from "@/lib/site-data";
 import type { AdminBookingRecord, AdminTrainingSession } from "@/lib/supabase-db";
+import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
 
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
@@ -64,6 +65,20 @@ type SessionsResponse = {
   error?: string;
 };
 
+type ActiveWaiverRecord = {
+  booking: AdminBookingRecord;
+  session: AdminTrainingSession;
+};
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function formatDateTime(value: string, timeZone = "America/Los_Angeles") {
   const date = new Date(value);
 
@@ -117,8 +132,9 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
   const waiver = booking.waiver;
 
   return [
-    "Elite Soccer Training CV - Waiver Record",
+    "Elite Soccer Training CV - Signed Waiver Record",
     "",
+    "Business Name: Elite Soccer Training CV",
     `Booking ID: ${booking.id}`,
     `Training Group: ${bookingProgramLabel(booking)}`,
     `Session: ${session ? formatDateTime(session.start_datetime, session.timezone) : "Not recorded"}`,
@@ -144,8 +160,53 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
     `Payment Status: ${booking.status}`,
     `Stripe Checkout Session: ${booking.stripe_checkout_session_id || "Not recorded"}`,
     `Stripe Payment Intent: ${booking.stripe_payment_intent_id || "Not recorded"}`,
-    `Google Calendar Event ID: ${booking.calendarEvent?.google_calendar_event_id || "Not recorded"}`
+    `Google Calendar Event ID: ${booking.calendarEvent?.google_calendar_event_id || "Not recorded"}`,
+    "",
+    "Full Waiver Legal Text Agreed To By Parent/Guardian",
+    "",
+    ...waiverSections.flatMap((section) => [section.title, section.copy, ""]),
+    waiverRecordFooter
   ].join("\n");
+}
+
+function printableWaiverHtml(booking: AdminBookingRecord, session?: AdminTrainingSession) {
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <title>Elite Soccer Training CV - Signed Waiver Record</title>
+        <style>
+          body { background:#f4f6f8; color:#06152b; font-family: Arial, sans-serif; margin:0; padding:32px; }
+          main { background:#fffdf8; border:1px solid #cbd5e1; margin:0 auto; max-width:820px; padding:42px; }
+          h1 { font-size:24px; margin:0 0 8px; }
+          pre { color:#334155; font-family: Arial, sans-serif; font-size:13px; line-height:1.65; white-space:pre-wrap; }
+          @media print {
+            body { background:#fff; padding:0; }
+            main { border:0; max-width:none; padding:24px; }
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Elite Soccer Training CV - Signed Waiver Record</h1>
+          <pre>${escapeHtml(bookingWaiverRecordText(booking, session))}</pre>
+        </main>
+      </body>
+    </html>
+  `;
+}
+
+function printWaiverRecord(booking: AdminBookingRecord, session?: AdminTrainingSession) {
+  const popup = window.open("", "_blank", "noopener,noreferrer,width=900,height=900");
+
+  if (!popup) {
+    return;
+  }
+
+  popup.document.write(printableWaiverHtml(booking, session));
+  popup.document.close();
+  popup.focus();
+  popup.print();
 }
 
 function downloadWaiverRecord(booking: AdminBookingRecord, session?: AdminTrainingSession) {
@@ -207,6 +268,7 @@ export function AdminAvailability() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null);
+  const [activeWaiverRecord, setActiveWaiverRecord] = useState<ActiveWaiverRecord | null>(null);
 
   async function refreshAdminData(message?: string) {
     try {
@@ -650,13 +712,29 @@ export function AdminAvailability() {
                                     <p className="sm:col-span-2"><span className="font-black text-navy">Medical:</span> {booking.waiver?.emergency_medical_notes || booking.medical_notes || "None"}</p>
                                   </div>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => downloadWaiverRecord(booking, session)}
-                                  className="rounded-md border border-navy px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
-                                >
-                                  Download Waiver Record
-                                </button>
+                                <div className="flex flex-col gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveWaiverRecord({ booking, session })}
+                                    className="rounded-md bg-navy px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-electric"
+                                  >
+                                    View Waiver Record
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => printWaiverRecord(booking, session)}
+                                    className="rounded-md border border-navy px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
+                                  >
+                                    Print Waiver
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadWaiverRecord(booking, session)}
+                                    className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
+                                  >
+                                    Download Waiver Record
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </article>
@@ -689,6 +767,40 @@ export function AdminAvailability() {
           </div>
         </div>
       </section>
+
+      {activeWaiverRecord ? (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-navy/70 px-4 py-8">
+          <div className="mx-auto max-w-4xl border border-slate-300 bg-[#fffdf8] p-5 shadow-2xl sm:p-8">
+            <div className="flex flex-col gap-4 border-b border-slate-300 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
+                <h3 className="mt-1 text-2xl font-black text-navy">
+                  Signed waiver for {activeWaiverRecord.booking.player_name}
+                </h3>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => printWaiverRecord(activeWaiverRecord.booking, activeWaiverRecord.session)}
+                  className="rounded-md bg-navy px-4 py-2 text-xs font-black uppercase text-white"
+                >
+                  Print Waiver
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveWaiverRecord(null)}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <pre className="mt-5 whitespace-pre-wrap text-sm leading-7 text-slate-700">
+              {bookingWaiverRecordText(activeWaiverRecord.booking, activeWaiverRecord.session)}
+            </pre>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

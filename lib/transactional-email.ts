@@ -6,6 +6,7 @@ import {
 } from "@/lib/site-data";
 import { bookingNotificationEmail, type BookingRecord } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
+import { buildSignedWaiverPdf, signedWaiverPdfFileName } from "@/lib/waiver-pdf";
 
 type NodemailerModule = {
   default?: {
@@ -40,6 +41,11 @@ type EmailMessage = {
   subject: string;
   text: string;
   html: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    contentType: string;
+  }>;
 };
 
 type EmailResult = {
@@ -298,6 +304,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     `Payment: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
     `Location: ${business.location}`,
     `Waiver: ${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}`,
+    "Your waiver has been signed and recorded for this session.",
     `Media consent: ${booking.mediaConsent || "Not recorded"}`,
     "",
     ...bookingArrivalInstructions,
@@ -317,6 +324,7 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     intro: "Your small group soccer training session is confirmed.",
     body: `
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(booking.parentName)}, your Elite Soccer Training CV session is confirmed. We look forward to training with ${escapeHtml(booking.playerName)}.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Your waiver has been signed and recorded for this session.</p>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
         ${detailsRows(rows)}
       </table>
@@ -395,6 +403,44 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     text,
     html
   };
+}
+
+function buildAdminWaiverAttachment(booking: BookingRecord): EmailMessage["attachments"] {
+  try {
+    console.info("[EST Waiver] Building signed waiver PDF", {
+      bookingId: booking.id,
+      playerName: booking.playerName
+    });
+    const pdf = buildSignedWaiverPdf(booking);
+
+    console.info("[EST Waiver] Signed waiver PDF built successfully", {
+      bookingId: booking.id,
+      bytes: pdf.byteLength
+    });
+    console.info("[EST Waiver] Waiver PDF attached to admin email", {
+      bookingId: booking.id,
+      filename: signedWaiverPdfFileName(booking)
+    });
+
+    return [
+      {
+        filename: signedWaiverPdfFileName(booking),
+        content: pdf,
+        contentType: "application/pdf"
+      }
+    ];
+  } catch (error) {
+    console.error("[EST Waiver] Waiver PDF generation failed", {
+      bookingId: booking.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    console.error("[EST Waiver] Waiver PDF attachment failed", {
+      bookingId: booking.id,
+      reason: "PDF could not be generated."
+    });
+
+    return undefined;
+  }
 }
 
 export async function sendAdminTestEmail() {
@@ -476,6 +522,7 @@ export async function sendAdminTestEmail() {
 export async function sendBookingTransactionalEmails(booking: BookingRecord): Promise<EmailResult> {
   const customer = customerEmail(booking);
   const admin = adminEmail(booking);
+  admin.attachments = buildAdminWaiverAttachment(booking);
   const baseAttempt = {
     bookingId: booking.id,
     smtpConfigured: isSmtpConfigured(),
@@ -525,12 +572,32 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
   try {
     const transport = await createTransport();
 
-    const [customerResult, adminResult] = await Promise.allSettled([
+    const [customerResult, firstAdminResult] = await Promise.allSettled([
       transport.sendMail(customer),
       transport.sendMail(admin)
     ]);
     const customerSent = customerResult.status === "fulfilled";
-    const adminSent = adminResult.status === "fulfilled";
+    let adminResult = firstAdminResult;
+    let adminSent = firstAdminResult.status === "fulfilled";
+
+    if (!adminSent && admin.attachments?.length) {
+      const attachmentError =
+        firstAdminResult.status === "rejected" ? firstAdminResult.reason : "Admin email failed with attachment.";
+      console.error("[EST Waiver] Waiver PDF attachment failed", {
+        bookingId: booking.id,
+        error: attachmentError instanceof Error ? attachmentError.message : String(attachmentError)
+      });
+
+      const fallbackAdmin = {
+        ...admin,
+        attachments: undefined
+      };
+      adminResult = await Promise.resolve(transport.sendMail(fallbackAdmin)).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason) => ({ status: "rejected" as const, reason })
+      );
+      adminSent = adminResult.status === "fulfilled";
+    }
 
     if (customerSent) {
       console.info("[EST Email] Customer email sent successfully", {
@@ -546,7 +613,7 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
       });
     }
 
-    if (adminSent) {
+    if (adminResult.status === "fulfilled") {
       console.info("[EST Email] Admin email sent successfully", {
         to: admin.to,
         bookingId: booking.id,
