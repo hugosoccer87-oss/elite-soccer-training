@@ -5,7 +5,13 @@ import {
   refundCancellationReminder
 } from "@/lib/site-data";
 import { bookingNotificationEmail, type BookingRecord } from "@/lib/booking-data";
-import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
+import {
+  formatCurrencyFromCents,
+  getLaunchPassOption,
+  getSessionTotalCents,
+  sessionPriceLabel
+} from "@/lib/pricing";
+import type { PassPurchaseRow } from "@/lib/supabase-db";
 import { buildSignedWaiverPdf, signedWaiverPdfFileName } from "@/lib/waiver-pdf";
 
 type NodemailerModule = {
@@ -49,6 +55,13 @@ type EmailMessage = {
 };
 
 type EmailResult = {
+  sent: boolean;
+  customerSent: boolean;
+  adminSent: boolean;
+  message?: string;
+};
+
+type PassEmailResult = {
   sent: boolean;
   customerSent: boolean;
   adminSent: boolean;
@@ -255,6 +268,18 @@ function formatWaiverAcceptedAt(booking: BookingRecord) {
   });
 }
 
+function bookingPaymentText(booking: BookingRecord) {
+  if (booking.paymentType === "launch_pass_credit") {
+    return "Paid using Launch Pass credit.";
+  }
+
+  return `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`;
+}
+
+function bookingPaymentStatusText(booking: BookingRecord) {
+  return booking.paymentType === "launch_pass_credit" ? "Paid using Launch Pass credit" : "Payment confirmed";
+}
+
 function brandedEmailShell({ title, intro, body }: { title: string; intro: string; body: string }) {
   return `
     <!doctype html>
@@ -285,8 +310,8 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     ["Program", booking.programName],
     ["Player", booking.playerName],
     ["Player Count", booking.players],
-    ["Payment Status", "Payment confirmed"],
-    ["Payment", `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`],
+    ["Payment Status", bookingPaymentStatusText(booking)],
+    ["Payment", bookingPaymentText(booking)],
     ["Location", business.location],
     ["Waiver", `${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}${booking.waiverAcceptedAt ? ` on ${formatWaiverAcceptedAt(booking)}` : ""}`],
     ["Media Consent", booking.mediaConsent || "Not recorded"],
@@ -300,8 +325,8 @@ function customerEmail(booking: BookingRecord): EmailMessage {
     `Your session is confirmed for ${booking.sessionDate} at ${booking.sessionTime}.`,
     `Program: ${booking.programName}`,
     `Player count: ${booking.players}`,
-    "Payment status: Payment confirmed",
-    `Payment: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
+    `Payment status: ${bookingPaymentStatusText(booking)}`,
+    `Payment: ${bookingPaymentText(booking)}`,
     `Location: ${business.location}`,
     `Waiver: ${booking.waiverAccepted ? "Accepted electronically" : "Not recorded"}`,
     "Your waiver has been signed and recorded for this session.",
@@ -372,7 +397,9 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     ["Date / Time", `${booking.sessionDate} at ${booking.sessionTime}`],
     ["Location", business.location],
     ["Number of Players", booking.players],
-    ["Payment Amount", `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`],
+    ["Payment Type", booking.paymentType === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"],
+    ["Payment Amount", bookingPaymentText(booking)],
+    ["Remaining Launch Pass Credits", typeof booking.remainingCreditsAfter === "number" ? String(booking.remainingCreditsAfter) : "Not applicable"],
     ["Notes", booking.notes || "None"],
     ["Medical Notes/Injuries", booking.medicalNotes || "None"],
     ["Emergency Contact", `${booking.emergencyName} - ${booking.emergencyPhone}`],
@@ -403,6 +430,93 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     subject: `New paid EST booking: ${booking.playerName} - ${booking.programName}`,
     text,
     html
+  };
+}
+
+function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
+  const option = getLaunchPassOption(pass.pass_type);
+  const bookingUrl = `${(process.env.NEXT_PUBLIC_SITE_URL || "https://www.elitesoccertrainingcv.com").replace(/\/$/, "")}/booking`;
+  const rows: Array<[string, string]> = [
+    ["Launch Pass", option.title],
+    ["Player", pass.player_name],
+    ["Training Group", pass.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
+    ["Credits", `${pass.total_credits} session credits`],
+    ["Remaining Credits", String(pass.remaining_credits)],
+    ["Expiration", "June 30, 2026"],
+    ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)]
+  ];
+  const text = [
+    "Elite Soccer Training CV Launch Pass Confirmation",
+    "",
+    `Hi ${pass.parent_name},`,
+    "",
+    "Your Launch Pass has been purchased. You can now book sessions using your pass credits.",
+    "",
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    `Book sessions: ${bookingUrl}`,
+    "",
+    `Questions? Email ${business.email} or call ${business.phone}.`
+  ].join("\n");
+  const html = brandedEmailShell({
+    title: "Launch Pass Confirmed",
+    intro: "Your Launch Pass has been purchased. You can now book sessions using your pass credits.",
+    body: `
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(pass.parent_name)}, your Elite Soccer Training CV ${escapeHtml(option.title)} is active for ${escapeHtml(pass.player_name)}.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
+        ${detailsRows(rows)}
+      </table>
+      <div style="margin-top:22px;border-left:4px solid #1783ff;background:#eef6ff;padding:16px;color:#334155;line-height:1.6">
+        <strong style="color:#06152b">Next step</strong><br />
+        <p style="margin:10px 0 0">Visit the booking page and choose "Use Existing Launch Pass Credits" to reserve sessions with this pass.</p>
+        <p style="margin:10px 0 0"><a href="${escapeHtml(bookingUrl)}" style="color:#1783ff;font-weight:800">Book sessions</a></p>
+      </div>
+    `
+  });
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: pass.parent_email,
+    replyTo: business.email,
+    subject: "Elite Soccer Training CV Launch Pass Confirmation",
+    text,
+    html
+  };
+}
+
+function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
+  const option = getLaunchPassOption(pass.pass_type);
+  const rows: Array<[string, string]> = [
+    ["Pass Purchase ID", pass.id],
+    ["Parent/Guardian", pass.parent_name],
+    ["Parent Email", pass.parent_email],
+    ["Parent Phone", pass.parent_phone],
+    ["Player", pass.player_name],
+    ["Player Age", pass.player_age],
+    ["Training Group", pass.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
+    ["Pass Type", option.title],
+    ["Credits", `${pass.total_credits} total / ${pass.remaining_credits} remaining`],
+    ["Expiration", "June 30, 2026"],
+    ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)],
+    ["Stripe Checkout Session", pass.stripe_checkout_session_id || "Not recorded"],
+    ["Stripe Payment Intent", pass.stripe_payment_intent_id || "Not recorded"]
+  ];
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: bookingNotificationEmail,
+    replyTo: pass.parent_email,
+    subject: `New EST CV Launch Pass: ${pass.player_name} - ${option.title}`,
+    text: rows.map(([label, value]) => `${label}: ${value}`).join("\n"),
+    html: brandedEmailShell({
+      title: "New Launch Pass Purchase",
+      intro: "A parent purchased an Elite Soccer Training CV Launch Pass.",
+      body: `
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+          ${detailsRows(rows)}
+        </table>
+      `
+    })
   };
 }
 
@@ -665,6 +779,135 @@ export async function sendBookingTransactionalEmails(booking: BookingRecord): Pr
       customerSent: false,
       adminSent: false,
       message: error instanceof Error ? error.message : "Transactional email failed to send."
+    };
+  }
+}
+
+export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): Promise<PassEmailResult> {
+  const customer = launchPassCustomerEmail(pass);
+  const admin = launchPassAdminEmail(pass);
+  const baseAttempt = {
+    bookingId: pass.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Launch Pass confirmed, but emails were not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      passPurchaseId: pass.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message
+    };
+  }
+
+  console.info("[EST Email] Preparing customer confirmation email", {
+    passPurchaseId: pass.id,
+    type: "launch_pass"
+  });
+  console.info("[EST Email] Customer recipient:", {
+    passPurchaseId: pass.id,
+    to: customer.to
+  });
+  console.info("[EST Email] Preparing admin notification email", {
+    passPurchaseId: pass.id,
+    type: "launch_pass"
+  });
+  console.info("[EST Email] Admin recipient:", {
+    passPurchaseId: pass.id,
+    to: admin.to
+  });
+
+  try {
+    const transport = await createTransport();
+    const [customerResult, adminResult] = await Promise.allSettled([
+      transport.sendMail(customer),
+      transport.sendMail(admin)
+    ]);
+    const customerSent = customerResult.status === "fulfilled";
+    const adminSent = adminResult.status === "fulfilled";
+
+    if (customerSent) {
+      console.info("[EST Email] Customer email sent successfully", {
+        to: customer.to,
+        passPurchaseId: pass.id,
+        messageId: customerResult.value.messageId
+      });
+    } else {
+      console.error("[EST Email] Customer email failed:", {
+        to: customer.to,
+        passPurchaseId: pass.id,
+        error: customerResult.reason instanceof Error ? customerResult.reason.message : String(customerResult.reason)
+      });
+    }
+
+    if (adminSent) {
+      console.info("[EST Email] Admin email sent successfully", {
+        to: admin.to,
+        passPurchaseId: pass.id,
+        messageId: adminResult.value.messageId
+      });
+    } else {
+      console.error("[EST Email] Admin email failed:", {
+        to: admin.to,
+        passPurchaseId: pass.id,
+        error: adminResult.reason instanceof Error ? adminResult.reason.message : String(adminResult.reason)
+      });
+    }
+
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: customerSent ? "sent" : "failed",
+      adminStatus: adminSent ? "sent" : "failed",
+      message: customerSent && adminSent ? undefined : "One or more Launch Pass emails failed to send."
+    });
+
+    return {
+      sent: customerSent && adminSent,
+      customerSent,
+      adminSent,
+      message: customerSent && adminSent ? undefined : "One or more Launch Pass emails failed to send."
+    };
+  } catch (error) {
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message: error instanceof Error ? error.message : "Launch Pass email failed to send."
+    });
+
+    console.error("[EST Email] Customer email failed:", {
+      to: customer.to,
+      passPurchaseId: pass.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    console.error("[EST Email] Admin email failed:", {
+      to: admin.to,
+      passPurchaseId: pass.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message: error instanceof Error ? error.message : "Launch Pass email failed to send."
     };
   }
 }

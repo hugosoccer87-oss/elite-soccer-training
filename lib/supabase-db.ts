@@ -6,6 +6,11 @@ import {
   type TrainingGroupId
 } from "@/lib/booking-data";
 import { sessionUnitAmountCents } from "@/lib/pricing";
+import {
+  getLaunchPassOption,
+  launchPassExpirationDate,
+  type LaunchPassType
+} from "@/lib/pricing";
 import { business } from "@/lib/site-data";
 import type { PublicAvailableSession, PublicAvailabilityDebugResponse, PublicAvailabilityResponse } from "@/lib/public-availability";
 
@@ -46,8 +51,44 @@ export type BookingRow = {
   medical_notes?: string | null;
   emergency_name?: string | null;
   emergency_phone?: string | null;
+  payment_type?: "single_session" | "launch_pass_credit";
+  pass_purchase_id?: string | null;
+  credit_redemption_id?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type PassPurchaseRow = {
+  id: string;
+  parent_name: string;
+  parent_email: string;
+  parent_phone: string;
+  player_name: string;
+  player_age: string;
+  training_group: TrainingGroupId;
+  pass_type: LaunchPassType;
+  total_credits: number;
+  remaining_credits: number;
+  amount_paid: number;
+  status: "pending_payment" | "paid" | "cancelled" | "expired";
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreditRedemptionRow = {
+  id: string;
+  pass_purchase_id: string;
+  booking_id: string;
+  session_id: string;
+  credits_used: number;
+  created_at: string;
+};
+
+export type AdminPassPurchase = PassPurchaseRow & {
+  redemptions: Array<CreditRedemptionRow & { booking?: BookingRow | null }>;
 };
 
 export type WaiverRow = {
@@ -85,6 +126,8 @@ export type AdminBookingRecord = BookingRow & {
   waiver?: WaiverRow | null;
   calendarEvent?: CalendarEventRow | null;
   emailLogs: EmailLogRow[];
+  passPurchase?: PassPurchaseRow | null;
+  creditRedemption?: CreditRedemptionRow | null;
 };
 
 export type AdminTrainingSession = TrainingSessionRow & {
@@ -273,6 +316,50 @@ async function listPaidBookings() {
   return supabaseRequest<BookingRow[]>("bookings?select=*&status=eq.paid");
 }
 
+function toBookingRecordFromRows(input: {
+  booking: BookingRow;
+  session: TrainingSessionRow;
+  waiver?: WaiverRow | null;
+  remainingCreditsAfter?: number;
+}): BookingRecord {
+  const publicSession = toPublicSession(input.session, 0);
+
+  return {
+    id: input.booking.id,
+    createdAt: input.booking.created_at,
+    parentName: input.booking.parent_name,
+    playerName: input.booking.player_name,
+    playerAge: input.booking.player_age,
+    phone: input.booking.parent_phone,
+    email: input.booking.parent_email,
+    players: String(input.booking.player_count || 1),
+    notes: input.booking.notes || "",
+    medicalNotes: input.booking.medical_notes || input.waiver?.emergency_medical_notes || "",
+    emergencyName: input.booking.emergency_name || "",
+    emergencyPhone: input.booking.emergency_phone || "",
+    guardianSignature: input.waiver?.typed_signature || "",
+    waiverAccepted: Boolean(input.waiver?.waiver_signed),
+    waiverAcceptedAt: input.waiver?.signed_at || "",
+    waiverVersion: "",
+    ipAddress: input.waiver?.ip_address || "",
+    mediaConsent: input.waiver?.media_consent || "Granted",
+    programId: input.session.training_group,
+    programName: publicSession.trainingGroup,
+    sessionId: input.session.id,
+    sessionDateIso: publicSession.date,
+    sessionDate: publicSession.dateLabel,
+    sessionTime: publicSession.startTime,
+    sessionDurationMinutes: 60,
+    paymentStatus: input.booking.status === "paid" ? "Paid" : input.booking.status === "pending_payment" ? "pending_payment" : "Failed",
+    notificationStatus: "Ready",
+    calendarStatus: "Ready",
+    paymentType: input.booking.payment_type || "single_session",
+    passPurchaseId: input.booking.pass_purchase_id || undefined,
+    creditRedemptionId: input.booking.credit_redemption_id || undefined,
+    remainingCreditsAfter: input.remainingCreditsAfter
+  };
+}
+
 export async function getSupabaseAvailability(): Promise<PublicAvailabilityResponse> {
   if (!isSupabaseConfigured()) {
     return {
@@ -423,20 +510,45 @@ export async function deleteTrainingSession(id: string) {
 }
 
 export async function listAdminBookings() {
-  const [bookings, waivers, calendarEvents, emailLogs] = await Promise.all([
+  const [bookings, waivers, calendarEvents, emailLogs, passPurchases, redemptions] = await Promise.all([
     supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc"),
     supabaseRequest<WaiverRow[]>("waivers?select=*"),
     supabaseRequest<CalendarEventRow[]>("calendar_events?select=*"),
-    supabaseRequest<EmailLogRow[]>("email_logs?select=*&order=created_at.desc")
+    supabaseRequest<EmailLogRow[]>("email_logs?select=*&order=created_at.desc"),
+    supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => [])
   ]);
   const waiverMap = new Map(waivers.map((waiver) => [waiver.booking_id, waiver]));
   const calendarMap = new Map(calendarEvents.map((event) => [event.booking_id, event]));
+  const passMap = new Map(passPurchases.map((pass) => [pass.id, pass]));
+  const redemptionMap = new Map(redemptions.map((redemption) => [redemption.booking_id, redemption]));
 
   return bookings.map((booking) => ({
     ...booking,
     waiver: waiverMap.get(booking.id) ?? null,
     calendarEvent: calendarMap.get(booking.id) ?? null,
-    emailLogs: emailLogs.filter((log) => log.booking_id === booking.id)
+    emailLogs: emailLogs.filter((log) => log.booking_id === booking.id),
+    passPurchase: booking.pass_purchase_id ? passMap.get(booking.pass_purchase_id) ?? null : null,
+    creditRedemption: redemptionMap.get(booking.id) ?? null
+  }));
+}
+
+export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
+  const [passes, redemptions, bookings] = await Promise.all([
+    supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc").catch(() => [])
+  ]);
+  const bookingMap = new Map(bookings.map((booking) => [booking.id, booking]));
+
+  return passes.map((pass) => ({
+    ...pass,
+    redemptions: redemptions
+      .filter((redemption) => redemption.pass_purchase_id === pass.id)
+      .map((redemption) => ({
+        ...redemption,
+        booking: bookingMap.get(redemption.booking_id) ?? null
+      }))
   }));
 }
 
@@ -495,7 +607,8 @@ export async function createPendingBooking(rawBooking: BookingRecord, ipAddress 
       notes: rawBooking.notes || null,
       medical_notes: rawBooking.medicalNotes || null,
       emergency_name: rawBooking.emergencyName || null,
-      emergency_phone: rawBooking.emergencyPhone || null
+      emergency_phone: rawBooking.emergencyPhone || null,
+      payment_type: "single_session"
     })
   });
   const bookingRow = inserted[0];
@@ -525,6 +638,182 @@ export async function createPendingBooking(rawBooking: BookingRecord, ipAddress 
     } satisfies BookingRecord,
     session: publicSession
   };
+}
+
+export async function createPendingPassPurchase(input: {
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  playerName: string;
+  playerAge: string;
+  trainingGroup: TrainingGroupId;
+  passType: LaunchPassType;
+}) {
+  const option = getLaunchPassOption(input.passType);
+  const inserted = await supabaseRequest<PassPurchaseRow[]>("pass_purchases", {
+    method: "POST",
+    body: JSON.stringify({
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: input.trainingGroup,
+      pass_type: input.passType,
+      total_credits: option.credits,
+      remaining_credits: option.credits,
+      amount_paid: 0,
+      status: "pending_payment",
+      expires_at: launchPassExpirationDate
+    })
+  });
+  const pass = inserted[0];
+
+  if (!pass) {
+    throw new Error("Launch Pass purchase could not be saved before payment.");
+  }
+
+  return pass;
+}
+
+export async function attachPassStripeCheckoutSession(passPurchaseId: string, checkoutSessionId: string) {
+  await supabaseRequest<PassPurchaseRow[]>(`pass_purchases?id=eq.${encodeFilter(passPurchaseId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      stripe_checkout_session_id: checkoutSessionId
+    })
+  });
+}
+
+export async function confirmPaidLaunchPassPurchase(input: {
+  passPurchaseId: string;
+  checkoutSessionId?: string;
+  paymentIntentId?: string;
+  amountPaid?: number;
+}) {
+  const confirmed = await supabaseRequest<PassPurchaseRow[] | PassPurchaseRow>("rpc/confirm_paid_launch_pass_purchase", {
+    method: "POST",
+    body: JSON.stringify({
+      p_pass_purchase_id: input.passPurchaseId,
+      p_stripe_checkout_session_id: input.checkoutSessionId || null,
+      p_stripe_payment_intent_id: input.paymentIntentId || null,
+      p_amount_paid: input.amountPaid ?? null
+    })
+  });
+  const pass = Array.isArray(confirmed) ? confirmed[0] : confirmed;
+
+  if (!pass) {
+    throw new Error("Launch Pass payment could not be confirmed.");
+  }
+
+  return pass;
+}
+
+export async function findActiveLaunchPasses(input: {
+  parentEmail: string;
+  playerName: string;
+}) {
+  const email = input.parentEmail.trim().toLowerCase();
+  const playerName = input.playerName.trim();
+
+  if (!email || !playerName) {
+    return [];
+  }
+
+  const passes = await supabaseRequest<PassPurchaseRow[]>(
+    [
+      "pass_purchases?select=*",
+      `parent_email=eq.${encodeFilter(email)}`,
+      `player_name=ilike.${encodeFilter(playerName)}`,
+      "status=eq.paid",
+      "remaining_credits=gt.0",
+      `expires_at=gte.${encodeFilter(new Date().toISOString())}`,
+      "order=expires_at.asc"
+    ].join("&")
+  ).catch(() => []);
+
+  return passes;
+}
+
+async function saveWaiverForBooking(booking: BookingRecord) {
+  await supabaseRequest<WaiverRow[]>("waivers", {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=representation"
+    },
+    body: JSON.stringify({
+      booking_id: booking.id,
+      parent_name: booking.parentName,
+      player_name: booking.playerName,
+      typed_signature: booking.guardianSignature,
+      waiver_signed: booking.waiverAccepted,
+      signed_at: booking.waiverAcceptedAt || new Date().toISOString(),
+      media_consent: booking.mediaConsent,
+      emergency_medical_notes: booking.medicalNotes || null,
+      ip_address: booking.ipAddress || null
+    })
+  });
+}
+
+export async function redeemLaunchPassCreditAndSaveWaiver(rawBooking: BookingRecord, passPurchaseId: string, ipAddress = "") {
+  const session = await getSessionOrThrow(rawBooking.sessionId);
+  const redeemed = await supabaseRequest<Array<{ booking_id: string; credit_redemption_id: string; remaining_credits: number }>>(
+    "rpc/redeem_launch_pass_credit",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_pass_purchase_id: passPurchaseId,
+        p_session_id: rawBooking.sessionId,
+        p_parent_name: rawBooking.parentName,
+        p_parent_email: rawBooking.email,
+        p_parent_phone: rawBooking.phone,
+        p_player_name: rawBooking.playerName,
+        p_player_age: rawBooking.playerAge,
+        p_training_group: session.training_group,
+        p_notes: rawBooking.notes || "",
+        p_medical_notes: rawBooking.medicalNotes || "",
+        p_emergency_name: rawBooking.emergencyName || "",
+        p_emergency_phone: rawBooking.emergencyPhone || ""
+      })
+    }
+  );
+  const redemption = redeemed[0];
+
+  if (!redemption) {
+    throw new Error("Launch Pass credit could not be redeemed.");
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(
+    `bookings?select=*&id=eq.${encodeFilter(redemption.booking_id)}&limit=1`
+  );
+  const bookingRow = rows[0];
+
+  if (!bookingRow) {
+    throw new Error("Launch Pass booking could not be loaded after redemption.");
+  }
+
+  const booking: BookingRecord = {
+    ...toBookingRecordFromRows({
+      booking: bookingRow,
+      session,
+      remainingCreditsAfter: redemption.remaining_credits
+    }),
+    guardianSignature: rawBooking.guardianSignature,
+    waiverAccepted: rawBooking.waiverAccepted,
+    waiverAcceptedAt: rawBooking.waiverAcceptedAt || new Date().toISOString(),
+    waiverVersion: rawBooking.waiverVersion,
+    ipAddress: ipAddress || rawBooking.ipAddress,
+    mediaConsent: rawBooking.mediaConsent,
+    medicalNotes: rawBooking.medicalNotes,
+    paymentType: "launch_pass_credit",
+    passPurchaseId,
+    creditRedemptionId: redemption.credit_redemption_id,
+    remainingCreditsAfter: redemption.remaining_credits
+  };
+
+  await saveWaiverForBooking(booking);
+
+  return booking;
 }
 
 export async function attachStripeCheckoutSession(bookingId: string, checkoutSessionId: string) {
@@ -568,23 +857,7 @@ export async function markBookingPaidAndSaveWaiver(
     throw error;
   }
 
-  await supabaseRequest<WaiverRow[]>("waivers", {
-    method: "POST",
-    headers: {
-      Prefer: "resolution=merge-duplicates,return=representation"
-    },
-    body: JSON.stringify({
-      booking_id: booking.id,
-      parent_name: booking.parentName,
-      player_name: booking.playerName,
-      typed_signature: booking.guardianSignature,
-      waiver_signed: booking.waiverAccepted,
-      signed_at: booking.waiverAcceptedAt || new Date().toISOString(),
-      media_consent: booking.mediaConsent,
-      emergency_medical_notes: booking.medicalNotes || null,
-      ip_address: booking.ipAddress || null
-    })
-  });
+  await saveWaiverForBooking(booking);
 }
 
 export async function saveCalendarEventRecord(bookingId: string, googleCalendarEventId?: string) {

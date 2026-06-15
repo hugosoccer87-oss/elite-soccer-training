@@ -67,6 +67,10 @@ export type BookingRecord = {
   calendarMessage?: string;
   calendarEventId?: string;
   calendarEventUrl?: string;
+  paymentType?: "single_session" | "launch_pass_credit";
+  passPurchaseId?: string;
+  creditRedemptionId?: string;
+  remainingCreditsAfter?: number;
 };
 
 export const availabilityStorageKey = "est-availability-v3";

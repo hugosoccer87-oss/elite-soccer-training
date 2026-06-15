@@ -27,7 +27,7 @@ export default function BookingPage() {
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
               Future Elite supports ages 9-12. Elite Performance supports ages 13-18. Each session holds up to
-              six players. Online booking is currently for Single Session training.
+              six players. Parents can book a Single Session, purchase a June Launch Pass, or reserve with existing pass credits.
             </p>
             <div className="mt-5 grid gap-3">
               {pricingOptions.map((option) => (

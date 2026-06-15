@@ -182,6 +182,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../app/api/admin/passes/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/admin/passes">> = Specific
+  const handler = {} as typeof import("../../app/api/admin/passes/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../app/api/admin/send-test-email/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/admin/send-test-email">> = Specific
@@ -281,6 +290,24 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../app/api/passes/lookup/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/passes/lookup">> = Specific
+  const handler = {} as typeof import("../../app/api/passes/lookup/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/passes/redeem/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/passes/redeem">> = Specific
+  const handler = {} as typeof import("../../app/api/passes/redeem/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../app/api/reviews/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/reviews">> = Specific
@@ -303,6 +330,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/stripe/checkout">> = Specific
   const handler = {} as typeof import("../../app/api/stripe/checkout/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../app/api/stripe/pass-checkout/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/stripe/pass-checkout">> = Specific
+  const handler = {} as typeof import("../../app/api/stripe/pass-checkout/route.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

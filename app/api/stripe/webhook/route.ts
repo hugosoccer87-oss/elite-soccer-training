@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
-import { confirmPaidBooking } from "@/lib/booking-confirmation";
+import { confirmLaunchPassPurchase, confirmPaidBooking } from "@/lib/booking-confirmation";
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
-import { bookingFromStripeMetadata, isStripePaymentVerified, verifyStripeWebhookSignature } from "@/lib/stripe";
+import {
+  bookingFromStripeMetadata,
+  isStripePaymentVerified,
+  passPurchaseIdFromStripeMetadata,
+  verifyStripeWebhookSignature
+} from "@/lib/stripe";
 
 export const runtime = "nodejs";
 
@@ -24,6 +29,62 @@ export async function POST(request: Request) {
       });
 
       const session = event.data.object;
+      const passPurchaseId = passPurchaseIdFromStripeMetadata(session.metadata);
+
+      if (passPurchaseId) {
+        if (!isStripePaymentVerified(session)) {
+          console.warn("[EST Stripe] Payment not verified", {
+            eventId: event.id,
+            sessionId: session.id,
+            passPurchaseId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status
+          });
+          setLastPaymentVerificationResult({
+            source: "webhook",
+            verified: false,
+            sessionId: session.id,
+            bookingId: passPurchaseId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status,
+            message: "Launch Pass Checkout session was not paid and complete."
+          });
+          return NextResponse.json({ received: true });
+        }
+
+        console.info("[EST Stripe] Payment verified", {
+          eventId: event.id,
+          sessionId: session.id,
+          passPurchaseId,
+          purchaseType: "launch_pass"
+        });
+        setLastPaymentVerificationResult({
+          source: "webhook",
+          verified: true,
+          sessionId: session.id,
+          bookingId: passPurchaseId,
+          sessionStatus: session.status,
+          paymentStatus: session.payment_status,
+          message: "Launch Pass payment verified."
+        });
+
+        const result = await confirmLaunchPassPurchase({
+          passPurchaseId,
+          checkoutSessionId: session.id,
+          paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+          amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+        });
+
+        console.info("[EST Stripe] Launch Pass purchase confirmed", {
+          eventId: event.id,
+          sessionId: session.id,
+          passPurchaseId,
+          emailSent: result.emailResult.sent
+        });
+
+        return NextResponse.json({ received: true });
+      }
+
       const booking = bookingFromStripeMetadata(session.metadata);
 
       if (!booking) {

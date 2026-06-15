@@ -1,10 +1,14 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { type BookingRecord, type TrainingGroupId } from "@/lib/booking-data";
 import {
+  getLaunchPassOption,
+  launchPassExpirationDate,
+  type LaunchPassType,
   sessionCurrency,
   sessionLineItemName,
   sessionUnitAmountCents
 } from "@/lib/pricing";
+import type { PassPurchaseRow } from "@/lib/supabase-db";
 
 const stripeApiBase = "https://api.stripe.com/v1";
 const defaultSiteUrl = "https://www.elitesoccertrainingcv.com";
@@ -93,6 +97,22 @@ export function bookingToStripeMetadata(booking: BookingRecord) {
   };
 }
 
+export function passPurchaseToStripeMetadata(pass: PassPurchaseRow) {
+  return {
+    purchase_type: "launch_pass",
+    passPurchaseId: pass.id,
+    pass_type: pass.pass_type,
+    parent_name: pass.parent_name,
+    parent_email: pass.parent_email,
+    parent_phone: pass.parent_phone,
+    player_name: pass.player_name,
+    player_age: pass.player_age,
+    training_group: pass.training_group,
+    total_credits: pass.total_credits,
+    expires_at: pass.expires_at
+  };
+}
+
 function appendMetadata(params: URLSearchParams, metadata: Record<string, string | number | boolean | undefined>) {
   Object.entries(metadata).forEach(([key, value]) => {
     params.append(`metadata[${key}]`, metadataValue(value));
@@ -150,6 +170,68 @@ export async function createStripeCheckoutSession(booking: BookingRecord) {
   }
 
   return result;
+}
+
+export async function createStripeLaunchPassCheckoutSession(pass: PassPurchaseRow) {
+  const secretKey = getStripeSecretKey();
+  const option = getLaunchPassOption(pass.pass_type);
+
+  if (!secretKey) {
+    throw new Error("Stripe is not configured. Add STRIPE_SECRET_KEY in Vercel.");
+  }
+
+  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+    throw new Error("Stripe is not configured. Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Vercel.");
+  }
+
+  const siteUrl = getSiteUrl();
+  const params = new URLSearchParams({
+    mode: "payment",
+    success_url: `${siteUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${siteUrl}/booking/cancel`,
+    allow_promotion_codes: "true",
+    client_reference_id: pass.id,
+    customer_email: pass.parent_email,
+    "line_items[0][price_data][currency]": sessionCurrency,
+    "line_items[0][price_data][product_data][name]": option.stripeLineItemName,
+    "line_items[0][price_data][product_data][description]": `${option.credits} training credits. Expires June 30, 2026.`,
+    "line_items[0][price_data][unit_amount]": String(option.amountCents),
+    "line_items[0][quantity]": "1",
+    "payment_intent_data[metadata][purchase_type]": "launch_pass",
+    "payment_intent_data[metadata][passPurchaseId]": pass.id,
+    "payment_intent_data[metadata][pass_type]": pass.pass_type,
+    "payment_intent_data[metadata][parent_email]": pass.parent_email,
+    "payment_intent_data[metadata][player_name]": pass.player_name,
+    "payment_intent_data[metadata][total_credits]": String(option.credits),
+    "payment_intent_data[metadata][expires_at]": pass.expires_at || launchPassExpirationDate
+  });
+
+  appendMetadata(params, passPurchaseToStripeMetadata(pass));
+
+  const response = await fetch(`${stripeApiBase}/checkout/sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: params.toString()
+  });
+
+  const result = (await response.json()) as StripeCheckoutSession & { error?: { message?: string } };
+
+  if (!response.ok) {
+    throw new Error(result.error?.message ?? "Stripe Checkout session could not be created.");
+  }
+
+  if (!result.url) {
+    throw new Error("Stripe did not return a Checkout URL.");
+  }
+
+  return result;
+}
+
+export function passPurchaseIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
+  return metadata?.purchase_type === "launch_pass" && metadata.passPurchaseId ? metadata.passPurchaseId : null;
 }
 
 export async function retrieveStripeCheckoutSession(sessionId: string) {

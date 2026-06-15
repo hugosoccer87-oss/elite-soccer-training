@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { business } from "@/lib/site-data";
-import type { AdminBookingRecord, AdminTrainingSession } from "@/lib/supabase-db";
+import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
 
 const inputClass =
@@ -62,6 +62,12 @@ type AdminDiagnostics = {
 type SessionsResponse = {
   status?: string;
   sessions?: AdminTrainingSession[];
+  error?: string;
+};
+
+type PassesResponse = {
+  status?: string;
+  passes?: AdminPassPurchase[];
   error?: string;
 };
 
@@ -126,6 +132,18 @@ function formatWaiverTimestamp(value?: string | null) {
 
 function bookingProgramLabel(booking: AdminBookingRecord) {
   return trainingGroups.find((group) => group.id === booking.training_group)?.name ?? booking.training_group;
+}
+
+function passTypeLabel(passType: string) {
+  if (passType === "four_session_launch_pass") {
+    return "4-Session Launch Pass";
+  }
+
+  if (passType === "six_session_launch_pass") {
+    return "6-Session Launch Pass";
+  }
+
+  return passType;
 }
 
 function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTrainingSession) {
@@ -255,8 +273,25 @@ async function readAdminSessions() {
   return result.sessions ?? [];
 }
 
+async function readAdminPasses() {
+  const response = await fetch(`/api/admin/passes?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as PassesResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Launch Passes could not be loaded.");
+  }
+
+  return result.passes ?? [];
+}
+
 export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
+  const [passes, setPasses] = useState<AdminPassPurchase[]>([]);
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>(trainingGroups[0].id);
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
@@ -273,8 +308,13 @@ export function AdminAvailability() {
   async function refreshAdminData(message?: string) {
     try {
       setError("");
-      const [nextSessions, nextDiagnostics] = await Promise.all([readAdminSessions(), readAdminDiagnostics()]);
+      const [nextSessions, nextPasses, nextDiagnostics] = await Promise.all([
+        readAdminSessions(),
+        readAdminPasses(),
+        readAdminDiagnostics()
+      ]);
       setSessions(nextSessions);
+      setPasses(nextPasses);
       setDiagnostics(nextDiagnostics);
       if (message) {
         setNotice(message);
@@ -298,6 +338,14 @@ export function AdminAvailability() {
       bookings: sessions.reduce((total, session) => total + session.paidBookings.length, 0)
     }),
     [sessions]
+  );
+  const passCounts = useMemo(
+    () => ({
+      paid: passes.filter((pass) => pass.status === "paid").length,
+      remainingCredits: passes.reduce((total, pass) => total + (Number(pass.remaining_credits) || 0), 0),
+      redemptions: passes.reduce((total, pass) => total + pass.redemptions.length, 0)
+    }),
+    [passes]
   );
 
   async function addSession() {
@@ -615,6 +663,90 @@ export function AdminAvailability() {
       <section className="panel overflow-hidden">
         <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
           <div>
+            <p className="text-xs font-black uppercase text-electric">Launch Passes / Credits</p>
+            <h3 className="mt-2 text-xl font-black text-navy">Paid Launch Pass purchases</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Track remaining credits, expiration, and bookings paid by Launch Pass credit.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{passCounts.paid}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Paid Passes</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{passCounts.remainingCredits}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Credits Left</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{passCounts.redemptions}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Used</p>
+            </div>
+          </div>
+        </div>
+        {passes.length > 0 ? (
+          <div className="grid divide-y divide-slate-200">
+            {passes.map((pass) => (
+              <article key={pass.id} className="grid gap-4 p-5">
+                <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                  <div>
+                    <p className="text-xs font-black uppercase text-electric">{passTypeLabel(pass.pass_type)}</p>
+                    <h4 className="mt-1 text-lg font-black text-navy">{pass.player_name}</h4>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Parent: {pass.parent_name} - {pass.parent_email} - {pass.parent_phone}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Training group: {trainingGroups.find((group) => group.id === pass.training_group)?.name ?? pass.training_group}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+                    <p className="font-black text-navy">
+                      {pass.remaining_credits}/{pass.total_credits} credits remaining
+                    </p>
+                    <p className="mt-1 text-slate-600">Status: {pass.status}</p>
+                    <p className="mt-1 text-slate-600">
+                      Expires: {new Date(pass.expires_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
+                    </p>
+                    <p className="mt-1 text-slate-600">Paid: ${(pass.amount_paid / 100).toFixed(2)}</p>
+                  </div>
+                </div>
+                {pass.redemptions.length > 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-black uppercase text-electric">Redemption History</p>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                      {pass.redemptions.map((redemption) => (
+                        <p key={redemption.id}>
+                          {new Date(redemption.created_at).toLocaleString("en-US", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                            timeZone: "America/Los_Angeles"
+                          })}{" "}
+                          - {redemption.credits_used} credit used
+                          {redemption.booking ? ` for ${redemption.booking.player_name}` : ""}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                    No credits used yet.
+                  </p>
+                )}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="p-5 sm:p-6">
+            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+              No Launch Pass purchases yet.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="panel overflow-hidden">
+        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+          <div>
             <h3 className="text-xl font-black text-navy">Supabase Sessions</h3>
             <p className="mt-2 text-sm text-slate-600">
               These are the only sessions that can appear on the public booking page.
@@ -680,6 +812,15 @@ export function AdminAvailability() {
                                 <p className="mt-1 text-sm text-slate-600">
                                   {booking.player_count} player(s) - Payment: {booking.status}
                                 </p>
+                                <p className="mt-1 text-sm text-slate-600">
+                                  Payment type:{" "}
+                                  {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}
+                                </p>
+                                {booking.payment_type === "launch_pass_credit" ? (
+                                  <p className="mt-1 text-sm text-slate-600">
+                                    Pass credits remaining: {booking.passPurchase?.remaining_credits ?? "Not loaded"}
+                                  </p>
+                                ) : null}
                                 <p className="mt-1 text-sm text-slate-600">Amount paid: ${(booking.amount_paid / 100).toFixed(2)}</p>
                               </div>
                               <div className="grid gap-1 text-sm text-slate-600">

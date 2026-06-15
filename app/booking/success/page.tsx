@@ -36,13 +36,15 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
       sessionId: "",
       bookingId: "",
       status: "",
-      paymentStatus: ""
+      paymentStatus: "",
+      isLaunchPass: false
     };
   }
 
   try {
     const session = await retrieveStripeCheckoutSession(sessionId);
     const verified = isStripePaymentVerified(session);
+    const isLaunchPass = session.metadata?.purchase_type === "launch_pass";
     const bookingId = session.metadata?.bookingId || session.client_reference_id || "";
 
     if (verified) {
@@ -71,14 +73,17 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
 
     return {
       verified,
-      title: verified ? "Booking confirmed." : "Payment not confirmed.",
+      title: verified ? (isLaunchPass ? "Launch Pass confirmed." : "Booking confirmed.") : "Payment not confirmed.",
       message: verified
-        ? "Your secure payment is complete. Your session details will be sent by email."
+        ? isLaunchPass
+          ? "Your secure payment is complete. Your Launch Pass confirmation will be sent by email."
+          : "Your secure payment is complete. Your session details will be sent by email."
         : "We could not confirm a completed payment for this session. Your booking is not confirmed.",
       sessionId: session.id,
       bookingId,
       status: session.status ?? "",
-      paymentStatus: session.payment_status ?? ""
+      paymentStatus: session.payment_status ?? "",
+      isLaunchPass
     };
   } catch (error) {
     console.error("[EST Stripe] Payment not verified", {
@@ -99,7 +104,8 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
       sessionId,
       bookingId: "",
       status: "",
-      paymentStatus: ""
+      paymentStatus: "",
+      isLaunchPass: false
     };
   }
 }
@@ -121,20 +127,27 @@ export default async function BookingSuccessPage({ searchParams }: BookingSucces
         <div className="section-shell max-w-3xl">
           <div className="panel p-6 sm:p-8">
             <p className={`text-sm font-black uppercase ${verification.verified ? "text-field" : "text-red-700"}`}>
-              {verification.verified ? "Session Confirmed" : "Booking Not Confirmed"}
+              {verification.verified ? (verification.isLaunchPass ? "Launch Pass Confirmed" : "Session Confirmed") : "Booking Not Confirmed"}
             </p>
             <h2 className="mt-3 text-3xl font-black text-navy">
-              {verification.verified ? "Thank you for booking with Elite Soccer Training CV." : "Please return to secure payment."}
+              {verification.verified
+                ? verification.isLaunchPass
+                  ? "Thank you for purchasing a Launch Pass."
+                  : "Thank you for booking with Elite Soccer Training CV."
+                : "Please return to secure payment."}
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
               {verification.verified
-                ? "Your secure payment is complete. Watch your email for session details and reminders."
+                ? verification.isLaunchPass
+                  ? "Your secure payment is complete. Watch your email for Launch Pass details, then book sessions using your credits."
+                  : "Your secure payment is complete. Watch your email for session details and reminders."
                 : "No completed payment was confirmed for this booking. Please return to the booking page when you are ready to finish."}
             </p>
             <div className="mt-6 grid gap-3 rounded-md border border-slate-200 bg-mist p-4 text-sm text-slate-700">
               {verification.bookingId ? (
                 <p>
-                  <span className="font-black text-navy">Booking ID:</span> {verification.bookingId}
+                  <span className="font-black text-navy">{verification.isLaunchPass ? "Launch Pass ID:" : "Booking ID:"}</span>{" "}
+                  {verification.bookingId}
                 </p>
               ) : (
                 <p>
@@ -143,7 +156,7 @@ export default async function BookingSuccessPage({ searchParams }: BookingSucces
                 </p>
               )}
             </div>
-            {verification.verified ? (
+            {verification.verified && !verification.isLaunchPass ? (
               <div className="mt-6 rounded-md border border-electric/20 bg-blue-50 p-5 text-sm leading-6 text-slate-700">
                 <p className="font-black uppercase text-navy">Before The Session</p>
                 <div className="mt-3 grid gap-3">

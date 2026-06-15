@@ -38,7 +38,7 @@ export default function ServicesPage() {
               ))}
             </div>
             <p className="mt-4 text-sm font-bold leading-6 text-slate-600">
-              Launch Passes are currently handled directly with Coach Hugo. Online booking remains Single Session.
+              Single Sessions and Launch Passes can be purchased through the booking page. Launch Pass credits can then be used to reserve available sessions.
             </p>
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

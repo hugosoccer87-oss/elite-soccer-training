@@ -372,6 +372,11 @@ function getDurationMinutes(startDateTime?: string, endDateTime?: string) {
 }
 
 function bookingDescription(booking: BookingRecord) {
+  const paidWithLaunchPass = booking.paymentType === "launch_pass_credit";
+  const paymentAmount = paidWithLaunchPass
+    ? "Paid using Launch Pass credit"
+    : `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`;
+
   return [
     `Parent/guardian name: ${booking.parentName}`,
     `Parent email: ${booking.email}`,
@@ -382,8 +387,10 @@ function bookingDescription(booking: BookingRecord) {
     `Session date/time: ${booking.sessionDate} at ${booking.sessionTime}`,
     `Location: ${business.location}`,
     `Number of players: ${booking.players}`,
-    `Payment status: Paid`,
-    `Payment amount: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
+    `Payment status: ${paidWithLaunchPass ? "Paid using Launch Pass credit" : "Paid"}`,
+    `Payment amount: ${paymentAmount}`,
+    `Payment type: ${paidWithLaunchPass ? "Launch Pass credit" : "Single Session"}`,
+    `Remaining Launch Pass credits: ${typeof booking.remainingCreditsAfter === "number" ? booking.remainingCreditsAfter : "Not applicable"}`,
     `Waiver status: ${booking.waiverAccepted ? "Signed" : "Not recorded"}`,
     `Typed waiver signature: ${booking.guardianSignature || "Not recorded"}`,
     `Waiver signed date/time: ${booking.waiverAcceptedAt || "Not recorded"}`,

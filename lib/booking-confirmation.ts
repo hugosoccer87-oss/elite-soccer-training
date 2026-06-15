@@ -5,31 +5,27 @@ import {
   type CalendarBookingResult
 } from "@/lib/google-calendar";
 import {
+  confirmPaidLaunchPassPurchase,
   logEmailStatus,
   markBookingPaidAndSaveWaiver,
   saveCalendarEventRecord
 } from "@/lib/supabase-db";
-import { sendBookingTransactionalEmails } from "@/lib/transactional-email";
+import {
+  sendBookingTransactionalEmails,
+  sendLaunchPassTransactionalEmails
+} from "@/lib/transactional-email";
 
-export async function confirmPaidBooking(
-  booking: BookingRecord,
-  payment: {
-    checkoutSessionId?: string;
-    paymentIntentId?: string;
-    amountPaid?: number;
-  } = {}
-) {
-  console.info("[EST Booking] Paid booking confirmation started", {
+export async function finalizeConfirmedBooking(booking: BookingRecord) {
+  console.info("[EST Booking] Confirmed booking finalization started", {
     bookingId: booking.id,
     programName: booking.programName,
     playerName: booking.playerName,
     sessionDateIso: booking.sessionDateIso,
     sessionDate: booking.sessionDate,
     sessionTime: booking.sessionTime,
-    paymentStatus: booking.paymentStatus
+    paymentStatus: booking.paymentStatus,
+    paymentType: booking.paymentType || "single_session"
   });
-
-  await markBookingPaidAndSaveWaiver(booking, payment);
 
   let calendarResult: CalendarBookingResult;
 
@@ -136,4 +132,93 @@ export async function confirmPaidBooking(
     calendarResult,
     emailResult
   };
+}
+
+export async function confirmPaidBooking(
+  booking: BookingRecord,
+  payment: {
+    checkoutSessionId?: string;
+    paymentIntentId?: string;
+    amountPaid?: number;
+  } = {}
+) {
+  console.info("[EST Booking] Paid booking confirmation started", {
+    bookingId: booking.id,
+    programName: booking.programName,
+    playerName: booking.playerName,
+    sessionDateIso: booking.sessionDateIso,
+    sessionDate: booking.sessionDate,
+    sessionTime: booking.sessionTime,
+    paymentStatus: booking.paymentStatus
+  });
+
+  await markBookingPaidAndSaveWaiver(booking, payment);
+
+  return finalizeConfirmedBooking({
+    ...booking,
+    paymentType: "single_session",
+    paymentStatus: "Paid"
+  });
+}
+
+export async function confirmLaunchPassCreditBooking(booking: BookingRecord) {
+  console.info("[EST Booking] Launch Pass credit booking confirmation started", {
+    bookingId: booking.id,
+    passPurchaseId: booking.passPurchaseId,
+    creditRedemptionId: booking.creditRedemptionId,
+    remainingCreditsAfter: booking.remainingCreditsAfter
+  });
+
+  return finalizeConfirmedBooking({
+    ...booking,
+    paymentType: "launch_pass_credit",
+    paymentStatus: "Paid"
+  });
+}
+
+export async function confirmLaunchPassPurchase(input: {
+  passPurchaseId: string;
+  checkoutSessionId?: string;
+  paymentIntentId?: string;
+  amountPaid?: number;
+}) {
+  console.info("[EST Stripe] Confirming Launch Pass purchase", {
+    passPurchaseId: input.passPurchaseId,
+    checkoutSessionId: input.checkoutSessionId
+  });
+  const pass = await confirmPaidLaunchPassPurchase(input);
+
+  try {
+    console.info("[EST Stripe] Starting Launch Pass email notifications", {
+      passPurchaseId: pass.id
+    });
+    const result = await sendLaunchPassTransactionalEmails(pass);
+    console.info("[EST Stripe] Launch Pass email notifications complete", {
+      passPurchaseId: pass.id,
+      sent: result.sent,
+      customerSent: result.customerSent,
+      adminSent: result.adminSent,
+      message: result.message
+    });
+
+    return {
+      pass,
+      emailResult: result
+    };
+  } catch (error) {
+    console.error("[EST Email] Launch Pass email flow failed:", {
+      passPurchaseId: pass.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      pass,
+      emailResult: {
+        sent: false,
+        customerSent: false,
+        adminSent: false,
+        message: error instanceof Error ? error.message : "Launch Pass emails failed."
+      }
+    };
+  }
 }
