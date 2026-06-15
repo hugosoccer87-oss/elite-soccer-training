@@ -21,7 +21,6 @@ import {
   bookingArrivalInstructions,
   business,
   groupSizeMessage,
-  juneLaunchScheduleNote,
   refundCancellationReminder
 } from "@/lib/site-data";
 import {
@@ -973,20 +972,20 @@ export function BookingForm() {
 
             <div className="grid gap-3 lg:grid-cols-4">
               {[
-                ["single_session", "Single Session", "$55", "Book one 60-minute session now."],
+                ["single_session", "Single Session", "$55", "Book online"],
                 [
                   "four_session_launch_pass",
                   "4-Session Launch Pass",
                   "$200",
-                  "Four credits through June 30."
+                  "Buy credits"
                 ],
                 [
                   "six_session_launch_pass",
                   "6-Session Launch Pass",
                   "$285",
-                  "Six credits through June 30."
+                  "Buy credits"
                 ],
-                ["use_existing_pass", "Use Existing Credits", "Launch Pass", "Reserve a session with paid credits."]
+                ["use_existing_pass", "Use Existing Credits", "Launch Pass", "Reserve with credits"]
               ].map(([value, title, price, description]) => {
                 const isSelected = bookingOption === value;
 
@@ -1184,9 +1183,6 @@ export function BookingForm() {
                 {selectedGroup ? selectedGroup.ages : "All available training groups"}
               </p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
-              <p className="mt-3 max-w-2xl rounded-lg border border-electric/20 bg-blue-50 p-4 text-sm font-bold leading-6 text-slate-700">
-                {juneLaunchScheduleNote}
-              </p>
             </div>
 
             {showAvailabilityDebug ? (

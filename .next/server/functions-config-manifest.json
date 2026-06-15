@@ -4,16 +4,16 @@
     "/api/admin/bookings": {},
     "/api/admin/email-diagnostics": {},
     "/api/admin/passes": {},
-    "/api/admin/send-test-email": {},
     "/api/admin/sessions": {},
     "/api/availability": {},
     "/api/admin/sessions/[id]": {},
+    "/api/availability/debug": {},
     "/api/reviews": {},
     "/api/passes/lookup": {},
-    "/api/availability/debug": {},
-    "/api/stripe/pass-checkout": {},
+    "/api/passes/redeem": {},
+    "/api/admin/send-test-email": {},
     "/api/stripe/verify-session": {},
     "/api/stripe/webhook": {},
-    "/api/passes/redeem": {}
+    "/api/stripe/pass-checkout": {}
   }
 }
