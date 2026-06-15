@@ -19,6 +19,8 @@ create table if not exists public.pass_purchases (
   status text not null default 'pending_payment' check (status in ('pending_payment', 'paid', 'cancelled', 'expired')),
   stripe_checkout_session_id text,
   stripe_payment_intent_id text,
+  selected_session_ids uuid[] not null default '{}',
+  booking_details jsonb not null default '{}'::jsonb,
   expires_at timestamptz not null default '2026-07-01T06:59:59Z',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -41,6 +43,12 @@ alter table public.bookings
 
 alter table public.bookings
   add column if not exists credit_redemption_id uuid references public.credit_redemptions(id);
+
+alter table public.pass_purchases
+  add column if not exists selected_session_ids uuid[] not null default '{}';
+
+alter table public.pass_purchases
+  add column if not exists booking_details jsonb not null default '{}'::jsonb;
 
 create index if not exists idx_pass_purchases_lookup
   on public.pass_purchases (lower(parent_email), lower(player_name), status, expires_at);

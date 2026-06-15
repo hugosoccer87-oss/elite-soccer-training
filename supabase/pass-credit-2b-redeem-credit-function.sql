@@ -150,9 +150,9 @@ begin
   returning id into v_booking_id;
 
   update public.pass_purchases
-  set remaining_credits = remaining_credits - 1
-  where id = p_pass_purchase_id
-  returning remaining_credits into v_remaining;
+  set remaining_credits = public.pass_purchases.remaining_credits - 1
+  where public.pass_purchases.id = p_pass_purchase_id
+  returning public.pass_purchases.remaining_credits into v_remaining;
 
   insert into public.credit_redemptions (
     pass_purchase_id,

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { type LaunchPassType, launchPassOptions } from "@/lib/pricing";
-import { createStripeLaunchPassCheckoutSession } from "@/lib/stripe";
-import { attachPassStripeCheckoutSession, createPendingPassPurchase } from "@/lib/supabase-db";
+import { createStripeLaunchPassCheckoutSession, getStripeEnvironmentDiagnostics } from "@/lib/stripe";
+import { attachPassStripeCheckoutSession, createPendingPassPurchase, getSupabaseAvailability } from "@/lib/supabase-db";
+import { waiverVersion } from "@/lib/waiver-content";
 
 export const runtime = "nodejs";
 
@@ -18,6 +19,14 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function getRequestIpAddress(request: Request) {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  const vercelForwardedFor = request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim();
+
+  return forwardedFor || realIp || vercelForwardedFor || "";
+}
+
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
     parentName?: string;
@@ -27,6 +36,17 @@ export async function POST(request: Request) {
     playerAge?: string;
     trainingGroup?: string;
     passType?: string;
+    selectedSessionIds?: unknown;
+    bookingDetails?: {
+      notes?: string;
+      medicalNotes?: string;
+      emergencyName?: string;
+      emergencyPhone?: string;
+      guardianSignature?: string;
+      waiverAccepted?: boolean;
+      waiverAcceptedAt?: string;
+      mediaConsent?: "Granted" | "Declined";
+    };
   } | null;
 
   if (
@@ -45,6 +65,56 @@ export async function POST(request: Request) {
   }
 
   try {
+    const passType = payload.passType;
+    const option = launchPassOptions[passType];
+    const selectedSessionIds = Array.isArray(payload.selectedSessionIds)
+      ? Array.from(
+          new Set(
+            payload.selectedSessionIds
+              .filter((id): id is string => typeof id === "string" && Boolean(id.trim()))
+              .map((id) => id.trim())
+          )
+        )
+      : [];
+
+    if (selectedSessionIds.length > option.credits) {
+      return NextResponse.json(
+        { error: `Choose no more than ${option.credits} sessions for this Launch Pass.` },
+        { status: 400 }
+      );
+    }
+
+    if (selectedSessionIds.length > 0) {
+      const availability = await getSupabaseAvailability();
+      const availableById = new Map(availability.sessions.map((session) => [session.id, session]));
+      const invalidSession = selectedSessionIds.find((sessionId) => {
+        const session = availableById.get(sessionId);
+
+        return !session || session.trainingGroupId !== payload.trainingGroup || session.remainingSpots < 1;
+      });
+
+      if (invalidSession) {
+        return NextResponse.json(
+          { error: "One or more selected sessions are no longer available for this Launch Pass." },
+          { status: 400 }
+        );
+      }
+
+      if (
+        !payload.bookingDetails?.emergencyName?.trim() ||
+        !payload.bookingDetails.emergencyPhone?.trim() ||
+        !payload.bookingDetails.medicalNotes?.trim() ||
+        !payload.bookingDetails.guardianSignature?.trim() ||
+        !payload.bookingDetails.waiverAccepted ||
+        !payload.bookingDetails.mediaConsent
+      ) {
+        return NextResponse.json(
+          { error: "Complete the emergency details and signed waiver before choosing sessions with a Launch Pass." },
+          { status: 400 }
+        );
+      }
+    }
+
     const pass = await createPendingPassPurchase({
       parentName: payload.parentName,
       parentEmail: payload.parentEmail,
@@ -52,14 +122,34 @@ export async function POST(request: Request) {
       playerName: payload.playerName,
       playerAge: payload.playerAge,
       trainingGroup: payload.trainingGroup,
-      passType: payload.passType
+      passType,
+      selectedSessionIds,
+      bookingDetails:
+        selectedSessionIds.length > 0
+          ? {
+              notes: payload.bookingDetails?.notes?.trim() ?? "",
+              medicalNotes: payload.bookingDetails?.medicalNotes?.trim() ?? "",
+              emergencyName: payload.bookingDetails?.emergencyName?.trim() ?? "",
+              emergencyPhone: payload.bookingDetails?.emergencyPhone?.trim() ?? "",
+              guardianSignature: payload.bookingDetails?.guardianSignature?.trim() ?? "",
+              waiverAccepted: Boolean(payload.bookingDetails?.waiverAccepted),
+              waiverAcceptedAt: payload.bookingDetails?.waiverAcceptedAt || new Date().toISOString(),
+              waiverVersion,
+              mediaConsent: payload.bookingDetails?.mediaConsent,
+              ipAddress: getRequestIpAddress(request)
+            }
+          : {}
     });
+
+    const stripeDiagnostics = getStripeEnvironmentDiagnostics();
 
     console.info("[EST Stripe] Creating checkout session", {
       purchaseType: "launch_pass",
       passPurchaseId: pass.id,
       passType: pass.pass_type,
-      playerName: pass.player_name
+      playerName: pass.player_name,
+      stripeMode: stripeDiagnostics.stripeMode,
+      hasPublishableKey: stripeDiagnostics.publishableKeyConfigured
     });
 
     const session = await createStripeLaunchPassCheckoutSession(pass);

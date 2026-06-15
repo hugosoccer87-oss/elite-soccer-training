@@ -3,6 +3,7 @@ import { confirmLaunchPassPurchase, confirmPaidBooking } from "@/lib/booking-con
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import {
   bookingFromStripeMetadata,
+  getStripeEnvironmentDiagnostics,
   isStripePaymentVerified,
   passPurchaseIdFromStripeMetadata,
   verifyStripeWebhookSignature
@@ -16,10 +17,12 @@ export async function POST(request: Request) {
 
   try {
     const event = verifyStripeWebhookSignature(payload, signature);
+    const stripeDiagnostics = getStripeEnvironmentDiagnostics();
 
     console.info("[EST Stripe] Webhook received", {
       eventId: event.id,
-      eventType: event.type
+      eventType: event.type,
+      stripeMode: stripeDiagnostics.stripeMode
     });
 
     if (event.type === "checkout.session.completed") {

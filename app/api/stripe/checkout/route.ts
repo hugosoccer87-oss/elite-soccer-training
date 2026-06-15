@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { type BookingRecord } from "@/lib/booking-data";
-import { createStripeCheckoutSession } from "@/lib/stripe";
+import { createStripeCheckoutSession, getStripeEnvironmentDiagnostics } from "@/lib/stripe";
 import { attachStripeCheckoutSession, createPendingBooking } from "@/lib/supabase-db";
 
 function getRequestIpAddress(request: Request) {
@@ -40,11 +40,14 @@ export async function POST(request: Request) {
       getRequestIpAddress(request) || rawBooking.ipAddress
     );
 
+    const stripeDiagnostics = getStripeEnvironmentDiagnostics();
+
     console.info("[EST Stripe] Creating checkout session", {
       bookingId: booking.id,
       playerName: booking.playerName,
       players: booking.players,
-      hasPublishableKey: Boolean(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
+      stripeMode: stripeDiagnostics.stripeMode,
+      hasPublishableKey: stripeDiagnostics.publishableKeyConfigured
     });
 
     const session = await createStripeCheckoutSession(booking);

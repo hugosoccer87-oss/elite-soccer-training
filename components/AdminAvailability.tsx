@@ -15,6 +15,15 @@ type AdminDiagnostics = {
   smtpConfigured: boolean;
   emailFromConfigured: boolean;
   adminNotificationRecipient: string;
+  stripe?: {
+    stripeMode: "live" | "test";
+    secretKeyConfigured: boolean;
+    publishableKeyConfigured: boolean;
+    webhookSecretConfigured: boolean;
+    secretKeyName: string;
+    publishableKeyName: string;
+    webhookSecretName: string;
+  };
   supabase?: {
     configured: boolean;
     urlConfigured: boolean;
@@ -513,6 +522,12 @@ export function AdminAvailability() {
         {notice ? <p className="mt-5 rounded-md bg-field/10 p-3 text-sm font-bold text-field">{notice}</p> : null}
         {error ? <p className="mt-5 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
 
+        {diagnostics?.stripe?.stripeMode === "test" ? (
+          <div className="mt-5 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-black uppercase tracking-wide text-amber-800">
+            TEST MODE ACTIVE
+          </div>
+        ) : null}
+
         {diagnostics ? (
           <div className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <div>
@@ -524,8 +539,12 @@ export function AdminAvailability() {
               </p>
             </div>
             <div>
-              <p className="text-xs font-black uppercase text-slate-500">Stripe key mode</p>
-              <p className="mt-1 font-black text-navy">{diagnostics.stripeKeyMode}</p>
+              <p className="text-xs font-black uppercase text-slate-500">Stripe mode</p>
+              <p className="mt-1 font-black text-navy">{diagnostics.stripe?.stripeMode ?? diagnostics.stripeKeyMode}</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                Secret: {diagnostics.stripe?.secretKeyConfigured ? "yes" : "no"} / Publishable:{" "}
+                {diagnostics.stripe?.publishableKeyConfigured ? "yes" : "no"}
+              </p>
             </div>
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Google Calendar configured</p>
@@ -553,7 +572,9 @@ export function AdminAvailability() {
             </div>
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Webhook secret</p>
-              <p className="mt-1 font-black text-navy">{diagnostics.webhookSecretExists ? "yes" : "no"}</p>
+              <p className="mt-1 font-black text-navy">
+                {diagnostics.stripe?.webhookSecretConfigured ?? diagnostics.webhookSecretExists ? "yes" : "no"}
+              </p>
             </div>
             <div>
               <p className="text-xs font-black uppercase text-slate-500">Last payment verification</p>
@@ -686,7 +707,12 @@ export function AdminAvailability() {
         </div>
         {passes.length > 0 ? (
           <div className="grid divide-y divide-slate-200">
-            {passes.map((pass) => (
+            {passes.map((pass) => {
+              const selectedSessions = (pass.selected_session_ids ?? [])
+                .map((sessionId) => sessions.find((session) => session.id === sessionId))
+                .filter((session): session is AdminTrainingSession => Boolean(session));
+
+              return (
               <article key={pass.id} className="grid gap-4 p-5">
                 <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
                   <div>
@@ -705,11 +731,31 @@ export function AdminAvailability() {
                     </p>
                     <p className="mt-1 text-slate-600">Status: {pass.status}</p>
                     <p className="mt-1 text-slate-600">
+                      Selected at purchase: {(pass.selected_session_ids ?? []).length || 0}
+                    </p>
+                    <p className="mt-1 text-slate-600">
                       Expires: {new Date(pass.expires_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
                     </p>
                     <p className="mt-1 text-slate-600">Paid: ${(pass.amount_paid / 100).toFixed(2)}</p>
                   </div>
                 </div>
+                {(pass.selected_session_ids ?? []).length > 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-black uppercase text-electric">Sessions Selected At Purchase</p>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                      {selectedSessions.length > 0 ? (
+                        selectedSessions.map((session) => (
+                          <p key={session.id}>
+                            {formatDateTime(session.start_datetime, session.timezone)} -{" "}
+                            {trainingGroups.find((group) => group.id === session.training_group)?.name ?? session.training_group}
+                          </p>
+                        ))
+                      ) : (
+                        <p>{(pass.selected_session_ids ?? []).join(", ")}</p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
                 {pass.redemptions.length > 0 ? (
                   <div className="rounded-lg border border-slate-200 bg-white p-4">
                     <p className="text-xs font-black uppercase text-electric">Redemption History</p>
@@ -733,7 +779,8 @@ export function AdminAvailability() {
                   </p>
                 )}
               </article>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="p-5 sm:p-6">

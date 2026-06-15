@@ -73,9 +73,24 @@ export type PassPurchaseRow = {
   status: "pending_payment" | "paid" | "cancelled" | "expired";
   stripe_checkout_session_id?: string | null;
   stripe_payment_intent_id?: string | null;
+  selected_session_ids?: string[] | null;
+  booking_details?: PassPurchaseBookingDetails | null;
   expires_at: string;
   created_at: string;
   updated_at: string;
+};
+
+export type PassPurchaseBookingDetails = {
+  notes?: string;
+  medicalNotes?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  guardianSignature?: string;
+  waiverAccepted?: boolean;
+  waiverAcceptedAt?: string;
+  waiverVersion?: string;
+  mediaConsent?: "Granted" | "Declined";
+  ipAddress?: string;
 };
 
 export type CreditRedemptionRow = {
@@ -648,6 +663,8 @@ export async function createPendingPassPurchase(input: {
   playerAge: string;
   trainingGroup: TrainingGroupId;
   passType: LaunchPassType;
+  selectedSessionIds?: string[];
+  bookingDetails?: PassPurchaseBookingDetails;
 }) {
   const option = getLaunchPassOption(input.passType);
   const inserted = await supabaseRequest<PassPurchaseRow[]>("pass_purchases", {
@@ -664,6 +681,8 @@ export async function createPendingPassPurchase(input: {
       remaining_credits: option.credits,
       amount_paid: 0,
       status: "pending_payment",
+      selected_session_ids: input.selectedSessionIds ?? [],
+      booking_details: input.bookingDetails ?? {},
       expires_at: launchPassExpirationDate
     })
   });
@@ -709,6 +728,14 @@ export async function confirmPaidLaunchPassPurchase(input: {
   return pass;
 }
 
+export async function getPassPurchaseById(passPurchaseId: string) {
+  const rows = await supabaseRequest<PassPurchaseRow[]>(
+    `pass_purchases?select=*&id=eq.${encodeFilter(passPurchaseId)}&limit=1`
+  ).catch(() => []);
+
+  return rows[0] ?? null;
+}
+
 export async function findActiveLaunchPasses(input: {
   parentEmail: string;
   playerName: string;
@@ -733,6 +760,12 @@ export async function findActiveLaunchPasses(input: {
   ).catch(() => []);
 
   return passes;
+}
+
+export async function listCreditRedemptionsForPass(passPurchaseId: string) {
+  return supabaseRequest<CreditRedemptionRow[]>(
+    `credit_redemptions?select=*&pass_purchase_id=eq.${encodeFilter(passPurchaseId)}&order=created_at.desc`
+  ).catch(() => []);
 }
 
 async function saveWaiverForBooking(booking: BookingRecord) {

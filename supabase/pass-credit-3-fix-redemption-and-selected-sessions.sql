@@ -1,61 +1,12 @@
 -- Elite Soccer Training CV Launch Pass / Credit System
--- Step 2: Database functions for Stripe pass confirmation and credit redemption.
--- Run this after pass-credit-1-tables.sql.
+-- Step 3: Fix ambiguous remaining_credits references and support selected sessions at purchase.
+-- Safe to run more than once in Supabase SQL Editor.
 
-drop function if exists public.confirm_paid_launch_pass_purchase(uuid, text, text, integer);
+alter table public.pass_purchases
+  add column if not exists selected_session_ids uuid[] not null default '{}';
 
-create or replace function public.confirm_paid_launch_pass_purchase(
-  p_pass_purchase_id uuid,
-  p_stripe_checkout_session_id text,
-  p_stripe_payment_intent_id text,
-  p_amount_paid integer
-)
-returns public.pass_purchases
-language plpgsql
-security definer
-set search_path = public
-as $est$
-declare
-  v_pass public.pass_purchases;
-begin
-  select *
-  into v_pass
-  from public.pass_purchases
-  where id = p_pass_purchase_id
-  for update;
-
-  if not found then
-    raise exception 'Launch pass purchase not found.';
-  end if;
-
-  if v_pass.status = 'paid' then
-    update public.pass_purchases
-    set
-      stripe_checkout_session_id = coalesce(p_stripe_checkout_session_id, stripe_checkout_session_id),
-      stripe_payment_intent_id = coalesce(p_stripe_payment_intent_id, stripe_payment_intent_id),
-      amount_paid = greatest(coalesce(p_amount_paid, amount_paid), amount_paid)
-    where id = p_pass_purchase_id
-    returning * into v_pass;
-
-    return v_pass;
-  end if;
-
-  if v_pass.status not in ('pending_payment', 'paid') then
-    raise exception 'Launch pass purchase cannot be confirmed from status %.', v_pass.status;
-  end if;
-
-  update public.pass_purchases
-  set
-    status = 'paid',
-    stripe_checkout_session_id = p_stripe_checkout_session_id,
-    stripe_payment_intent_id = p_stripe_payment_intent_id,
-    amount_paid = coalesce(p_amount_paid, amount_paid)
-  where id = p_pass_purchase_id
-  returning * into v_pass;
-
-  return v_pass;
-end;
-$est$;
+alter table public.pass_purchases
+  add column if not exists booking_details jsonb not null default '{}'::jsonb;
 
 drop function if exists public.redeem_launch_pass_credit(
   uuid,
@@ -101,7 +52,7 @@ declare
   v_paid_players integer;
   v_booking_id uuid;
   v_redemption_id uuid;
-  v_remaining integer;
+  v_remaining_credits integer;
 begin
   select *
   into v_pass
@@ -118,7 +69,10 @@ begin
   end if;
 
   if v_pass.expires_at < now() then
-    update public.pass_purchases set status = 'expired' where id = v_pass.id;
+    update public.pass_purchases
+    set status = 'expired'
+    where public.pass_purchases.id = v_pass.id;
+
     raise exception 'Launch pass has expired.';
   end if;
 
@@ -156,11 +110,20 @@ begin
     raise exception 'Selected training session does not match this Launch Pass training group.';
   end if;
 
-  select coalesce(sum(coalesce(player_count, 1)), 0)
+  if exists (
+    select 1
+    from public.credit_redemptions
+    where public.credit_redemptions.pass_purchase_id = p_pass_purchase_id
+      and public.credit_redemptions.session_id = p_session_id
+  ) then
+    raise exception 'Launch Pass credit has already been used for this session.';
+  end if;
+
+  select coalesce(sum(coalesce(public.bookings.player_count, 1)), 0)
   into v_paid_players
   from public.bookings
-  where session_id = p_session_id
-    and status = 'paid';
+  where public.bookings.session_id = p_session_id
+    and public.bookings.status = 'paid';
 
   if v_paid_players + 1 > v_session.capacity then
     raise exception 'Selected training session is full.';
@@ -207,7 +170,7 @@ begin
   update public.pass_purchases
   set remaining_credits = public.pass_purchases.remaining_credits - 1
   where public.pass_purchases.id = p_pass_purchase_id
-  returning public.pass_purchases.remaining_credits into v_remaining;
+  returning public.pass_purchases.remaining_credits into v_remaining_credits;
 
   insert into public.credit_redemptions (
     pass_purchase_id,
@@ -225,11 +188,11 @@ begin
 
   update public.bookings
   set credit_redemption_id = v_redemption_id
-  where id = v_booking_id;
+  where public.bookings.id = v_booking_id;
 
   booking_id := v_booking_id;
   credit_redemption_id := v_redemption_id;
-  remaining_credits := v_remaining;
+  remaining_credits := v_remaining_credits;
   return next;
 end;
 $est$;

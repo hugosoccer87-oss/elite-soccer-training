@@ -2,18 +2,18 @@
   "version": 1,
   "functions": {
     "/api/admin/bookings": {},
-    "/api/admin/email-diagnostics": {},
     "/api/admin/passes": {},
-    "/api/admin/sessions": {},
-    "/api/availability": {},
+    "/api/admin/email-diagnostics": {},
     "/api/admin/sessions/[id]": {},
+    "/api/admin/sessions": {},
     "/api/availability/debug": {},
-    "/api/reviews": {},
-    "/api/passes/lookup": {},
-    "/api/passes/redeem": {},
+    "/api/availability": {},
     "/api/admin/send-test-email": {},
+    "/api/passes/lookup": {},
+    "/api/reviews": {},
+    "/api/passes/redeem": {},
     "/api/stripe/verify-session": {},
-    "/api/stripe/webhook": {},
-    "/api/stripe/pass-checkout": {}
+    "/api/stripe/pass-checkout": {},
+    "/api/stripe/webhook": {}
   }
 }

@@ -32,12 +32,76 @@ export type StripeEvent = {
   };
 };
 
+export type StripeMode = "live" | "test";
+
+function normalizeStripeMode(value: string | undefined): StripeMode | null {
+  const normalized = value?.trim().toLowerCase();
+
+  if (normalized === "test" || normalized === "live") {
+    return normalized;
+  }
+
+  return null;
+}
+
+export function getStripeMode(): StripeMode {
+  return normalizeStripeMode(process.env.STRIPE_MODE) ?? normalizeStripeMode(process.env.NEXT_PUBLIC_STRIPE_MODE) ?? "live";
+}
+
+function getStripeEnvironment() {
+  const mode = getStripeMode();
+
+  if (mode === "test") {
+    return {
+      mode,
+      secretKey: process.env.STRIPE_TEST_SECRET_KEY,
+      publishableKey: process.env.NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY,
+      webhookSecret: process.env.STRIPE_TEST_WEBHOOK_SECRET,
+      secretKeyName: "STRIPE_TEST_SECRET_KEY",
+      publishableKeyName: "NEXT_PUBLIC_STRIPE_TEST_PUBLISHABLE_KEY",
+      webhookSecretName: "STRIPE_TEST_WEBHOOK_SECRET"
+    };
+  }
+
+  return {
+    mode,
+    secretKey: process.env.STRIPE_SECRET_KEY,
+    publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    secretKeyName: "STRIPE_SECRET_KEY",
+    publishableKeyName: "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+    webhookSecretName: "STRIPE_WEBHOOK_SECRET"
+  };
+}
+
 function getStripeSecretKey() {
-  return process.env.STRIPE_SECRET_KEY;
+  return getStripeEnvironment().secretKey;
+}
+
+function getStripePublishableKey() {
+  return getStripeEnvironment().publishableKey;
+}
+
+function getStripeWebhookSecret() {
+  return getStripeEnvironment().webhookSecret;
+}
+
+export function getStripeEnvironmentDiagnostics() {
+  const stripe = getStripeEnvironment();
+
+  return {
+    stripeMode: stripe.mode,
+    secretKeyConfigured: Boolean(stripe.secretKey),
+    publishableKeyConfigured: Boolean(stripe.publishableKey),
+    webhookSecretConfigured: Boolean(stripe.webhookSecret),
+    secretKeyName: stripe.secretKeyName,
+    publishableKeyName: stripe.publishableKeyName,
+    webhookSecretName: stripe.webhookSecretName
+  };
 }
 
 export function getStripeKeyMode() {
-  const key = getStripeSecretKey() || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "";
+  const key = getStripeSecretKey() || getStripePublishableKey() || "";
 
   if (key.startsWith("sk_live_") || key.startsWith("pk_live_")) {
     return "live";
@@ -51,7 +115,7 @@ export function getStripeKeyMode() {
 }
 
 export function hasStripeWebhookSecret() {
-  return Boolean(process.env.STRIPE_WEBHOOK_SECRET?.trim());
+  return Boolean(getStripeWebhookSecret()?.trim());
 }
 
 export function getSiteUrl() {
@@ -102,6 +166,7 @@ export function passPurchaseToStripeMetadata(pass: PassPurchaseRow) {
     purchase_type: "launch_pass",
     passPurchaseId: pass.id,
     pass_type: pass.pass_type,
+    selected_session_count: pass.selected_session_ids?.length ?? 0,
     parent_name: pass.parent_name,
     parent_email: pass.parent_email,
     parent_phone: pass.parent_phone,
@@ -121,13 +186,14 @@ function appendMetadata(params: URLSearchParams, metadata: Record<string, string
 
 export async function createStripeCheckoutSession(booking: BookingRecord) {
   const secretKey = getStripeSecretKey();
+  const stripe = getStripeEnvironment();
 
   if (!secretKey) {
-    throw new Error("Stripe is not configured. Add STRIPE_SECRET_KEY in Vercel.");
+    throw new Error(`Stripe is not configured. Add ${stripe.secretKeyName} in Vercel.`);
   }
 
-  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-    throw new Error("Stripe is not configured. Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Vercel.");
+  if (!getStripePublishableKey()) {
+    throw new Error(`Stripe is not configured. Add ${stripe.publishableKeyName} in Vercel.`);
   }
 
   const siteUrl = getSiteUrl();
@@ -174,14 +240,15 @@ export async function createStripeCheckoutSession(booking: BookingRecord) {
 
 export async function createStripeLaunchPassCheckoutSession(pass: PassPurchaseRow) {
   const secretKey = getStripeSecretKey();
+  const stripe = getStripeEnvironment();
   const option = getLaunchPassOption(pass.pass_type);
 
   if (!secretKey) {
-    throw new Error("Stripe is not configured. Add STRIPE_SECRET_KEY in Vercel.");
+    throw new Error(`Stripe is not configured. Add ${stripe.secretKeyName} in Vercel.`);
   }
 
-  if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-    throw new Error("Stripe is not configured. Add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY in Vercel.");
+  if (!getStripePublishableKey()) {
+    throw new Error(`Stripe is not configured. Add ${stripe.publishableKeyName} in Vercel.`);
   }
 
   const siteUrl = getSiteUrl();
@@ -236,9 +303,10 @@ export function passPurchaseIdFromStripeMetadata(metadata: Record<string, string
 
 export async function retrieveStripeCheckoutSession(sessionId: string) {
   const secretKey = getStripeSecretKey();
+  const stripe = getStripeEnvironment();
 
   if (!secretKey) {
-    throw new Error("Stripe is not configured. Add STRIPE_SECRET_KEY in Vercel.");
+    throw new Error(`Stripe is not configured. Add ${stripe.secretKeyName} in Vercel.`);
   }
 
   const cleanSessionId = sessionId.trim();
@@ -308,10 +376,11 @@ export function bookingFromStripeMetadata(metadata: Record<string, string> | und
 }
 
 export function verifyStripeWebhookSignature(payload: string, signatureHeader: string | null) {
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const stripe = getStripeEnvironment();
+  const webhookSecret = getStripeWebhookSecret();
 
   if (!webhookSecret) {
-    throw new Error("Stripe webhook is not configured. Add STRIPE_WEBHOOK_SECRET in Vercel.");
+    throw new Error(`Stripe webhook is not configured. Add ${stripe.webhookSecretName} in Vercel.`);
   }
 
   if (!signatureHeader) {

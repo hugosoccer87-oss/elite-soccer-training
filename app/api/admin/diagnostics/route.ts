@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { adminSessionCookie, getAdminSessionValue } from "@/lib/admin-auth";
 import { getGoogleCalendarDiagnostics } from "@/lib/google-calendar";
 import { getLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
-import { getStripeKeyMode, hasStripeWebhookSecret } from "@/lib/stripe";
+import { getStripeEnvironmentDiagnostics, getStripeKeyMode, hasStripeWebhookSecret } from "@/lib/stripe";
 import { getSupabaseDiagnostics } from "@/lib/supabase-db";
 import { getEmailDiagnostics } from "@/lib/transactional-email";
 
@@ -25,6 +25,7 @@ export async function GET() {
   }
 
   return NextResponse.json({
+    stripe: getStripeEnvironmentDiagnostics(),
     stripeKeyMode: getStripeKeyMode(),
     webhookSecretExists: hasStripeWebhookSecret(),
     lastPaymentVerificationResult: getLastPaymentVerificationResult(),

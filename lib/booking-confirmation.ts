@@ -1,4 +1,4 @@
-import { type BookingRecord } from "@/lib/booking-data";
+import { getTrainingGroup, type BookingRecord } from "@/lib/booking-data";
 import {
   createBookingCalendarEvent,
   recordCalendarEventCreationFailure,
@@ -6,10 +6,14 @@ import {
 } from "@/lib/google-calendar";
 import {
   confirmPaidLaunchPassPurchase,
+  getPassPurchaseById,
+  listCreditRedemptionsForPass,
   logEmailStatus,
   markBookingPaidAndSaveWaiver,
+  redeemLaunchPassCreditAndSaveWaiver,
   saveCalendarEventRecord
 } from "@/lib/supabase-db";
+import type { PassPurchaseRow } from "@/lib/supabase-db";
 import {
   sendBookingTransactionalEmails,
   sendLaunchPassTransactionalEmails
@@ -176,6 +180,115 @@ export async function confirmLaunchPassCreditBooking(booking: BookingRecord) {
   });
 }
 
+function launchPassSelectedSessionBooking(pass: PassPurchaseRow, sessionId: string): BookingRecord {
+  const details = pass.booking_details ?? {};
+  const signedAt = details.waiverAcceptedAt || new Date().toISOString();
+  const group = getTrainingGroup(pass.training_group);
+
+  return {
+    id: `PASS-${pass.id.replaceAll("-", "").slice(-8).toUpperCase()}-${Date.now().toString().slice(-5)}`,
+    createdAt: signedAt,
+    parentName: pass.parent_name,
+    playerName: pass.player_name,
+    playerAge: pass.player_age,
+    phone: pass.parent_phone,
+    email: pass.parent_email,
+    players: "1",
+    notes: details.notes || "",
+    medicalNotes: details.medicalNotes || "",
+    emergencyName: details.emergencyName || "",
+    emergencyPhone: details.emergencyPhone || "",
+    guardianSignature: details.guardianSignature || pass.parent_name,
+    waiverAccepted: Boolean(details.waiverAccepted),
+    waiverAcceptedAt: signedAt,
+    waiverVersion: details.waiverVersion || "",
+    ipAddress: details.ipAddress || "",
+    mediaConsent: details.mediaConsent === "Declined" ? "Declined" : "Granted",
+    programId: pass.training_group,
+    programName: group.name,
+    sessionId,
+    sessionDateIso: "",
+    sessionDate: "",
+    sessionTime: "",
+    sessionDurationMinutes: 60,
+    paymentStatus: "Paid",
+    notificationStatus: "Ready",
+    calendarStatus: "Ready",
+    paymentType: "launch_pass_credit",
+    passPurchaseId: pass.id
+  };
+}
+
+async function redeemSelectedLaunchPassSessions(pass: PassPurchaseRow) {
+  const selectedSessionIds = Array.from(new Set(pass.selected_session_ids ?? []));
+
+  if (selectedSessionIds.length === 0) {
+    return [];
+  }
+
+  console.info("[EST Pass] Redeeming sessions selected at Launch Pass purchase", {
+    passPurchaseId: pass.id,
+    selectedSessionCount: selectedSessionIds.length
+  });
+
+  const existingRedemptions = await listCreditRedemptionsForPass(pass.id);
+  const alreadyRedeemedSessionIds = new Set(existingRedemptions.map((redemption) => redemption.session_id));
+  const results: Array<{
+    sessionId: string;
+    bookingId?: string;
+    status: "confirmed" | "skipped" | "failed";
+    message?: string;
+  }> = [];
+
+  for (const sessionId of selectedSessionIds) {
+    if (alreadyRedeemedSessionIds.has(sessionId)) {
+      results.push({
+        sessionId,
+        status: "skipped",
+        message: "Session was already redeemed for this Launch Pass."
+      });
+      continue;
+    }
+
+    try {
+      const booking = await redeemLaunchPassCreditAndSaveWaiver(
+        launchPassSelectedSessionBooking(pass, sessionId),
+        pass.id,
+        pass.booking_details?.ipAddress || ""
+      );
+      const confirmation = await confirmLaunchPassCreditBooking(booking);
+
+      results.push({
+        sessionId,
+        bookingId: confirmation.booking.id,
+        status: "confirmed"
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      console.error("[EST Pass] Selected Launch Pass session could not be booked", {
+        passPurchaseId: pass.id,
+        sessionId,
+        error: message
+      });
+      results.push({
+        sessionId,
+        status: "failed",
+        message
+      });
+    }
+  }
+
+  console.info("[EST Pass] Selected Launch Pass session redemption complete", {
+    passPurchaseId: pass.id,
+    confirmed: results.filter((result) => result.status === "confirmed").length,
+    skipped: results.filter((result) => result.status === "skipped").length,
+    failed: results.filter((result) => result.status === "failed").length
+  });
+
+  return results;
+}
+
 export async function confirmLaunchPassPurchase(input: {
   passPurchaseId: string;
   checkoutSessionId?: string;
@@ -187,14 +300,16 @@ export async function confirmLaunchPassPurchase(input: {
     checkoutSessionId: input.checkoutSessionId
   });
   const pass = await confirmPaidLaunchPassPurchase(input);
+  const selectedSessionResults = await redeemSelectedLaunchPassSessions(pass);
+  const updatedPass = selectedSessionResults.length > 0 ? (await getPassPurchaseById(pass.id)) ?? pass : pass;
 
   try {
     console.info("[EST Stripe] Starting Launch Pass email notifications", {
-      passPurchaseId: pass.id
+      passPurchaseId: updatedPass.id
     });
-    const result = await sendLaunchPassTransactionalEmails(pass);
+    const result = await sendLaunchPassTransactionalEmails(updatedPass);
     console.info("[EST Stripe] Launch Pass email notifications complete", {
-      passPurchaseId: pass.id,
+      passPurchaseId: updatedPass.id,
       sent: result.sent,
       customerSent: result.customerSent,
       adminSent: result.adminSent,
@@ -202,17 +317,19 @@ export async function confirmLaunchPassPurchase(input: {
     });
 
     return {
-      pass,
+      pass: updatedPass,
+      selectedSessionResults,
       emailResult: result
     };
   } catch (error) {
     console.error("[EST Email] Launch Pass email flow failed:", {
-      passPurchaseId: pass.id,
+      passPurchaseId: updatedPass.id,
       error: error instanceof Error ? error.message : String(error)
     });
 
     return {
-      pass,
+      pass: updatedPass,
+      selectedSessionResults,
       emailResult: {
         sent: false,
         customerSent: false,

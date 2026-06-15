@@ -60,14 +60,21 @@ export async function POST(request: Request) {
       emailSent: confirmation.emailResult?.sent ?? false
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isMissingCredits =
+      message.toLowerCase().includes("no remaining credits") ||
+      message.toLowerCase().includes("not found") ||
+      message.toLowerCase().includes("not paid") ||
+      message.toLowerCase().includes("expired");
+
     console.error("[EST Pass] Launch Pass credit redemption failed", {
       passPurchaseId: payload?.passPurchaseId,
-      error: error instanceof Error ? error.message : String(error)
+      error: message
     });
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Launch Pass credit could not be redeemed."
+        error: isMissingCredits ? "No active Launch Pass credits were found for this player." : message
       },
       { status: 500 }
     );

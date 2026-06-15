@@ -436,12 +436,14 @@ function adminEmail(booking: BookingRecord): EmailMessage {
 function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
   const option = getLaunchPassOption(pass.pass_type);
   const bookingUrl = `${(process.env.NEXT_PUBLIC_SITE_URL || "https://www.elitesoccertrainingcv.com").replace(/\/$/, "")}/booking`;
+  const selectedSessionCount = pass.selected_session_ids?.length ?? 0;
   const rows: Array<[string, string]> = [
     ["Launch Pass", option.title],
     ["Player", pass.player_name],
     ["Training Group", pass.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
     ["Credits", `${pass.total_credits} session credits`],
     ["Remaining Credits", String(pass.remaining_credits)],
+    ["Sessions Selected at Purchase", selectedSessionCount > 0 ? String(selectedSessionCount) : "None"],
     ["Expiration", "June 30, 2026"],
     ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)]
   ];
@@ -450,7 +452,9 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
     "",
     `Hi ${pass.parent_name},`,
     "",
-    "Your Launch Pass has been purchased. You can now book sessions using your pass credits.",
+    selectedSessionCount > 0
+      ? "Your Launch Pass has been purchased. Selected sessions will be confirmed by email."
+      : "Your Launch Pass has been purchased. You can now book sessions using your pass credits.",
     "",
     ...rows.map(([label, value]) => `${label}: ${value}`),
     "",
@@ -468,7 +472,7 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
       </table>
       <div style="margin-top:22px;border-left:4px solid #1783ff;background:#eef6ff;padding:16px;color:#334155;line-height:1.6">
         <strong style="color:#06152b">Next step</strong><br />
-        <p style="margin:10px 0 0">Visit the booking page and choose "Use Existing Launch Pass Credits" to reserve sessions with this pass.</p>
+        <p style="margin:10px 0 0">${selectedSessionCount > 0 ? "Any remaining credits can be used later from the booking page." : "Visit the booking page and choose \"Use Existing Launch Pass Credits\" to reserve sessions with this pass."}</p>
         <p style="margin:10px 0 0"><a href="${escapeHtml(bookingUrl)}" style="color:#1783ff;font-weight:800">Book sessions</a></p>
       </div>
     `
@@ -486,6 +490,7 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
 
 function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
   const option = getLaunchPassOption(pass.pass_type);
+  const selectedSessionCount = pass.selected_session_ids?.length ?? 0;
   const rows: Array<[string, string]> = [
     ["Pass Purchase ID", pass.id],
     ["Parent/Guardian", pass.parent_name],
@@ -496,6 +501,8 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
     ["Training Group", pass.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
     ["Pass Type", option.title],
     ["Credits", `${pass.total_credits} total / ${pass.remaining_credits} remaining`],
+    ["Sessions Selected at Purchase", selectedSessionCount > 0 ? `${selectedSessionCount} selected` : "None"],
+    ["Selected Session IDs", selectedSessionCount > 0 ? (pass.selected_session_ids ?? []).join(", ") : "None"],
     ["Expiration", "June 30, 2026"],
     ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)],
     ["Stripe Checkout Session", pass.stripe_checkout_session_id || "Not recorded"],

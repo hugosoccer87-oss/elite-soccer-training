@@ -41,6 +41,7 @@ const specialTrainingRequestValue = "special-training-request";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
 type BookingOption = "single_session" | LaunchPassType | "use_existing_pass";
+type LaunchPassUseMode = "choose_now" | "choose_later";
 
 type BookingFields = {
   parentName: string;
@@ -113,6 +114,17 @@ type PassLookupFields = {
   playerName: string;
 };
 
+type LaunchPassBookingDetails = {
+  notes: string;
+  medicalNotes: string;
+  emergencyName: string;
+  emergencyPhone: string;
+  guardianSignature: string;
+  waiverAccepted: boolean;
+  waiverAcceptedAt: string;
+  mediaConsent: "Granted" | "Declined";
+};
+
 async function createStripeCheckout(booking: BookingRecord) {
   try {
     const response = await fetch("/api/stripe/checkout", {
@@ -138,7 +150,12 @@ async function createStripeCheckout(booking: BookingRecord) {
   }
 }
 
-async function createLaunchPassCheckout(passType: LaunchPassType, fields: PassPurchaseFields) {
+async function createLaunchPassCheckout(
+  passType: LaunchPassType,
+  fields: PassPurchaseFields,
+  selectedSessionIds: string[] = [],
+  bookingDetails?: LaunchPassBookingDetails
+) {
   try {
     const response = await fetch("/api/stripe/pass-checkout", {
       method: "POST",
@@ -147,7 +164,9 @@ async function createLaunchPassCheckout(passType: LaunchPassType, fields: PassPu
       },
       body: JSON.stringify({
         ...fields,
-        passType
+        passType,
+        selectedSessionIds,
+        bookingDetails
       })
     });
     const result = (await response.json()) as StripeCheckoutResult & { passPurchaseId?: string };
@@ -353,6 +372,8 @@ export function BookingForm() {
     parentEmail: "",
     playerName: ""
   });
+  const [launchPassUseMode, setLaunchPassUseMode] = useState<LaunchPassUseMode>("choose_later");
+  const [selectedPassSessionIds, setSelectedPassSessionIds] = useState<string[]>([]);
   const [foundPasses, setFoundPasses] = useState<LaunchPassSummary[]>([]);
   const [selectedPassId, setSelectedPassId] = useState("");
   const [passNotice, setPassNotice] = useState("");
@@ -430,6 +451,19 @@ export function BookingForm() {
   const usesExistingPass = bookingOption === "use_existing_pass";
   const isPassPurchaseOption =
     bookingOption === "four_session_launch_pass" || bookingOption === "six_session_launch_pass";
+  const selectedLaunchPassOption = isPassPurchaseOption ? getLaunchPassOption(bookingOption as LaunchPassType) : null;
+  const passPurchaseAvailableSessions = useMemo(
+    () => apiSessions.filter((session) => session.trainingGroupId === passPurchaseFields.trainingGroup),
+    [apiSessions, passPurchaseFields.trainingGroup]
+  );
+  const selectedPassSessions = useMemo(
+    () =>
+      selectedPassSessionIds
+        .map((sessionId) => apiSessions.find((session) => session.id === sessionId))
+        .filter((session): session is PublicAvailableSession => Boolean(session)),
+    [apiSessions, selectedPassSessionIds]
+  );
+  const selectedPassCreditLimit = selectedLaunchPassOption?.credits ?? 0;
 
   useEffect(() => {
     if (availableSessions.length === 0) {
@@ -465,6 +499,22 @@ export function BookingForm() {
       setVisibleMonth(firstMonth);
     }
   }, [availableDateSet, availableSessions, selectedSessionDate, visibleMonth]);
+
+  useEffect(() => {
+    if (!isPassPurchaseOption) {
+      return;
+    }
+
+    setSelectedPassSessionIds((current) =>
+      current
+        .filter((sessionId) => {
+          const session = apiSessions.find((item) => item.id === sessionId);
+
+          return session?.trainingGroupId === passPurchaseFields.trainingGroup;
+        })
+        .slice(0, selectedPassCreditLimit || current.length)
+    );
+  }, [apiSessions, isPassPurchaseOption, passPurchaseFields.trainingGroup, selectedPassCreditLimit]);
 
   const selectedSlot = availableSessions.find((slot) => slot.id === selectedSlotId);
   const selectedGroup = selectedGroupId ? getTrainingGroup(selectedGroupId) : null;
@@ -554,6 +604,7 @@ export function BookingForm() {
     setFieldErrors({});
     setPassNotice("");
     setCreditBookingSuccess(null);
+    setSelectedPassSessionIds([]);
     setError("");
 
     if (option === "single_session") {
@@ -569,6 +620,7 @@ export function BookingForm() {
     }
 
     setSelectedGroupId("");
+    setLaunchPassUseMode("choose_later");
   }
 
   function selectTrainingGroup(value: string) {
@@ -585,6 +637,9 @@ export function BookingForm() {
 
   function setPassPurchaseField(field: keyof PassPurchaseFields, value: string) {
     setPassPurchaseFields((current) => ({ ...current, [field]: value }));
+    if (field === "trainingGroup") {
+      setSelectedPassSessionIds([]);
+    }
     setError("");
   }
 
@@ -594,10 +649,28 @@ export function BookingForm() {
     setPassNotice("");
   }
 
+  function togglePassSession(sessionId: string) {
+    setSelectedPassSessionIds((current) => {
+      if (current.includes(sessionId)) {
+        return current.filter((id) => id !== sessionId);
+      }
+
+      if (selectedPassCreditLimit && current.length >= selectedPassCreditLimit) {
+        setError(`Choose up to ${selectedPassCreditLimit} sessions for this Launch Pass.`);
+        return current;
+      }
+
+      setError("");
+      return [...current, sessionId];
+    });
+  }
+
   async function startLaunchPassCheckout() {
     if (bookingOption !== "four_session_launch_pass" && bookingOption !== "six_session_launch_pass") {
       return;
     }
+
+    const needsSelectedSessions = launchPassUseMode === "choose_now";
 
     if (
       !passPurchaseFields.parentName.trim() ||
@@ -611,10 +684,50 @@ export function BookingForm() {
       return;
     }
 
+    if (needsSelectedSessions) {
+      if (selectedPassSessionIds.length === 0) {
+        setError("Choose at least one session, or select choose dates later.");
+        return;
+      }
+
+      if (selectedPassSessionIds.length > selectedPassCreditLimit) {
+        setError(`Choose no more than ${selectedPassCreditLimit} sessions for this Launch Pass.`);
+        return;
+      }
+
+      if (
+        !fields.emergencyName.trim() ||
+        !fields.emergencyPhone.trim() ||
+        !fields.medicalNotes.trim() ||
+        !fields.mediaConsent ||
+        !fields.waiverAgreement ||
+        !fields.guardianSignature.trim()
+      ) {
+        setError("Complete the emergency details and signed waiver before checkout.");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setError("");
 
-    const checkout = await createLaunchPassCheckout(bookingOption, passPurchaseFields);
+    const checkout = await createLaunchPassCheckout(
+      bookingOption,
+      passPurchaseFields,
+      needsSelectedSessions ? selectedPassSessionIds : [],
+      needsSelectedSessions
+        ? {
+            notes: fields.notes,
+            medicalNotes: fields.medicalNotes,
+            emergencyName: fields.emergencyName,
+            emergencyPhone: fields.emergencyPhone,
+            guardianSignature: fields.guardianSignature,
+            waiverAccepted: fields.waiverAgreement,
+            waiverAcceptedAt: new Date().toISOString(),
+            mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined"
+          }
+        : undefined
+    );
 
     if (!checkout.checkoutUrl) {
       setIsSubmitting(false);
@@ -649,7 +762,7 @@ export function BookingForm() {
 
     if (result.passes.length === 0) {
       setSelectedPassId("");
-      setPassNotice("No active Launch Pass credits were found for that parent email and player name.");
+      setPassNotice("No active Launch Pass credits were found for this player.");
       return;
     }
 
@@ -1051,13 +1164,201 @@ export function BookingForm() {
                     </select>
                   </label>
                 </div>
+                <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
+                  <div>
+                    <p className="text-xs font-black uppercase text-electric">How would you like to use your pass?</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Choose sessions now, or buy the pass first and come back later to use the credits.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      ["choose_now", "Choose session dates now", "Reserve up to your pass credits after payment."],
+                      ["choose_later", "Choose session dates later", "Keep all credits available for future booking."]
+                    ].map(([value, title, description]) => {
+                      const isSelected = launchPassUseMode === value;
+
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => {
+                            setLaunchPassUseMode(value as LaunchPassUseMode);
+                            setError("");
+                          }}
+                          className={`rounded-lg border p-4 text-left transition ${
+                            isSelected
+                              ? "border-navy bg-navy text-white shadow-lg shadow-navy/15"
+                              : "border-slate-200 bg-mist text-navy hover:border-electric"
+                          }`}
+                        >
+                          <span className={`block text-sm font-black ${isSelected ? "text-white" : "text-navy"}`}>{title}</span>
+                          <span className="mt-2 block text-sm leading-6 opacity-80">{description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {launchPassUseMode === "choose_now" ? (
+                  <div className="grid gap-5 rounded-lg border border-slate-200 bg-white p-4">
+                    <div>
+                      <p className="text-xs font-black uppercase text-electric">Select Sessions</p>
+                      <h5 className="mt-2 text-xl font-black text-navy">Choose up to {selectedPassCreditLimit} sessions</h5>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        You may choose fewer now and use the remaining credits later.
+                      </p>
+                    </div>
+
+                    {passPurchaseAvailableSessions.length > 0 ? (
+                      <div className="grid max-h-[28rem] gap-3 overflow-y-auto pr-1">
+                        {passPurchaseAvailableSessions.map((slot) => {
+                          const isSelected = selectedPassSessionIds.includes(slot.id);
+
+                          return (
+                            <button
+                              key={slot.id}
+                              type="button"
+                              onClick={() => togglePassSession(slot.id)}
+                              className={`rounded-lg border p-4 text-left transition ${
+                                isSelected
+                                  ? "border-navy bg-navy text-white shadow-lg shadow-navy/15"
+                                  : "border-slate-200 bg-mist text-navy hover:border-electric"
+                              }`}
+                            >
+                              <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
+                                {slot.dayLabel}, {slot.dateLabel}
+                              </span>
+                              <span className="mt-1 block text-2xl font-black">{slot.startTime}</span>
+                              <span className="mt-2 block text-sm font-bold opacity-90">
+                                {slot.trainingGroup}: {slot.trainingGroupAges}
+                              </span>
+                              <span className="mt-1 block text-sm font-semibold opacity-80">
+                                {sessionLocationLines(slot.location).map((line) => (
+                                  <span key={line} className="block">{line}</span>
+                                ))}
+                              </span>
+                              <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(slot.remainingSpots)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="rounded-md bg-mist p-4 text-sm font-bold text-slate-600">
+                        No open sessions are available for this training group right now.
+                      </p>
+                    )}
+
+                    <div className="rounded-md bg-mist p-4 text-sm font-bold text-slate-700">
+                      <p>{selectedPassSessionIds.length} selected / {selectedPassCreditLimit} included</p>
+                      <p className="mt-1">
+                        Credits left for later after checkout: {Math.max(0, selectedPassCreditLimit - selectedPassSessionIds.length)}
+                      </p>
+                      {selectedPassSessions.length > 0 ? (
+                        <div className="mt-3 grid gap-1 font-semibold">
+                          {selectedPassSessions.map((slot) => (
+                            <p key={slot.id}>
+                              {slot.dateLabel} at {slot.startTime} - {slot.trainingGroup}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="grid gap-2 text-sm font-bold text-navy">
+                        Emergency Contact Name
+                        <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-navy">
+                        Emergency Contact Phone
+                        <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                        Notes
+                        <textarea
+                          className={`${inputClass} min-h-20 resize-y`}
+                          value={fields.notes}
+                          onChange={(event) => setField("notes", event.target.value)}
+                          placeholder="Optional notes for Coach Hugo"
+                        />
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                        Medical Notes/Injuries
+                        <textarea
+                          className={`${inputClass} min-h-24 resize-y`}
+                          value={fields.medicalNotes}
+                          onChange={(event) => setField("medicalNotes", event.target.value)}
+                          placeholder="Share medical conditions, allergies, injuries, or type None"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-300 bg-[#fffdf8] p-4 text-sm leading-6 text-slate-700">
+                      <p className="text-xs font-black uppercase text-electric">Parent Waiver</p>
+                      <h5 className="mt-2 font-black text-navy">Elite Soccer Training CV Participation Waiver & Release of Liability</h5>
+                      <div className="mt-4 max-h-72 overflow-y-auto border-y border-slate-200 py-3">
+                        {waiverSections.map((section) => (
+                          <section key={section.title} className="py-3">
+                            <h6 className="font-black uppercase tracking-wide text-navy">{section.title}</h6>
+                            <p className="mt-1">{section.copy}</p>
+                          </section>
+                        ))}
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        {[
+                          ["yes", "Yes, media use is approved"],
+                          ["no", "No, media consent is declined"]
+                        ].map(([value, label]) => (
+                          <label key={value} className="flex items-center gap-3 font-semibold text-navy">
+                            <input
+                              className="h-4 w-4 border-slate-400 text-electric"
+                              type="radio"
+                              name="launchPassMediaConsent"
+                              checked={fields.mediaConsent === value}
+                              onChange={() => setField("mediaConsent", value)}
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                      <label className="mt-4 flex items-start gap-3 font-semibold text-slate-700">
+                        <input
+                          className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                          checked={fields.waiverAgreement}
+                          type="checkbox"
+                          onChange={(event) => setField("waiverAgreement", event.target.checked)}
+                        />
+                        <span>I have read and agree to the Elite Soccer Training CV waiver for the selected Launch Pass sessions.</span>
+                      </label>
+                      <label className="mt-4 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
+                        Parent/Guardian Digital Signature
+                        <input
+                          className="field-focus w-full border-0 border-b border-slate-400 bg-transparent px-0 py-3 text-base font-semibold text-slate-900 placeholder:text-slate-400"
+                          value={fields.guardianSignature}
+                          onChange={(event) => setField("guardianSignature", event.target.value)}
+                          placeholder="Type parent/guardian full legal name"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="rounded-md bg-white p-4 text-sm font-bold leading-6 text-slate-700">
+                    You will receive instructions by email after payment. No session spots are reserved until credits are used.
+                  </p>
+                )}
+
                 <button
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => void startLaunchPassCheckout()}
                   className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 sm:w-fit"
                 >
-                  {isSubmitting ? "Starting Payment..." : `Buy ${getLaunchPassOption(bookingOption as LaunchPassType).title}`}
+                  {isSubmitting
+                    ? "Starting Payment..."
+                    : launchPassUseMode === "choose_now"
+                      ? `Buy Pass & Book ${selectedPassSessionIds.length || ""} Session${selectedPassSessionIds.length === 1 ? "" : "s"}`
+                      : `Buy ${getLaunchPassOption(bookingOption as LaunchPassType).title}`}
                 </button>
               </div>
             ) : usesExistingPass ? (
