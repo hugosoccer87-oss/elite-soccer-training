@@ -4,7 +4,8 @@ import { PageHero } from "@/components/PageHero";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecialRequestForm } from "@/components/SpecialRequestForm";
 import { TrainingCard } from "@/components/TrainingCard";
-import { groupSizeMessage, services } from "@/lib/site-data";
+import { groupSizeMessage, juneLaunchScheduleNote, services } from "@/lib/site-data";
+import { pricingOptions } from "@/lib/pricing";
 
 export const metadata: Metadata = {
   title: "Programs",
@@ -25,6 +26,24 @@ export default function ServicesPage() {
           <div className="rounded-lg border border-electric/20 bg-white p-5 shadow-sm">
             <p className="text-sm font-black uppercase text-electric">Limited Group Size</p>
             <p className="mt-2 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-black uppercase text-electric">June Launch Pricing</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              {pricingOptions.map((option) => (
+                <article key={option.title} className="rounded-lg border border-slate-200 bg-mist p-4">
+                  <h2 className="text-lg font-black text-navy">{option.title} — {option.price}</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{option.description}</p>
+                </article>
+              ))}
+            </div>
+            <p className="mt-4 text-sm font-bold leading-6 text-slate-600">
+              Launch Passes are currently handled directly with Coach Hugo. Online booking remains Single Session.
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-sm font-black uppercase text-electric">June Schedule Note</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{juneLaunchScheduleNote}</p>
           </div>
           {services.map((service, index) => (
             <TrainingCard key={service.title} index={index} {...service} />

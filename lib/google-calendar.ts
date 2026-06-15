@@ -10,6 +10,7 @@ import {
   type TrainingSlot
 } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
+import { business } from "@/lib/site-data";
 
 const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleTokenEndpoint = "https://oauth2.googleapis.com/token";
@@ -379,6 +380,7 @@ function bookingDescription(booking: BookingRecord) {
     `Player age: ${booking.playerAge}`,
     `Training group: ${booking.programName}`,
     `Session date/time: ${booking.sessionDate} at ${booking.sessionTime}`,
+    `Location: ${business.location}`,
     `Number of players: ${booking.players}`,
     `Payment status: Paid`,
     `Payment amount: ${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`,
@@ -972,6 +974,7 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     body: JSON.stringify({
       summary: `Elite Soccer Training CV - Paid Booking: ${booking.playerName}`,
       description: bookingDescription(booking),
+      location: business.location,
       start: {
         dateTime: range.start,
         timeZone: calendarTimeZone

@@ -59,7 +59,7 @@ export default function ContactPage() {
             <div className="rounded-lg border border-slate-200 bg-white p-5">
               <p className="text-sm font-black uppercase text-navy">Map</p>
               <div className="mt-4 flex aspect-[4/3] items-center justify-center rounded-md bg-[linear-gradient(135deg,#eef4fb,#d9eadf)] p-6 text-center text-sm font-bold leading-6 text-slate-600">
-                Google Maps embed placeholder for Coachella Valley, CA
+                Google Maps embed placeholder for Desert Christian Academy, 40700 Yucca Lane, Bermuda Dunes, CA 92203
               </div>
             </div>
           </aside>

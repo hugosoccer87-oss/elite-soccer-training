@@ -7,7 +7,7 @@ create table if not exists public.training_sessions (
   start_datetime timestamptz not null,
   end_datetime timestamptz not null,
   timezone text not null default 'America/Los_Angeles',
-  location text not null default 'Coachella Valley, CA',
+  location text not null default 'Desert Christian Academy, 40700 Yucca Lane, Bermuda Dunes, CA 92203',
   capacity integer not null default 6 check (capacity between 1 and 6),
   status text not null default 'open' check (status in ('open', 'closed', 'cancelled')),
   created_at timestamptz not null default now(),

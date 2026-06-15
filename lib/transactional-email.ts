@@ -370,6 +370,7 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     ["Player Age", booking.playerAge],
     ["Program", booking.programName],
     ["Date / Time", `${booking.sessionDate} at ${booking.sessionTime}`],
+    ["Location", business.location],
     ["Number of Players", booking.players],
     ["Payment Amount", `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`],
     ["Notes", booking.notes || "None"],

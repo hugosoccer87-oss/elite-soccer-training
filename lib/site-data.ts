@@ -1,7 +1,9 @@
 export const business = {
   name: "Elite Soccer Training CV",
   coach: "Hugo Chaparro",
-  location: "Coachella Valley, California",
+  location: "Desert Christian Academy, 40700 Yucca Lane, Bermuda Dunes, CA 92203",
+  trainingLocationName: "Desert Christian Academy",
+  trainingLocationAddress: "40700 Yucca Lane, Bermuda Dunes, CA 92203",
   email: "info@elitesoccertrainingcv.com",
   phone: "323-684-8024",
   phoneHref: "tel:3236848024",
@@ -83,6 +85,9 @@ export const bookingArrivalInstructions = [
 
 export const groupSizeMessage =
   "Small group sessions are capped at 6 players to keep training focused, competitive, and personal.";
+
+export const juneLaunchScheduleNote =
+  "June launch sessions are limited and groups are capped at 6 players. Morning sessions are recommended for older players. Younger player sessions are scheduled in the early evening with water breaks and controlled training intensity.";
 
 export const refundCancellationReminder =
   "Sessions are non-refundable. If Elite Soccer Training CV cancels due to weather, field conditions, or scheduling changes, families will receive a reschedule option.";

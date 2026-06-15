@@ -21,6 +21,7 @@ import {
   bookingArrivalInstructions,
   business,
   groupSizeMessage,
+  juneLaunchScheduleNote,
   refundCancellationReminder
 } from "@/lib/site-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
@@ -142,6 +143,14 @@ function spotsLabel(count: number) {
 
 function isValidEmailAddress(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function sessionLocationLines(location: string) {
+  if (location.includes("40700 Yucca Lane")) {
+    return [business.trainingLocationName, business.trainingLocationAddress];
+  }
+
+  return location.split(/\n|,\s(?=\d)/).filter(Boolean);
 }
 
 export function BookingForm() {
@@ -612,6 +621,9 @@ export function BookingForm() {
                 {selectedGroup ? selectedGroup.ages : "All available training groups"}
               </p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+              <p className="mt-3 max-w-2xl rounded-lg border border-electric/20 bg-blue-50 p-4 text-sm font-bold leading-6 text-slate-700">
+                {juneLaunchScheduleNote}
+              </p>
             </div>
 
             {showAvailabilityDebug ? (
@@ -683,7 +695,11 @@ export function BookingForm() {
                             <span className="mt-2 block text-sm font-bold opacity-90">
                               {slot.trainingGroup}: {slot.trainingGroupAges}
                             </span>
-                            <span className="mt-1 block text-sm font-semibold opacity-80">{slot.location}</span>
+                            <span className="mt-1 block text-sm font-semibold opacity-80">
+                              {sessionLocationLines(slot.location).map((line) => (
+                                <span key={line} className="block">{line}</span>
+                              ))}
+                            </span>
                             <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
                             <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(slot.remainingSpots)}</span>
                           </div>
@@ -1076,7 +1092,7 @@ export function BookingForm() {
                 <p className="text-sm font-black uppercase text-electric">Confirm & Pay</p>
                 <div className="mt-4 grid gap-3 text-sm text-slate-700">
                   <div className="flex items-center justify-between gap-4">
-                    <span>Elite Soccer Training CV - Small Group Session</span>
+                    <span>Elite Soccer Training CV - Single Session</span>
                     <span className="font-black text-navy">{sessionPriceLabel}</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">

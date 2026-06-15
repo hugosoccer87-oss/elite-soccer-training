@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { BookingForm } from "@/components/BookingForm";
 import { PageHero } from "@/components/PageHero";
-import { business } from "@/lib/site-data";
+import { business, juneLaunchScheduleNote } from "@/lib/site-data";
+import { pricingOptions } from "@/lib/pricing";
 
 export const metadata: Metadata = {
   title: "Book Training",
@@ -26,7 +27,18 @@ export default function BookingPage() {
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
               Future Elite supports ages 9-12. Elite Performance supports ages 13-18. Each session holds up to
-              six players. Training is $55 per player.
+              six players. Online booking is currently for Single Session training.
+            </p>
+            <div className="mt-5 grid gap-3">
+              {pricingOptions.map((option) => (
+                <div key={option.title} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <p className="font-black text-navy">{option.title} — {option.price}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{option.description}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-5 rounded-lg border border-electric/20 bg-white p-4 text-sm font-bold leading-6 text-slate-600">
+              {juneLaunchScheduleNote}
             </p>
             <a
               href={business.phoneHref}
