@@ -160,7 +160,18 @@ export function DirectPayForm() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
+    <div className="grid gap-6">
+      <div className="panel border-l-4 border-l-electric p-5 sm:p-6">
+        <h2 className="text-xl font-black text-navy">How This Works</h2>
+        <ol className="mt-4 grid gap-2 text-sm font-semibold leading-6 text-slate-700 sm:grid-cols-2">
+          <li>1. Choose your payment option.</li>
+          <li>2. Complete the player and parent information.</li>
+          <li>3. Review and sign the waiver.</li>
+          <li>4. Click the button at the bottom to continue with card payment or view Zelle instructions.</li>
+        </ol>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
       <aside className="panel h-fit p-5 sm:p-6">
         <h2 className="text-xl font-black text-navy">Choose Payment Option</h2>
         <div className="mt-5 grid gap-3">
@@ -377,20 +388,30 @@ export function DirectPayForm() {
             </p>
           </section>
 
-          <button
-            type="button"
-            onClick={() => void submitDirectPayment()}
-            disabled={isSubmitting}
-            className="rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmitting ? "Saving..." : fields.paymentMethod === "card" ? "Save Waiver + Pay by Card" : "Save Waiver + View Zelle Instructions"}
-          </button>
+          <div className="grid gap-3">
+            <p className="text-sm font-bold leading-6 text-slate-600">
+              Please complete all required information and sign the waiver before continuing to payment.
+            </p>
+            <button
+              type="button"
+              onClick={() => void submitDirectPayment()}
+              disabled={isSubmitting}
+              className="w-full rounded-md bg-electric px-6 py-5 text-center text-base font-black uppercase tracking-wide text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting
+                ? "Saving..."
+                : fields.paymentMethod === "card"
+                  ? "Continue to Secure Card Payment"
+                  : "Submit Waiver + View Zelle Instructions"}
+            </button>
+          </div>
 
           <p className="text-sm leading-6 text-slate-600">
             Questions? Email <a className="font-black text-navy underline" href={`mailto:${business.email}`}>{business.email}</a> or call{" "}
             <a className="font-black text-navy underline" href={business.phoneHref}>{business.phone}</a>.
           </p>
         </div>
+      </div>
       </div>
     </div>
   );
