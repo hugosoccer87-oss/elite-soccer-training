@@ -3,11 +3,13 @@ import { confirmLaunchPassPurchase, confirmPaidBooking } from "@/lib/booking-con
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import {
   bookingFromStripeMetadata,
+  directPaymentIdFromStripeMetadata,
   getStripeEnvironmentDiagnostics,
   isStripePaymentVerified,
   passPurchaseIdFromStripeMetadata,
   verifyStripeWebhookSignature
 } from "@/lib/stripe";
+import { markDirectPaymentPaid } from "@/lib/supabase-db";
 
 export const runtime = "nodejs";
 
@@ -32,6 +34,55 @@ export async function POST(request: Request) {
       });
 
       const session = event.data.object;
+      const directPaymentId = directPaymentIdFromStripeMetadata(session.metadata);
+
+      if (directPaymentId) {
+        if (!isStripePaymentVerified(session)) {
+          console.warn("[EST Stripe] Payment not verified", {
+            eventId: event.id,
+            sessionId: session.id,
+            directPaymentId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status
+          });
+          setLastPaymentVerificationResult({
+            source: "webhook",
+            verified: false,
+            sessionId: session.id,
+            bookingId: directPaymentId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status,
+            message: "Direct payment Checkout session was not paid and complete."
+          });
+          return NextResponse.json({ received: true });
+        }
+
+        const directPayment = await markDirectPaymentPaid({
+          directPaymentId,
+          checkoutSessionId: session.id,
+          paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+          amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+        });
+
+        console.info("[EST Stripe] Direct payment confirmed", {
+          eventId: event.id,
+          sessionId: session.id,
+          directPaymentId,
+          status: directPayment.status
+        });
+        setLastPaymentVerificationResult({
+          source: "webhook",
+          verified: true,
+          sessionId: session.id,
+          bookingId: directPaymentId,
+          sessionStatus: session.status,
+          paymentStatus: session.payment_status,
+          message: "Direct Pay + Waiver payment verified."
+        });
+
+        return NextResponse.json({ received: true });
+      }
+
       const passPurchaseId = passPurchaseIdFromStripeMetadata(session.metadata);
 
       if (passPurchaseId) {

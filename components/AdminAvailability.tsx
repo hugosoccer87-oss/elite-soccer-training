@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { business } from "@/lib/site-data";
-import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession } from "@/lib/supabase-db";
+import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession, DirectPaymentRow, DirectPaymentStatus } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
 
 const inputClass =
@@ -80,6 +80,12 @@ type PassesResponse = {
   error?: string;
 };
 
+type DirectPaymentsResponse = {
+  status?: string;
+  directPayments?: DirectPaymentRow[];
+  error?: string;
+};
+
 type ActiveWaiverRecord = {
   booking: AdminBookingRecord;
   session: AdminTrainingSession;
@@ -153,6 +159,34 @@ function passTypeLabel(passType: string) {
   }
 
   return passType;
+}
+
+function directPaymentOptionLabel(option: string) {
+  if (option === "single_session") {
+    return "Single Session";
+  }
+
+  return passTypeLabel(option);
+}
+
+function directPaymentMethodLabel(method: string) {
+  return method === "zelle" ? "Zelle" : "Card";
+}
+
+function paymentStatusLabel(status: string) {
+  if (status === "pending_card_payment") {
+    return "Pending card payment";
+  }
+
+  if (status === "zelle_pending") {
+    return "Zelle pending";
+  }
+
+  return status;
+}
+
+function formatMoney(amountCents: number) {
+  return `$${(amountCents / 100).toFixed(2)}`;
 }
 
 function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTrainingSession) {
@@ -298,9 +332,26 @@ async function readAdminPasses() {
   return result.passes ?? [];
 }
 
+async function readAdminDirectPayments() {
+  const response = await fetch(`/api/admin/direct-payments?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as DirectPaymentsResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Direct payment records could not be loaded.");
+  }
+
+  return result.directPayments ?? [];
+}
+
 export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
   const [passes, setPasses] = useState<AdminPassPurchase[]>([]);
+  const [directPayments, setDirectPayments] = useState<DirectPaymentRow[]>([]);
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>(trainingGroups[0].id);
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
@@ -317,13 +368,15 @@ export function AdminAvailability() {
   async function refreshAdminData(message?: string) {
     try {
       setError("");
-      const [nextSessions, nextPasses, nextDiagnostics] = await Promise.all([
+      const [nextSessions, nextPasses, nextDirectPayments, nextDiagnostics] = await Promise.all([
         readAdminSessions(),
         readAdminPasses(),
+        readAdminDirectPayments(),
         readAdminDiagnostics()
       ]);
       setSessions(nextSessions);
       setPasses(nextPasses);
+      setDirectPayments(nextDirectPayments);
       setDiagnostics(nextDiagnostics);
       if (message) {
         setNotice(message);
@@ -355,6 +408,14 @@ export function AdminAvailability() {
       redemptions: passes.reduce((total, pass) => total + pass.redemptions.length, 0)
     }),
     [passes]
+  );
+  const directPaymentCounts = useMemo(
+    () => ({
+      pending: directPayments.filter((payment) => payment.status !== "paid" && payment.status !== "cancelled").length,
+      paid: directPayments.filter((payment) => payment.status === "paid").length,
+      zellePending: directPayments.filter((payment) => payment.status === "zelle_pending").length
+    }),
+    [directPayments]
   );
 
   async function addSession() {
@@ -489,6 +550,33 @@ export function AdminAvailability() {
     }
 
     void updateSession(session.id, { location: nextLocation.trim() || business.location });
+  }
+
+  async function updateDirectPayment(id: string, status: DirectPaymentStatus) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/direct-payments/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ status })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Direct payment record could not be updated.");
+      }
+
+      await refreshAdminData("Direct payment record updated.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Direct payment record could not be updated.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -786,6 +874,126 @@ export function AdminAvailability() {
           <div className="p-5 sm:p-6">
             <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
               No Launch Pass purchases yet.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="panel overflow-hidden">
+        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+          <div>
+            <p className="text-xs font-black uppercase text-electric">Direct Pay + Waiver</p>
+            <h3 className="mt-2 text-xl font-black text-navy">Direct payment records</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Review after-session payments and manually confirm Zelle payments. These records do not change session
+              capacity.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{directPaymentCounts.pending}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Pending</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{directPaymentCounts.zellePending}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Zelle</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{directPaymentCounts.paid}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Paid</p>
+            </div>
+          </div>
+        </div>
+        {directPayments.length > 0 ? (
+          <div className="grid divide-y divide-slate-200">
+            {directPayments.map((payment) => {
+              const playerName = `${payment.player_first_name} ${payment.player_last_name}`.trim();
+              const zelleMemo = `${playerName} - ${directPaymentOptionLabel(payment.payment_option)}`;
+
+              return (
+                <article key={payment.id} className="grid gap-4 p-5">
+                  <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                    <div>
+                      <p className="text-xs font-black uppercase text-electric">
+                        {directPaymentOptionLabel(payment.payment_option)} - {directPaymentMethodLabel(payment.payment_method)}
+                      </p>
+                      <h4 className="mt-1 text-lg font-black text-navy">{playerName}</h4>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Parent: {payment.parent_name} - {payment.parent_email} - {payment.parent_phone}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-600">Player age: {payment.player_age}</p>
+                      <p className="mt-1 text-xs font-black uppercase text-slate-500">
+                        Submitted: {formatWaiverTimestamp(payment.created_at)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+                      <p className="font-black text-navy">Status: {paymentStatusLabel(payment.status)}</p>
+                      <p className="mt-1 text-slate-600">Amount due: {formatMoney(payment.amount_due)}</p>
+                      <p className="mt-1 text-slate-600">Amount paid: {formatMoney(payment.amount_paid)}</p>
+                      {payment.payment_method === "zelle" ? (
+                        <p className="mt-1 text-slate-600">Zelle memo: {zelleMemo}</p>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-2">
+                    <div className="grid gap-1 text-sm text-slate-600">
+                      <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
+                      <p><span className="font-black text-navy">Waiver Signed:</span> {payment.waiver_signed ? "Yes" : "No"}</p>
+                      <p><span className="font-black text-navy">Typed Signature:</span> {payment.typed_signature}</p>
+                      <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(payment.signed_at)}</p>
+                      <p><span className="font-black text-navy">Media Consent:</span> {payment.media_consent}</p>
+                      <p><span className="font-black text-navy">IP Address:</span> {payment.ip_address || "Not collected"}</p>
+                    </div>
+                    <div className="grid gap-1 text-sm text-slate-600">
+                      <p className="text-xs font-black uppercase text-electric">Emergency / Payment</p>
+                      <p><span className="font-black text-navy">Emergency:</span> {payment.emergency_name} - {payment.emergency_phone}</p>
+                      <p><span className="font-black text-navy">Medical:</span> {payment.medical_notes || "None"}</p>
+                      <p><span className="font-black text-navy">Stripe Checkout:</span> {payment.stripe_checkout_session_id || "Not recorded"}</p>
+                      <p><span className="font-black text-navy">Stripe Payment Intent:</span> {payment.stripe_payment_intent_id || "Not recorded"}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {payment.status !== "paid" ? (
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void updateDirectPayment(payment.id, "paid")}
+                        className="rounded-md bg-navy px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-electric disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Mark Paid
+                      </button>
+                    ) : null}
+                    {payment.status !== "zelle_pending" && payment.payment_method === "zelle" ? (
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void updateDirectPayment(payment.id, "zelle_pending")}
+                        className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Mark Zelle Pending
+                      </button>
+                    ) : null}
+                    {payment.status !== "cancelled" ? (
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void updateDirectPayment(payment.id, "cancelled")}
+                        className="rounded-md border border-red-200 px-4 py-2 text-xs font-black uppercase text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Cancel Record
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-5 sm:p-6">
+            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+              No direct Pay + Waiver records yet.
             </p>
           </div>
         )}

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { type BookingRecord, type TrainingGroupId } from "@/lib/booking-data";
 import {
+  getDirectPaymentOption,
   getLaunchPassOption,
   launchPassExpirationDate,
   type LaunchPassType,
@@ -8,7 +9,7 @@ import {
   sessionLineItemName,
   sessionUnitAmountCents
 } from "@/lib/pricing";
-import type { PassPurchaseRow } from "@/lib/supabase-db";
+import type { DirectPaymentRow, PassPurchaseRow } from "@/lib/supabase-db";
 
 const stripeApiBase = "https://api.stripe.com/v1";
 const defaultSiteUrl = "https://www.elitesoccertrainingcv.com";
@@ -299,6 +300,69 @@ export async function createStripeLaunchPassCheckoutSession(pass: PassPurchaseRo
 
 export function passPurchaseIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
   return metadata?.purchase_type === "launch_pass" && metadata.passPurchaseId ? metadata.passPurchaseId : null;
+}
+
+export async function createStripeDirectPaymentCheckoutSession(record: DirectPaymentRow) {
+  const secretKey = getStripeSecretKey();
+  const stripe = getStripeEnvironment();
+  const option = getDirectPaymentOption(record.payment_option);
+
+  if (!secretKey) {
+    throw new Error(`Stripe is not configured. Add ${stripe.secretKeyName} in Vercel.`);
+  }
+
+  if (!getStripePublishableKey()) {
+    throw new Error(`Stripe is not configured. Add ${stripe.publishableKeyName} in Vercel.`);
+  }
+
+  const siteUrl = getSiteUrl();
+  const playerName = `${record.player_first_name} ${record.player_last_name}`.trim();
+  const params = new URLSearchParams({
+    mode: "payment",
+    success_url: `${siteUrl}/pay/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${siteUrl}/pay/cancel`,
+    allow_promotion_codes: "true",
+    client_reference_id: record.id,
+    customer_email: record.parent_email,
+    "line_items[0][price_data][currency]": sessionCurrency,
+    "line_items[0][price_data][product_data][name]": option.stripeLineItemName,
+    "line_items[0][price_data][product_data][description]": `Direct Pay + Waiver for ${playerName}`,
+    "line_items[0][price_data][unit_amount]": String(option.amountCents),
+    "line_items[0][quantity]": "1",
+    "payment_intent_data[metadata][purchase_type]": "direct_payment",
+    "payment_intent_data[metadata][directPaymentId]": record.id,
+    "payment_intent_data[metadata][payment_option]": record.payment_option,
+    "payment_intent_data[metadata][player_name]": playerName,
+    "metadata[purchase_type]": "direct_payment",
+    "metadata[directPaymentId]": record.id,
+    "metadata[payment_option]": record.payment_option,
+    "metadata[player_name]": playerName
+  });
+
+  const response = await fetch(`${stripeApiBase}/checkout/sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: params.toString()
+  });
+
+  const result = (await response.json()) as StripeCheckoutSession & { error?: { message?: string } };
+
+  if (!response.ok) {
+    throw new Error(result.error?.message ?? "Stripe Checkout session could not be created.");
+  }
+
+  if (!result.url) {
+    throw new Error("Stripe did not return a Checkout URL.");
+  }
+
+  return result;
+}
+
+export function directPaymentIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
+  return metadata?.purchase_type === "direct_payment" && metadata.directPaymentId ? metadata.directPaymentId : null;
 }
 
 export async function retrieveStripeCheckoutSession(sessionId: string) {

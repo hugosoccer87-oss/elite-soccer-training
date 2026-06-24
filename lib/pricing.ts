@@ -4,6 +4,7 @@ export const sessionCurrency = "usd";
 export const sessionLineItemName = "Elite Soccer Training CV - Single Session";
 
 export type LaunchPassType = "four_session_launch_pass" | "six_session_launch_pass";
+export type DirectPaymentOption = "single_session" | LaunchPassType;
 
 export const launchPassExpirationDate = "2026-06-30T23:59:59-07:00";
 
@@ -64,4 +65,41 @@ export function formatCurrencyFromCents(amountCents: number) {
 
 export function getLaunchPassOption(passType: LaunchPassType) {
   return launchPassOptions[passType];
+}
+
+export const directPaymentOptions: Record<
+  DirectPaymentOption,
+  {
+    option: DirectPaymentOption;
+    title: string;
+    amountCents: number;
+    price: string;
+    stripeLineItemName: string;
+  }
+> = {
+  single_session: {
+    option: "single_session",
+    title: "Single Session",
+    amountCents: sessionUnitAmountCents,
+    price: sessionPriceLabel,
+    stripeLineItemName: sessionLineItemName
+  },
+  four_session_launch_pass: {
+    option: "four_session_launch_pass",
+    title: launchPassOptions.four_session_launch_pass.title,
+    amountCents: launchPassOptions.four_session_launch_pass.amountCents,
+    price: launchPassOptions.four_session_launch_pass.price,
+    stripeLineItemName: launchPassOptions.four_session_launch_pass.stripeLineItemName
+  },
+  six_session_launch_pass: {
+    option: "six_session_launch_pass",
+    title: launchPassOptions.six_session_launch_pass.title,
+    amountCents: launchPassOptions.six_session_launch_pass.amountCents,
+    price: launchPassOptions.six_session_launch_pass.price,
+    stripeLineItemName: launchPassOptions.six_session_launch_pass.stripeLineItemName
+  }
+};
+
+export function getDirectPaymentOption(option: DirectPaymentOption) {
+  return directPaymentOptions[option];
 }

@@ -20,6 +20,14 @@
   },
   "dynamicRoutes": [
     {
+      "page": "/api/admin/direct-payments/[id]",
+      "regex": "^/api/admin/direct\\-payments/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/admin/direct\\-payments/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/admin/sessions/[id]",
       "regex": "^/api/admin/sessions/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -84,6 +92,24 @@
       "regex": "^/contact(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/contact(?:/)?$"
+    },
+    {
+      "page": "/pay",
+      "regex": "^/pay(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/pay(?:/)?$"
+    },
+    {
+      "page": "/pay/cancel",
+      "regex": "^/pay/cancel(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/pay/cancel(?:/)?$"
+    },
+    {
+      "page": "/pay/success",
+      "regex": "^/pay/success(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/pay/success(?:/)?$"
     },
     {
       "page": "/payment",

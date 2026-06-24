@@ -7,8 +7,10 @@ import {
 } from "@/lib/booking-data";
 import { sessionUnitAmountCents } from "@/lib/pricing";
 import {
+  getDirectPaymentOption,
   getLaunchPassOption,
   launchPassExpirationDate,
+  type DirectPaymentOption,
   type LaunchPassType
 } from "@/lib/pricing";
 import { business } from "@/lib/site-data";
@@ -137,6 +139,36 @@ export type EmailLogRow = {
   created_at: string;
 };
 
+export type DirectPaymentStatus = "pending_card_payment" | "zelle_pending" | "paid" | "cancelled";
+
+export type DirectPaymentRow = {
+  id: string;
+  player_first_name: string;
+  player_last_name: string;
+  player_age: string;
+  parent_name: string;
+  parent_email: string;
+  parent_phone: string;
+  payment_option: DirectPaymentOption;
+  payment_method: "card" | "zelle";
+  status: DirectPaymentStatus;
+  amount_due: number;
+  amount_paid: number;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  waiver_signed: boolean;
+  typed_signature: string;
+  signed_at: string;
+  waiver_version?: string | null;
+  media_consent: "Granted" | "Declined";
+  emergency_name: string;
+  emergency_phone: string;
+  medical_notes: string;
+  ip_address?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AdminBookingRecord = BookingRow & {
   waiver?: WaiverRow | null;
   calendarEvent?: CalendarEventRow | null;
@@ -149,6 +181,26 @@ export type AdminTrainingSession = TrainingSessionRow & {
   paidPlayers: number;
   remainingSpots: number;
   paidBookings: AdminBookingRecord[];
+};
+
+export type DirectPaymentInput = {
+  playerFirstName: string;
+  playerLastName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  paymentOption: DirectPaymentOption;
+  paymentMethod: "card" | "zelle";
+  waiverSigned: boolean;
+  typedSignature: string;
+  signedAt: string;
+  waiverVersion: string;
+  mediaConsent: "Granted" | "Declined";
+  emergencyName: string;
+  emergencyPhone: string;
+  medicalNotes: string;
+  ipAddress?: string;
 };
 
 export type SupabaseDiagnostics = {
@@ -565,6 +617,101 @@ export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
         booking: bookingMap.get(redemption.booking_id) ?? null
       }))
   }));
+}
+
+export async function listAdminDirectPayments() {
+  return supabaseRequest<DirectPaymentRow[]>("direct_payments?select=*&order=created_at.desc").catch(() => []);
+}
+
+export async function createDirectPaymentRecord(input: DirectPaymentInput) {
+  const option = getDirectPaymentOption(input.paymentOption);
+  const status: DirectPaymentStatus = input.paymentMethod === "card" ? "pending_card_payment" : "zelle_pending";
+  const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
+    method: "POST",
+    body: JSON.stringify({
+      player_first_name: input.playerFirstName.trim(),
+      player_last_name: input.playerLastName.trim(),
+      player_age: input.playerAge.trim(),
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      payment_option: input.paymentOption,
+      payment_method: input.paymentMethod,
+      status,
+      amount_due: option.amountCents,
+      amount_paid: 0,
+      waiver_signed: input.waiverSigned,
+      typed_signature: input.typedSignature.trim(),
+      signed_at: input.signedAt,
+      waiver_version: input.waiverVersion,
+      media_consent: input.mediaConsent,
+      emergency_name: input.emergencyName.trim(),
+      emergency_phone: input.emergencyPhone.trim(),
+      medical_notes: input.medicalNotes.trim(),
+      ip_address: input.ipAddress || null
+    })
+  });
+  const record = inserted[0];
+
+  if (!record) {
+    throw new Error("Direct payment record could not be saved.");
+  }
+
+  return record;
+}
+
+export async function attachDirectPaymentStripeCheckoutSession(directPaymentId: string, checkoutSessionId: string) {
+  await supabaseRequest<DirectPaymentRow[]>(`direct_payments?id=eq.${encodeFilter(directPaymentId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      stripe_checkout_session_id: checkoutSessionId
+    })
+  });
+}
+
+export async function markDirectPaymentPaid(input: {
+  directPaymentId: string;
+  checkoutSessionId?: string;
+  paymentIntentId?: string;
+  amountPaid?: number;
+}) {
+  const rows = await supabaseRequest<DirectPaymentRow[]>(`direct_payments?id=eq.${encodeFilter(input.directPaymentId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: "paid",
+      stripe_checkout_session_id: input.checkoutSessionId || null,
+      stripe_payment_intent_id: input.paymentIntentId || null,
+      amount_paid: input.amountPaid ?? 0
+    })
+  });
+  const record = rows[0];
+
+  if (!record) {
+    throw new Error("Direct payment record could not be marked paid.");
+  }
+
+  return record;
+}
+
+export async function updateDirectPaymentStatus(id: string, status: DirectPaymentStatus) {
+  const existing = await supabaseRequest<DirectPaymentRow[]>(
+    `direct_payments?select=*&id=eq.${encodeFilter(id)}&limit=1`
+  );
+  const current = existing[0];
+
+  if (!current) {
+    throw new Error("Direct payment record was not found.");
+  }
+
+  const rows = await supabaseRequest<DirectPaymentRow[]>(`direct_payments?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status,
+      amount_paid: status === "paid" ? current.amount_due : 0
+    })
+  });
+
+  return rows[0] ?? null;
 }
 
 export async function listAdminTrainingSessions(): Promise<AdminTrainingSession[]> {
