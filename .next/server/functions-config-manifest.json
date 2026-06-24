@@ -5,18 +5,18 @@
     "/api/admin/direct-payments": {},
     "/api/admin/direct-payments/[id]": {},
     "/api/admin/email-diagnostics": {},
-    "/api/admin/send-test-email": {},
     "/api/admin/passes": {},
+    "/api/admin/send-test-email": {},
+    "/api/admin/sessions": {},
     "/api/availability/debug": {},
     "/api/availability": {},
     "/api/admin/sessions/[id]": {},
-    "/api/admin/sessions": {},
     "/api/passes/lookup": {},
-    "/api/direct-payments": {},
-    "/api/passes/redeem": {},
     "/api/reviews": {},
+    "/api/passes/redeem": {},
     "/api/stripe/verify-session": {},
-    "/api/stripe/webhook": {},
-    "/api/stripe/pass-checkout": {}
+    "/api/direct-payments": {},
+    "/api/stripe/pass-checkout": {},
+    "/api/stripe/webhook": {}
   }
 }

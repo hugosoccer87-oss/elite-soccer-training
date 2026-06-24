@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 export function MobileStickyBookButton() {
   const pathname = usePathname();
-  const shouldHide = pathname.startsWith("/booking") || pathname.startsWith("/admin");
+  const shouldHide = pathname === "/pay" || pathname.startsWith("/booking") || pathname.startsWith("/admin");
 
   if (shouldHide) {
     return null;
