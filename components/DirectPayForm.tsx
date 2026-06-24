@@ -31,6 +31,25 @@ type DirectPayFields = {
   guardianSignature: string;
 };
 
+type DirectPayErrorKey =
+  | "playerFirstName"
+  | "playerLastName"
+  | "playerAge"
+  | "secondPlayerFirstName"
+  | "secondPlayerLastName"
+  | "secondPlayerAge"
+  | "parentName"
+  | "parentEmail"
+  | "parentPhone"
+  | "emergencyName"
+  | "emergencyPhone"
+  | "medicalNotes"
+  | "mediaConsent"
+  | "waiverAgreement"
+  | "guardianSignature";
+
+type DirectPayFieldErrors = Partial<Record<DirectPayErrorKey, string>>;
+
 const initialFields: DirectPayFields = {
   playerCount: 1,
   playerFirstName: "",
@@ -86,8 +105,29 @@ function formatCurrency(amountCents: number) {
   return `$${(amountCents / 100).toFixed(0)}`;
 }
 
+function scrollToFirstError(errors: DirectPayFieldErrors) {
+  const firstErrorKey = Object.keys(errors)[0];
+
+  if (!firstErrorKey) {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const target = document.querySelector(`[data-error-key="${firstErrorKey}"]`);
+
+    if (!target) {
+      return;
+    }
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusable = target.querySelector("input, textarea, button") as HTMLElement | null;
+    focusable?.focus({ preventScroll: true });
+  });
+}
+
 export function DirectPayForm() {
   const [fields, setFields] = useState<DirectPayFields>(initialFields);
+  const [fieldErrors, setFieldErrors] = useState<DirectPayFieldErrors>({});
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [zelleMemo, setZelleMemo] = useState("");
@@ -100,29 +140,106 @@ export function DirectPayForm() {
 
   function setField<Key extends keyof DirectPayFields>(field: Key, value: DirectPayFields[Key]) {
     setFields((current) => ({ ...current, [field]: value }));
+    setFieldErrors((current) => {
+      const next = { ...current };
+      delete next[field as DirectPayErrorKey];
+
+      if (field === "playerCount") {
+        delete next.secondPlayerFirstName;
+        delete next.secondPlayerLastName;
+        delete next.secondPlayerAge;
+      }
+
+      return next;
+    });
     setError("");
     setNotice("");
   }
 
+  function fieldClass(field: DirectPayErrorKey) {
+    return `${inputClass} ${fieldErrors[field] ? "border-red-500 bg-red-50" : ""}`;
+  }
+
+  function fieldError(field: DirectPayErrorKey) {
+    return fieldErrors[field] ? <p className="text-xs font-bold text-red-600">{fieldErrors[field]}</p> : null;
+  }
+
+  function hasFieldError(field: DirectPayErrorKey) {
+    return Boolean(fieldErrors[field]);
+  }
+
   function validate() {
-    if (
-      !fields.playerFirstName.trim() ||
-      !fields.playerLastName.trim() ||
-      !fields.playerAge.trim() ||
-      (fields.playerCount === 2 &&
-        (!fields.secondPlayerFirstName.trim() || !fields.secondPlayerLastName.trim() || !fields.secondPlayerAge.trim())) ||
-      !fields.parentName.trim() ||
-      !fields.parentEmail.trim() ||
-      !isValidEmail(fields.parentEmail) ||
-      !fields.parentPhone.trim() ||
-      !fields.emergencyName.trim() ||
-      !fields.emergencyPhone.trim() ||
-      !fields.medicalNotes.trim() ||
-      !fields.mediaConsent ||
-      !fields.waiverAgreement ||
-      !fields.guardianSignature.trim()
-    ) {
-      setError("Complete all parent, player, payment, and waiver fields before continuing.");
+    const nextErrors: DirectPayFieldErrors = {};
+
+    if (!fields.playerFirstName.trim()) {
+      nextErrors.playerFirstName = fields.playerCount === 2 ? "Player 1 first name is required." : "Player first name is required.";
+    }
+
+    if (!fields.playerLastName.trim()) {
+      nextErrors.playerLastName = fields.playerCount === 2 ? "Player 1 last name is required." : "Player last name is required.";
+    }
+
+    if (!fields.playerAge.trim()) {
+      nextErrors.playerAge = fields.playerCount === 2 ? "Player 1 age is required." : "Player age is required.";
+    }
+
+    if (fields.playerCount === 2) {
+      if (!fields.secondPlayerFirstName.trim()) {
+        nextErrors.secondPlayerFirstName = "Player 2 first name is required.";
+      }
+
+      if (!fields.secondPlayerLastName.trim()) {
+        nextErrors.secondPlayerLastName = "Player 2 last name is required.";
+      }
+
+      if (!fields.secondPlayerAge.trim()) {
+        nextErrors.secondPlayerAge = "Player 2 age is required.";
+      }
+    }
+
+    if (!fields.parentName.trim()) {
+      nextErrors.parentName = "Parent/guardian name is required.";
+    }
+
+    if (!fields.parentEmail.trim()) {
+      nextErrors.parentEmail = "Parent email is required.";
+    } else if (!isValidEmail(fields.parentEmail)) {
+      nextErrors.parentEmail = "Enter a valid parent email.";
+    }
+
+    if (!fields.parentPhone.trim()) {
+      nextErrors.parentPhone = "Parent phone is required.";
+    }
+
+    if (!fields.emergencyName.trim()) {
+      nextErrors.emergencyName = "Emergency contact name is required.";
+    }
+
+    if (!fields.emergencyPhone.trim()) {
+      nextErrors.emergencyPhone = "Emergency contact phone is required.";
+    }
+
+    if (!fields.medicalNotes.trim()) {
+      nextErrors.medicalNotes = "Please enter any medical conditions/allergies or type None.";
+    }
+
+    if (!fields.mediaConsent) {
+      nextErrors.mediaConsent = "Please select media consent.";
+    }
+
+    if (!fields.waiverAgreement) {
+      nextErrors.waiverAgreement = "Please agree to the waiver.";
+    }
+
+    if (!fields.guardianSignature.trim()) {
+      nextErrors.guardianSignature = "Parent/guardian signature is required.";
+    }
+
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError("Please complete the highlighted required fields before continuing.");
+      scrollToFirstError(nextErrors);
       return false;
     }
 
@@ -301,6 +418,10 @@ export function DirectPayForm() {
         {notice ? <div className="border-b border-field/20 bg-field/10 px-5 py-4 text-sm font-bold text-field">{notice}</div> : null}
 
         <div className="grid gap-5 p-5 sm:p-6">
+          <p className="rounded-md border border-slate-200 bg-mist p-3 text-sm font-bold text-slate-600">
+            Fields marked with * are required.
+          </p>
+
           <section className="grid gap-4 border-b border-slate-200 pb-5 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <h3 className="text-xl font-black text-navy">Player & Parent Information</h3>
@@ -308,60 +429,69 @@ export function DirectPayForm() {
             {fields.playerCount === 2 ? (
               <p className="text-xs font-black uppercase text-electric sm:col-span-2">Player 1</p>
             ) : null}
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              {fields.playerCount === 2 ? "First Name" : "Player First Name"}
-              <input className={inputClass} value={fields.playerFirstName} onChange={(event) => setField("playerFirstName", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="playerFirstName">
+              {fields.playerCount === 2 ? "First Name *" : "Player First Name *"}
+              <input className={fieldClass("playerFirstName")} value={fields.playerFirstName} onChange={(event) => setField("playerFirstName", event.target.value)} />
+              {fieldError("playerFirstName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              {fields.playerCount === 2 ? "Last Name" : "Player Last Name"}
-              <input className={inputClass} value={fields.playerLastName} onChange={(event) => setField("playerLastName", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="playerLastName">
+              {fields.playerCount === 2 ? "Last Name *" : "Player Last Name *"}
+              <input className={fieldClass("playerLastName")} value={fields.playerLastName} onChange={(event) => setField("playerLastName", event.target.value)} />
+              {fieldError("playerLastName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              {fields.playerCount === 2 ? "Age" : "Player Age"}
-              <input className={inputClass} inputMode="numeric" value={fields.playerAge} onChange={(event) => setField("playerAge", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="playerAge">
+              {fields.playerCount === 2 ? "Age *" : "Player Age *"}
+              <input className={fieldClass("playerAge")} inputMode="numeric" value={fields.playerAge} onChange={(event) => setField("playerAge", event.target.value)} />
+              {fieldError("playerAge")}
             </label>
             {fields.playerCount === 2 ? (
               <>
                 <p className="text-xs font-black uppercase text-electric sm:col-span-2">Player 2</p>
-                <label className="grid gap-2 text-sm font-bold text-navy">
-                  First Name
+                <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="secondPlayerFirstName">
+                  First Name *
                   <input
-                    className={inputClass}
+                    className={fieldClass("secondPlayerFirstName")}
                     value={fields.secondPlayerFirstName}
                     onChange={(event) => setField("secondPlayerFirstName", event.target.value)}
                   />
+                  {fieldError("secondPlayerFirstName")}
                 </label>
-                <label className="grid gap-2 text-sm font-bold text-navy">
-                  Last Name
+                <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="secondPlayerLastName">
+                  Last Name *
                   <input
-                    className={inputClass}
+                    className={fieldClass("secondPlayerLastName")}
                     value={fields.secondPlayerLastName}
                     onChange={(event) => setField("secondPlayerLastName", event.target.value)}
                   />
+                  {fieldError("secondPlayerLastName")}
                 </label>
-                <label className="grid gap-2 text-sm font-bold text-navy">
-                  Age
+                <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="secondPlayerAge">
+                  Age *
                   <input
-                    className={inputClass}
+                    className={fieldClass("secondPlayerAge")}
                     inputMode="numeric"
                     value={fields.secondPlayerAge}
                     onChange={(event) => setField("secondPlayerAge", event.target.value)}
                   />
+                  {fieldError("secondPlayerAge")}
                 </label>
               </>
             ) : null}
             <p className="text-xs font-black uppercase text-electric sm:col-span-2">Parent/Guardian</p>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Parent/Guardian Name
-              <input className={inputClass} value={fields.parentName} onChange={(event) => setField("parentName", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="parentName">
+              Parent/Guardian Name *
+              <input className={fieldClass("parentName")} value={fields.parentName} onChange={(event) => setField("parentName", event.target.value)} />
+              {fieldError("parentName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Parent Email
-              <input className={inputClass} type="email" value={fields.parentEmail} onChange={(event) => setField("parentEmail", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="parentEmail">
+              Parent Email *
+              <input className={fieldClass("parentEmail")} type="email" value={fields.parentEmail} onChange={(event) => setField("parentEmail", event.target.value)} />
+              {fieldError("parentEmail")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Parent Phone
-              <input className={inputClass} type="tel" value={fields.parentPhone} onChange={(event) => setField("parentPhone", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="parentPhone">
+              Parent Phone *
+              <input className={fieldClass("parentPhone")} type="tel" value={fields.parentPhone} onChange={(event) => setField("parentPhone", event.target.value)} />
+              {fieldError("parentPhone")}
             </label>
           </section>
 
@@ -391,22 +521,26 @@ export function DirectPayForm() {
             <div className="sm:col-span-2">
               <h3 className="text-xl font-black text-navy">Waiver Agreement</h3>
             </div>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Emergency Contact Name
-              <input className={inputClass} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="emergencyName">
+              Emergency Contact Name *
+              <input className={fieldClass("emergencyName")} value={fields.emergencyName} onChange={(event) => setField("emergencyName", event.target.value)} />
+              {fieldError("emergencyName")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Emergency Contact Phone
-              <input className={inputClass} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
+            <label className="grid gap-2 text-sm font-bold text-navy" data-error-key="emergencyPhone">
+              Emergency Contact Phone *
+              <input className={fieldClass("emergencyPhone")} type="tel" value={fields.emergencyPhone} onChange={(event) => setField("emergencyPhone", event.target.value)} />
+              {fieldError("emergencyPhone")}
             </label>
-            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-              Medical Conditions / Allergies / Notes
+            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2" data-error-key="medicalNotes">
+              Medical Conditions / Allergies / Notes *
+              <span className="text-xs font-semibold normal-case text-slate-500">Type "None" if not applicable.</span>
               <textarea
-                className={`${inputClass} min-h-24 resize-y`}
+                className={`${fieldClass("medicalNotes")} min-h-24 resize-y`}
                 value={fields.medicalNotes}
                 onChange={(event) => setField("medicalNotes", event.target.value)}
                 placeholder="List medical conditions, allergies, injuries, or type None"
               />
+              {fieldError("medicalNotes")}
             </label>
 
             <div className="border border-slate-300 bg-[#fffdf8] p-4 text-sm leading-6 text-slate-700 sm:col-span-2">
@@ -429,12 +563,19 @@ export function DirectPayForm() {
             <p className="text-sm font-bold leading-6 text-slate-700 sm:col-span-2">
               By signing below, I confirm this waiver applies to all players listed on this form.
             </p>
-            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+            <div className="grid gap-3 sm:col-span-2" data-error-key="mediaConsent">
+              <p className="text-sm font-bold text-navy">Media Consent *</p>
+              <div className="grid gap-3 sm:grid-cols-2">
               {[
                 ["yes", "Yes, media use is approved"],
                 ["no", "No, media consent is declined"]
               ].map(([value, label]) => (
-                <label key={value} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-sm font-semibold text-navy">
+                <label
+                  key={value}
+                  className={`flex items-center gap-3 rounded-md border bg-white p-3 text-sm font-semibold text-navy ${
+                    hasFieldError("mediaConsent") ? "border-red-500 bg-red-50" : "border-slate-200"
+                  }`}
+                >
                   <input
                     className="h-4 w-4 border-slate-400 text-electric"
                     type="radio"
@@ -445,26 +586,41 @@ export function DirectPayForm() {
                   {label}
                 </label>
               ))}
+              </div>
+              {fieldError("mediaConsent")}
             </div>
 
-            <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
+            <label
+              className={`flex items-start gap-3 rounded-md border bg-mist p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2 ${
+                hasFieldError("waiverAgreement") ? "border-red-500 bg-red-50" : "border-slate-200"
+              }`}
+              data-error-key="waiverAgreement"
+            >
               <input
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
                 checked={fields.waiverAgreement}
                 type="checkbox"
                 onChange={(event) => setField("waiverAgreement", event.target.checked)}
               />
-              <span>I have read and agree to the Elite Soccer Training CV waiver and electronic signature consent.</span>
+              <span>
+                I have read and agree to the Elite Soccer Training CV waiver and electronic signature consent. *
+                {fieldErrors.waiverAgreement ? (
+                  <span className="mt-1 block text-xs font-bold text-red-600">{fieldErrors.waiverAgreement}</span>
+                ) : null}
+              </span>
             </label>
 
-            <label className="grid gap-2 text-xs font-bold uppercase tracking-wide text-navy sm:col-span-2">
-              Parent/Guardian Digital Signature
+            <label className="grid gap-2 text-xs font-bold uppercase tracking-wide text-navy sm:col-span-2" data-error-key="guardianSignature">
+              Parent/Guardian Digital Signature *
               <input
-                className="field-focus w-full border-0 border-b border-slate-400 bg-transparent px-0 py-3 text-base font-semibold text-slate-900 placeholder:text-slate-400"
+                className={`field-focus w-full border-0 border-b bg-transparent px-0 py-3 text-base font-semibold text-slate-900 placeholder:text-slate-400 ${
+                  hasFieldError("guardianSignature") ? "border-red-500" : "border-slate-400"
+                }`}
                 value={fields.guardianSignature}
                 onChange={(event) => setField("guardianSignature", event.target.value)}
                 placeholder="Type parent/guardian full legal name"
               />
+              {fieldError("guardianSignature")}
             </label>
             <p className="text-[11px] font-bold uppercase text-slate-500 sm:col-span-2">
               Waiver version {waiverVersion}. Timestamp is saved automatically.
