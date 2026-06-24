@@ -1,22 +1,26 @@
 import type { Metadata } from "next";
 import { DirectPayForm } from "@/components/DirectPayForm";
-import { PageHero } from "@/components/PageHero";
 
 export const metadata: Metadata = {
-  title: "Pay + Waiver",
-  description: "Complete direct payment and parent waiver for Elite Soccer Training CV."
+  title: "Complete Your EST CV Payment",
+  description: "Submit payment and required parent/player information for Elite Soccer Training CV."
 };
 
 export default function PayPage() {
   return (
     <>
-      <PageHero
-        eyebrow="Direct Payment"
-        title="PAY + WAIVER"
-        description="For families who already attended a session or were asked by Coach Hugo to complete payment directly."
-      />
+      <section className="bg-navy text-white">
+        <div className="section-shell py-8 sm:py-10">
+          <h1 className="max-w-4xl text-3xl font-black leading-tight text-balance sm:text-4xl">
+            Complete Your EST CV Payment
+          </h1>
+          <p className="mt-3 max-w-3xl text-base leading-7 text-slate-300">
+            Use this secure page to submit payment and complete the required parent/player information.
+          </p>
+        </div>
+      </section>
 
-      <section className="bg-mist py-16 sm:py-20">
+      <section className="bg-mist py-10 sm:py-14">
         <div className="section-shell">
           <DirectPayForm />
         </div>

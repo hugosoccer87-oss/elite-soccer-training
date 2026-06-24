@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { ShieldIcon } from "./Icons";
 import { directPaymentOptions, type DirectPaymentOption } from "@/lib/pricing";
 import { business } from "@/lib/site-data";
 import { waiverSections, waiverVersion } from "@/lib/waiver-content";
@@ -44,6 +43,32 @@ const initialFields: DirectPayFields = {
   waiverAgreement: false,
   guardianSignature: ""
 };
+
+const paymentCards: Array<{
+  option: DirectPaymentOption;
+  title: string;
+  price: string;
+  description: string;
+}> = [
+  {
+    option: "single_session",
+    title: "Single Session",
+    price: "$55",
+    description: "Pay for one training session."
+  },
+  {
+    option: "four_session_launch_pass",
+    title: "4-Session Launch Pass",
+    price: "$200",
+    description: "Includes 4 total training credits. Good for players training consistently."
+  },
+  {
+    option: "six_session_launch_pass",
+    title: "6-Session Launch Pass",
+    price: "$285",
+    description: "Includes 6 total training credits. Best value for players training multiple times per week."
+  }
+];
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -135,41 +160,53 @@ export function DirectPayForm() {
   }
 
   return (
-    <div className="panel overflow-hidden">
-      <div className="border-b border-slate-200 bg-navy p-5 text-white sm:p-7">
-        <p className="text-sm font-black uppercase text-electric">Direct Pay + Waiver</p>
-        <h2 className="mt-2 text-2xl font-black sm:text-3xl">Complete payment and parent waiver.</h2>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          For families who already attended a session or were asked by Coach Hugo to complete payment directly.
-        </p>
-      </div>
+    <div className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
+      <aside className="panel h-fit p-5 sm:p-6">
+        <h2 className="text-xl font-black text-navy">Choose Payment Option</h2>
+        <div className="mt-5 grid gap-3">
+          {paymentCards.map((card) => {
+            const isSelected = fields.paymentOption === card.option;
 
-      {error ? <div className="border-b border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">{error}</div> : null}
-      {notice ? <div className="border-b border-field/20 bg-field/10 px-5 py-4 text-sm font-bold text-field">{notice}</div> : null}
+            return (
+              <button
+                key={card.option}
+                type="button"
+                onClick={() => setField("paymentOption", card.option)}
+                className={`rounded-lg border p-4 text-left transition ${
+                  isSelected
+                    ? "border-electric bg-blue-50 shadow-lg shadow-electric/10"
+                    : "border-slate-200 bg-white hover:border-electric/60"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="font-black text-navy">{card.title} — {card.price}</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{card.description}</p>
+                  </div>
+                  <span
+                    className={`mt-1 h-4 w-4 shrink-0 rounded-full border ${
+                      isSelected ? "border-electric bg-electric ring-4 ring-electric/15" : "border-slate-300 bg-white"
+                    }`}
+                    aria-hidden="true"
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
 
-      <div className="grid gap-6 p-5 sm:p-8 lg:grid-cols-[0.9fr_1.1fr]">
-        <aside className="grid gap-5 rounded-lg border border-slate-200 bg-mist p-5">
-          <ShieldIcon className="h-9 w-9 text-electric" />
-          <div>
-            <p className="text-xs font-black uppercase text-electric">Payment Option</p>
-            <h3 className="mt-2 text-2xl font-black text-navy">{selectedOption.title} — {selectedOption.price}</h3>
-          </div>
+        <div className="mt-5 rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-700">
+          <p className="font-black text-navy">How Launch Passes Work</p>
+          <p className="mt-2">
+            Launch Passes let your player prepay for multiple training sessions at a discounted rate. After purchase,
+            credits can be used for future available EST CV sessions until all credits are used or the pass expiration
+            date is reached.
+          </p>
+        </div>
 
-          <label className="grid gap-2 text-sm font-bold text-navy">
-            Payment Option
-            <select
-              className={inputClass}
-              value={fields.paymentOption}
-              onChange={(event) => setField("paymentOption", event.target.value as DirectPaymentOption)}
-            >
-              <option value="single_session">Single Session — $55</option>
-              <option value="four_session_launch_pass">4-Session Launch Pass — $200</option>
-              <option value="six_session_launch_pass">6-Session Launch Pass — $285</option>
-            </select>
-          </label>
-
-          <div className="grid gap-3">
-            <p className="text-sm font-black uppercase text-navy">Payment Method</p>
+        <div className="mt-6">
+          <p className="text-sm font-black uppercase text-navy">Payment Method</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             {[
               ["card", "Pay by Card"],
               ["zelle", "Pay by Zelle"]
@@ -188,28 +225,32 @@ export function DirectPayForm() {
               </button>
             ))}
           </div>
+          <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
+            Card payments are processed securely through Stripe. Zelle payments must be confirmed manually.
+          </p>
+        </div>
 
-          {fields.paymentMethod === "zelle" ? (
-            <div className="rounded-md border border-electric/20 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
-              <p className="font-black uppercase text-navy">Zelle Instructions</p>
-              <p className="mt-2">Send payment through Zelle to: <span className="font-black text-navy">3236848024</span></p>
-              <p>Memo: Player Name + Payment Option</p>
-              <p>Example: "{fields.playerFirstName || "Maddie"} - {selectedOption.title}"</p>
-              <p className="mt-2 font-bold">Zelle payments must be confirmed manually.</p>
-              {zelleMemo ? <p className="mt-2 font-black text-navy">Saved memo: {zelleMemo}</p> : null}
-            </div>
-          ) : (
-            <p className="rounded-md border border-slate-200 bg-white p-4 text-sm font-bold leading-6 text-slate-700">
-              Your waiver record is saved first, then secure card payment opens.
+        {fields.paymentMethod === "zelle" ? (
+          <div className="mt-5 rounded-lg border border-electric/20 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
+            <p className="font-black text-navy">Zelle Instructions</p>
+            <p className="mt-2">
+              Send payment through Zelle to: <span className="font-black text-navy">3236848024</span>
             </p>
-          )}
-        </aside>
+            <p>Memo: Player Name + Payment Option</p>
+            <p>Example: {fields.playerFirstName || "Maddie"} - {selectedOption.title}</p>
+            {zelleMemo ? <p className="mt-2 font-black text-navy">Saved memo: {zelleMemo}</p> : null}
+          </div>
+        ) : null}
+      </aside>
 
-        <div className="grid gap-5">
-          <section className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 sm:grid-cols-2">
+      <div className="panel overflow-hidden">
+        {error ? <div className="border-b border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700">{error}</div> : null}
+        {notice ? <div className="border-b border-field/20 bg-field/10 px-5 py-4 text-sm font-bold text-field">{notice}</div> : null}
+
+        <div className="grid gap-5 p-5 sm:p-6">
+          <section className="grid gap-4 border-b border-slate-200 pb-5 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <p className="text-xs font-black uppercase text-electric">Player + Parent</p>
-              <h3 className="mt-2 text-xl font-black text-navy">Payment details</h3>
+              <h3 className="text-xl font-black text-navy">Player & Parent Information</h3>
             </div>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Player First Name
@@ -237,10 +278,27 @@ export function DirectPayForm() {
             </label>
           </section>
 
-          <section className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 sm:grid-cols-2">
+          <section className="border-b border-slate-200 pb-5">
+            <h3 className="text-xl font-black text-navy">Payment Details</h3>
+            <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm text-slate-700 sm:grid-cols-3">
+              <p>
+                <span className="block text-xs font-black uppercase text-slate-500">Selected Option</span>
+                <span className="font-black text-navy">{selectedOption.title}</span>
+              </p>
+              <p>
+                <span className="block text-xs font-black uppercase text-slate-500">Amount</span>
+                <span className="font-black text-navy">{selectedOption.price}</span>
+              </p>
+              <p>
+                <span className="block text-xs font-black uppercase text-slate-500">Payment Method</span>
+                <span className="font-black text-navy">{fields.paymentMethod === "card" ? "Card" : "Zelle"}</span>
+              </p>
+            </div>
+          </section>
+
+          <section className="grid gap-4 border-b border-slate-200 pb-5 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <p className="text-xs font-black uppercase text-electric">Waiver</p>
-              <h3 className="mt-2 text-xl font-black text-navy">Parent waiver and signature</h3>
+              <h3 className="text-xl font-black text-navy">Waiver Agreement</h3>
             </div>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Emergency Contact Name
@@ -260,7 +318,7 @@ export function DirectPayForm() {
               />
             </label>
 
-            <div className="rounded-lg border border-slate-300 bg-[#fffdf8] p-4 text-sm leading-6 text-slate-700 sm:col-span-2">
+            <div className="border border-slate-300 bg-[#fffdf8] p-4 text-sm leading-6 text-slate-700 sm:col-span-2">
               <h4 className="font-black text-navy">Elite Soccer Training CV Participation Waiver & Release of Liability</h4>
               <div className="mt-4 max-h-80 overflow-y-auto border-y border-slate-200 py-3">
                 {waiverSections.map((section) => (
@@ -271,13 +329,18 @@ export function DirectPayForm() {
                 ))}
               </div>
             </div>
+          </section>
 
+          <section className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <h3 className="text-xl font-black text-navy">Parent/Guardian Waiver & Signature</h3>
+            </div>
             <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
               {[
                 ["yes", "Yes, media use is approved"],
                 ["no", "No, media consent is declined"]
               ].map(([value, label]) => (
-                <label key={value} className="flex items-center gap-3 text-sm font-semibold text-navy">
+                <label key={value} className="flex items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-sm font-semibold text-navy">
                   <input
                     className="h-4 w-4 border-slate-400 text-electric"
                     type="radio"
@@ -290,7 +353,7 @@ export function DirectPayForm() {
               ))}
             </div>
 
-            <label className="flex items-start gap-3 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
+            <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
               <input
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
                 checked={fields.waiverAgreement}
@@ -320,7 +383,7 @@ export function DirectPayForm() {
             disabled={isSubmitting}
             className="rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? "Saving..." : fields.paymentMethod === "card" ? "Save Waiver + Pay by Card" : "Save Waiver + Show Zelle Instructions"}
+            {isSubmitting ? "Saving..." : fields.paymentMethod === "card" ? "Save Waiver + Pay by Card" : "Save Waiver + View Zelle Instructions"}
           </button>
 
           <p className="text-sm leading-6 text-slate-600">
