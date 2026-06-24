@@ -29,9 +29,13 @@ function getRequestIpAddress(request: Request) {
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
+    playerCount?: number;
     playerFirstName?: string;
     playerLastName?: string;
     playerAge?: string;
+    secondPlayerFirstName?: string;
+    secondPlayerLastName?: string;
+    secondPlayerAge?: string;
     parentName?: string;
     parentEmail?: string;
     parentPhone?: string;
@@ -44,11 +48,16 @@ export async function POST(request: Request) {
     emergencyPhone?: string;
     medicalNotes?: string;
   } | null;
+  const playerCount = payload?.playerCount === 2 ? 2 : 1;
 
   if (
     !payload?.playerFirstName?.trim() ||
     !payload.playerLastName?.trim() ||
     !payload.playerAge?.trim() ||
+    (playerCount === 2 &&
+      (!payload.secondPlayerFirstName?.trim() ||
+        !payload.secondPlayerLastName?.trim() ||
+        !payload.secondPlayerAge?.trim())) ||
     !payload.parentName?.trim() ||
     !payload.parentEmail?.trim() ||
     !isValidEmail(payload.parentEmail) ||
@@ -73,9 +82,13 @@ export async function POST(request: Request) {
   try {
     const signedAt = new Date().toISOString();
     const record = await createDirectPaymentRecord({
+      playerCount,
       playerFirstName: payload.playerFirstName,
       playerLastName: payload.playerLastName,
       playerAge: payload.playerAge,
+      secondPlayerFirstName: payload.secondPlayerFirstName,
+      secondPlayerLastName: payload.secondPlayerLastName,
+      secondPlayerAge: payload.secondPlayerAge,
       parentName: payload.parentName,
       parentEmail: payload.parentEmail,
       parentPhone: payload.parentPhone,
@@ -94,13 +107,19 @@ export async function POST(request: Request) {
 
     if (payload.paymentMethod === "zelle") {
       const option = directPaymentOptions[payload.paymentOption];
-      const playerName = `${payload.playerFirstName.trim()} ${payload.playerLastName.trim()}`.trim();
+      const firstPlayerName = `${payload.playerFirstName.trim()} ${payload.playerLastName.trim()}`.trim();
+      const secondPlayerName =
+        playerCount === 2
+          ? `${payload.secondPlayerFirstName?.trim() ?? ""} ${payload.secondPlayerLastName?.trim() ?? ""}`.trim()
+          : "";
+      const playerName = [firstPlayerName, secondPlayerName].filter(Boolean).join(" + ");
 
       return NextResponse.json({
         status: "zelle_pending",
         directPaymentId: record.id,
         zellePhone,
         memo: `${playerName} - ${option.title}`,
+        amountDue: record.amount_due,
         message: "Zelle payment must be confirmed manually."
       });
     }

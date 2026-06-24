@@ -316,7 +316,11 @@ export async function createStripeDirectPaymentCheckoutSession(record: DirectPay
   }
 
   const siteUrl = getSiteUrl();
-  const playerName = `${record.player_first_name} ${record.player_last_name}`.trim();
+  const playerCount = record.player_count === 2 ? 2 : 1;
+  const primaryPlayerName = `${record.player_first_name} ${record.player_last_name}`.trim();
+  const secondPlayerName =
+    playerCount === 2 ? `${record.second_player_first_name ?? ""} ${record.second_player_last_name ?? ""}`.trim() : "";
+  const playerName = [primaryPlayerName, secondPlayerName].filter(Boolean).join(" + ");
   const params = new URLSearchParams({
     mode: "payment",
     success_url: `${siteUrl}/pay/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -328,14 +332,16 @@ export async function createStripeDirectPaymentCheckoutSession(record: DirectPay
     "line_items[0][price_data][product_data][name]": option.stripeLineItemName,
     "line_items[0][price_data][product_data][description]": `Direct Pay + Waiver for ${playerName}`,
     "line_items[0][price_data][unit_amount]": String(option.amountCents),
-    "line_items[0][quantity]": "1",
+    "line_items[0][quantity]": String(playerCount),
     "payment_intent_data[metadata][purchase_type]": "direct_payment",
     "payment_intent_data[metadata][directPaymentId]": record.id,
     "payment_intent_data[metadata][payment_option]": record.payment_option,
+    "payment_intent_data[metadata][player_count]": String(playerCount),
     "payment_intent_data[metadata][player_name]": playerName,
     "metadata[purchase_type]": "direct_payment",
     "metadata[directPaymentId]": record.id,
     "metadata[payment_option]": record.payment_option,
+    "metadata[player_count]": String(playerCount),
     "metadata[player_name]": playerName
   });
 

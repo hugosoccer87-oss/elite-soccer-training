@@ -11,9 +11,13 @@ const inputClass =
 type PaymentMethod = "card" | "zelle";
 
 type DirectPayFields = {
+  playerCount: 1 | 2;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
+  secondPlayerFirstName: string;
+  secondPlayerLastName: string;
+  secondPlayerAge: string;
   parentName: string;
   parentEmail: string;
   parentPhone: string;
@@ -28,9 +32,13 @@ type DirectPayFields = {
 };
 
 const initialFields: DirectPayFields = {
+  playerCount: 1,
   playerFirstName: "",
   playerLastName: "",
   playerAge: "",
+  secondPlayerFirstName: "",
+  secondPlayerLastName: "",
+  secondPlayerAge: "",
   parentName: "",
   parentEmail: "",
   parentPhone: "",
@@ -53,25 +61,29 @@ const paymentCards: Array<{
   {
     option: "single_session",
     title: "Single Session",
-    price: "$55",
+    price: "$55/player",
     description: "Pay for one training session."
   },
   {
     option: "four_session_launch_pass",
     title: "4-Session Launch Pass",
-    price: "$200",
+    price: "$200/player",
     description: "Includes 4 total training credits. Good for players training consistently."
   },
   {
     option: "six_session_launch_pass",
     title: "6-Session Launch Pass",
-    price: "$285",
+    price: "$285/player",
     description: "Includes 6 total training credits. Best value for players training multiple times per week."
   }
 ];
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function formatCurrency(amountCents: number) {
+  return `$${(amountCents / 100).toFixed(0)}`;
 }
 
 export function DirectPayForm() {
@@ -81,6 +93,10 @@ export function DirectPayForm() {
   const [zelleMemo, setZelleMemo] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const selectedOption = directPaymentOptions[fields.paymentOption];
+  const totalAmountCents = selectedOption.amountCents * fields.playerCount;
+  const primaryPlayerName = fields.playerFirstName.trim() || "Maddie";
+  const secondPlayerName = fields.secondPlayerFirstName.trim() || "Logan";
+  const playerMemoNames = fields.playerCount === 2 ? `${primaryPlayerName} + ${secondPlayerName}` : primaryPlayerName;
 
   function setField<Key extends keyof DirectPayFields>(field: Key, value: DirectPayFields[Key]) {
     setFields((current) => ({ ...current, [field]: value }));
@@ -93,6 +109,8 @@ export function DirectPayForm() {
       !fields.playerFirstName.trim() ||
       !fields.playerLastName.trim() ||
       !fields.playerAge.trim() ||
+      (fields.playerCount === 2 &&
+        (!fields.secondPlayerFirstName.trim() || !fields.secondPlayerLastName.trim() || !fields.secondPlayerAge.trim())) ||
       !fields.parentName.trim() ||
       !fields.parentEmail.trim() ||
       !isValidEmail(fields.parentEmail) ||
@@ -151,7 +169,7 @@ export function DirectPayForm() {
       }
 
       setNotice("Your waiver was saved. Zelle payment is pending manual confirmation.");
-      setZelleMemo(result.memo || `${fields.playerFirstName} - ${selectedOption.title}`);
+      setZelleMemo(result.memo || `${playerMemoNames} - ${selectedOption.title}`);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Payment could not be started.");
     } finally {
@@ -174,6 +192,28 @@ export function DirectPayForm() {
       <div className="grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
       <aside className="panel h-fit p-5 sm:p-6">
         <h2 className="text-xl font-black text-navy">Choose Payment Option</h2>
+        <div className="mt-5">
+          <p className="text-sm font-black uppercase text-navy">Number of Players</p>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            {[
+              [1, "1 Player"],
+              [2, "2 Players"]
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setField("playerCount", value as 1 | 2)}
+                className={`rounded-lg border p-4 text-center text-sm font-black transition ${
+                  fields.playerCount === value
+                    ? "border-electric bg-blue-50 text-navy shadow-lg shadow-electric/10"
+                    : "border-slate-200 bg-white text-navy hover:border-electric/60"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="mt-5 grid gap-3">
           {paymentCards.map((card) => {
             const isSelected = fields.paymentOption === card.option;
@@ -211,7 +251,8 @@ export function DirectPayForm() {
           <p className="mt-2">
             Launch Passes let your player prepay for multiple training sessions at a discounted rate. After purchase,
             credits can be used for future available EST CV sessions until all credits are used or the pass expiration
-            date is reached.
+            date is reached. Launch Passes are purchased per player. If purchasing for two players, each player receives
+            their own credits.
           </p>
         </div>
 
@@ -247,8 +288,9 @@ export function DirectPayForm() {
             <p className="mt-2">
               Send payment through Zelle to: <span className="font-black text-navy">3236848024</span>
             </p>
-            <p>Memo: Player Name + Payment Option</p>
-            <p>Example: {fields.playerFirstName || "Maddie"} - {selectedOption.title}</p>
+            <p className="font-bold text-navy">Total amount owed: {formatCurrency(totalAmountCents)}</p>
+            <p>Memo: Player Name(s) + Payment Option</p>
+            <p>Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - {selectedOption.title}</p>
             {zelleMemo ? <p className="mt-2 font-black text-navy">Saved memo: {zelleMemo}</p> : null}
           </div>
         ) : null}
@@ -263,18 +305,52 @@ export function DirectPayForm() {
             <div className="sm:col-span-2">
               <h3 className="text-xl font-black text-navy">Player & Parent Information</h3>
             </div>
+            {fields.playerCount === 2 ? (
+              <p className="text-xs font-black uppercase text-electric sm:col-span-2">Player 1</p>
+            ) : null}
             <label className="grid gap-2 text-sm font-bold text-navy">
-              Player First Name
+              {fields.playerCount === 2 ? "First Name" : "Player First Name"}
               <input className={inputClass} value={fields.playerFirstName} onChange={(event) => setField("playerFirstName", event.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
-              Player Last Name
+              {fields.playerCount === 2 ? "Last Name" : "Player Last Name"}
               <input className={inputClass} value={fields.playerLastName} onChange={(event) => setField("playerLastName", event.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
-              Player Age
+              {fields.playerCount === 2 ? "Age" : "Player Age"}
               <input className={inputClass} inputMode="numeric" value={fields.playerAge} onChange={(event) => setField("playerAge", event.target.value)} />
             </label>
+            {fields.playerCount === 2 ? (
+              <>
+                <p className="text-xs font-black uppercase text-electric sm:col-span-2">Player 2</p>
+                <label className="grid gap-2 text-sm font-bold text-navy">
+                  First Name
+                  <input
+                    className={inputClass}
+                    value={fields.secondPlayerFirstName}
+                    onChange={(event) => setField("secondPlayerFirstName", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-navy">
+                  Last Name
+                  <input
+                    className={inputClass}
+                    value={fields.secondPlayerLastName}
+                    onChange={(event) => setField("secondPlayerLastName", event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-bold text-navy">
+                  Age
+                  <input
+                    className={inputClass}
+                    inputMode="numeric"
+                    value={fields.secondPlayerAge}
+                    onChange={(event) => setField("secondPlayerAge", event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+            <p className="text-xs font-black uppercase text-electric sm:col-span-2">Parent/Guardian</p>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Parent/Guardian Name
               <input className={inputClass} value={fields.parentName} onChange={(event) => setField("parentName", event.target.value)} />
@@ -291,14 +367,18 @@ export function DirectPayForm() {
 
           <section className="border-b border-slate-200 pb-5">
             <h3 className="text-xl font-black text-navy">Payment Details</h3>
-            <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm text-slate-700 sm:grid-cols-3">
+            <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
               <p>
                 <span className="block text-xs font-black uppercase text-slate-500">Selected Option</span>
                 <span className="font-black text-navy">{selectedOption.title}</span>
               </p>
               <p>
-                <span className="block text-xs font-black uppercase text-slate-500">Amount</span>
-                <span className="font-black text-navy">{selectedOption.price}</span>
+                <span className="block text-xs font-black uppercase text-slate-500">Number of Players</span>
+                <span className="font-black text-navy">{fields.playerCount}</span>
+              </p>
+              <p>
+                <span className="block text-xs font-black uppercase text-slate-500">Total Amount</span>
+                <span className="font-black text-navy">{formatCurrency(totalAmountCents)}</span>
               </p>
               <p>
                 <span className="block text-xs font-black uppercase text-slate-500">Payment Method</span>
@@ -346,6 +426,9 @@ export function DirectPayForm() {
             <div className="sm:col-span-2">
               <h3 className="text-xl font-black text-navy">Parent/Guardian Waiver & Signature</h3>
             </div>
+            <p className="text-sm font-bold leading-6 text-slate-700 sm:col-span-2">
+              By signing below, I confirm this waiver applies to all players listed on this form.
+            </p>
             <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
               {[
                 ["yes", "Yes, media use is approved"],

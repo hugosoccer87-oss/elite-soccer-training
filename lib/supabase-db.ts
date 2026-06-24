@@ -143,9 +143,13 @@ export type DirectPaymentStatus = "pending_card_payment" | "zelle_pending" | "pa
 
 export type DirectPaymentRow = {
   id: string;
+  player_count: number;
   player_first_name: string;
   player_last_name: string;
   player_age: string;
+  second_player_first_name?: string | null;
+  second_player_last_name?: string | null;
+  second_player_age?: string | null;
   parent_name: string;
   parent_email: string;
   parent_phone: string;
@@ -184,9 +188,13 @@ export type AdminTrainingSession = TrainingSessionRow & {
 };
 
 export type DirectPaymentInput = {
+  playerCount: number;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
+  secondPlayerFirstName?: string;
+  secondPlayerLastName?: string;
+  secondPlayerAge?: string;
   parentName: string;
   parentEmail: string;
   parentPhone: string;
@@ -625,20 +633,25 @@ export async function listAdminDirectPayments() {
 
 export async function createDirectPaymentRecord(input: DirectPaymentInput) {
   const option = getDirectPaymentOption(input.paymentOption);
+  const playerCount = input.playerCount === 2 ? 2 : 1;
   const status: DirectPaymentStatus = input.paymentMethod === "card" ? "pending_card_payment" : "zelle_pending";
   const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
     method: "POST",
     body: JSON.stringify({
+      player_count: playerCount,
       player_first_name: input.playerFirstName.trim(),
       player_last_name: input.playerLastName.trim(),
       player_age: input.playerAge.trim(),
+      second_player_first_name: playerCount === 2 ? input.secondPlayerFirstName?.trim() || null : null,
+      second_player_last_name: playerCount === 2 ? input.secondPlayerLastName?.trim() || null : null,
+      second_player_age: playerCount === 2 ? input.secondPlayerAge?.trim() || null : null,
       parent_name: input.parentName.trim(),
       parent_email: input.parentEmail.trim().toLowerCase(),
       parent_phone: input.parentPhone.trim(),
       payment_option: input.paymentOption,
       payment_method: input.paymentMethod,
       status,
-      amount_due: option.amountCents,
+      amount_due: option.amountCents * playerCount,
       amount_paid: 0,
       waiver_signed: input.waiverSigned,
       typed_signature: input.typedSignature.trim(),

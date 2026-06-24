@@ -5,9 +5,13 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.direct_payments (
   id uuid primary key default gen_random_uuid(),
+  player_count integer not null default 1 check (player_count in (1, 2)),
   player_first_name text not null,
   player_last_name text not null,
   player_age text not null,
+  second_player_first_name text,
+  second_player_last_name text,
+  second_player_age text,
   parent_name text not null,
   parent_email text not null,
   parent_phone text not null,
@@ -30,6 +34,32 @@ create table if not exists public.direct_payments (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.direct_payments
+  add column if not exists player_count integer not null default 1;
+
+alter table public.direct_payments
+  add column if not exists second_player_first_name text;
+
+alter table public.direct_payments
+  add column if not exists second_player_last_name text;
+
+alter table public.direct_payments
+  add column if not exists second_player_age text;
+
+do $est$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'direct_payments_player_count_check'
+      and conrelid = 'public.direct_payments'::regclass
+  ) then
+    alter table public.direct_payments
+      add constraint direct_payments_player_count_check check (player_count in (1, 2));
+  end if;
+end;
+$est$;
 
 create index if not exists idx_direct_payments_status
   on public.direct_payments (status, created_at desc);
