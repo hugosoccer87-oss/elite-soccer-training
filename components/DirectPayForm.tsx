@@ -83,7 +83,7 @@ const paymentCards: Array<{
     option: "single_session",
     title: "Single Session",
     price: "$55/player",
-    description: "Pay for one training session."
+    description: "Pay for one or more single sessions."
   },
   {
     option: "four_session_launch_pass",
@@ -370,41 +370,28 @@ export function DirectPayForm() {
         </div>
 
         {isSingleSession ? (
-          <div className="mt-5">
-            <p className="text-sm font-black uppercase text-navy">Number of Sessions</p>
-            <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">
-              Choose how many sessions you are paying for.
-            </p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+          <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
+            Number of Sessions
+            <span className="text-sm font-semibold leading-6 text-slate-600">
+              Choose how many single sessions you are paying for.
+            </span>
+            <select
+              className={inputClass}
+              value={fields.sessionCount}
+              onChange={(event) => setField("sessionCount", Number(event.target.value) as 1 | 2 | 3 | 4 | 5 | 6)}
+            >
               {[1, 2, 3, 4, 5, 6].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setField("sessionCount", value as 1 | 2 | 3 | 4 | 5 | 6)}
-                  className={`rounded-lg border p-3 text-center text-sm font-black transition ${
-                    fields.sessionCount === value
-                      ? "border-electric bg-blue-50 text-navy shadow-lg shadow-electric/10"
-                      : "border-slate-200 bg-white text-navy hover:border-electric/60"
-                  }`}
-                >
-                  {value}
-                </button>
+                <option key={value} value={value}>
+                  {value} {value === 1 ? "Session" : "Sessions"}
+                </option>
               ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mt-5 rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-700">
-          <p className="font-black text-navy">Payment Note</p>
-          {isSingleSession ? (
-            <p className="mt-2">Choose how many sessions you are paying for.</p>
-          ) : (
-            <p className="mt-2">
-              Launch Passes already include multiple training credits. Launch Passes are purchased per player. If
-              purchasing for two players, each player receives their own credits.
-            </p>
-          )}
-        </div>
+            </select>
+          </label>
+        ) : (
+          <p className="mt-5 rounded-md border border-slate-200 bg-mist px-4 py-3 text-sm font-semibold leading-6 text-slate-600">
+            Launch Passes already include multiple training credits.
+          </p>
+        )}
 
         <div className="mt-6">
           <p className="text-sm font-black uppercase text-navy">Payment Method</p>

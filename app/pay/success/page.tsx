@@ -5,6 +5,7 @@ import { business } from "@/lib/site-data";
 import { directPaymentIdFromStripeMetadata, isStripePaymentVerified, retrieveStripeCheckoutSession } from "@/lib/stripe";
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import { markDirectPaymentPaid } from "@/lib/supabase-db";
+import { sendDirectPaymentTransactionalEmails } from "@/lib/transactional-email";
 
 export const metadata: Metadata = {
   title: "Payment Confirmation",
@@ -68,12 +69,21 @@ async function verifyDirectPayment(sessionId: string | undefined) {
       };
     }
 
-    await markDirectPaymentPaid({
+    const directPayment = await markDirectPaymentPaid({
       directPaymentId,
       checkoutSessionId: session.id,
       paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
       amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
     });
+
+    if (!directPayment.wasAlreadyPaid) {
+      const emailResult = await sendDirectPaymentTransactionalEmails(directPayment);
+
+      console.info("[EST Direct Pay] Card direct payment emails processed from success page", {
+        directPaymentId,
+        emailSent: emailResult.sent
+      });
+    }
 
     return {
       verified: true,

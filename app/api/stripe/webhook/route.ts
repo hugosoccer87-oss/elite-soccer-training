@@ -10,6 +10,7 @@ import {
   verifyStripeWebhookSignature
 } from "@/lib/stripe";
 import { markDirectPaymentPaid } from "@/lib/supabase-db";
+import { sendDirectPaymentTransactionalEmails } from "@/lib/transactional-email";
 
 export const runtime = "nodejs";
 
@@ -68,7 +69,24 @@ export async function POST(request: Request) {
           eventId: event.id,
           sessionId: session.id,
           directPaymentId,
-          status: directPayment.status
+          status: directPayment.status,
+          wasAlreadyPaid: directPayment.wasAlreadyPaid
+        });
+        const emailResult = directPayment.wasAlreadyPaid
+          ? {
+              sent: false,
+              customerSent: false,
+              adminSent: false,
+              message: "Direct payment emails were already handled for this paid record."
+            }
+          : await sendDirectPaymentTransactionalEmails(directPayment);
+
+        console.info("[EST Stripe] Direct payment email notifications complete", {
+          eventId: event.id,
+          sessionId: session.id,
+          directPaymentId,
+          emailSent: emailResult.sent,
+          skippedDuplicate: directPayment.wasAlreadyPaid
         });
         setLastPaymentVerificationResult({
           source: "webhook",

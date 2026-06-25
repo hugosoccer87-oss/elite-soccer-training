@@ -3,20 +3,20 @@
   "functions": {
     "/api/admin/direct-payments/[id]": {},
     "/api/admin/direct-payments": {},
-    "/api/admin/bookings": {},
     "/api/admin/email-diagnostics": {},
     "/api/admin/passes": {},
     "/api/admin/send-test-email": {},
     "/api/admin/sessions/[id]": {},
-    "/api/availability/debug": {},
-    "/api/availability": {},
-    "/api/direct-payments": {},
     "/api/admin/sessions": {},
+    "/api/availability": {},
+    "/api/availability/debug": {},
     "/api/passes/lookup": {},
+    "/api/direct-payments": {},
     "/api/reviews": {},
     "/api/passes/redeem": {},
     "/api/stripe/verify-session": {},
     "/api/stripe/pass-checkout": {},
-    "/api/stripe/webhook": {}
+    "/api/stripe/webhook": {},
+    "/api/admin/bookings": {}
   }
 }

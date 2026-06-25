@@ -5,6 +5,7 @@ import {
   attachDirectPaymentStripeCheckoutSession,
   createDirectPaymentRecord
 } from "@/lib/supabase-db";
+import { sendDirectPaymentTransactionalEmails } from "@/lib/transactional-email";
 import { waiverVersion } from "@/lib/waiver-content";
 
 export const runtime = "nodejs";
@@ -123,6 +124,12 @@ export async function POST(request: Request) {
         payload.paymentOption === "single_session"
           ? `${playerName} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
           : `${playerName} - ${option.title}`;
+      const emailResult = await sendDirectPaymentTransactionalEmails(record);
+
+      console.info("[EST Direct Pay] Zelle direct payment emails processed", {
+        directPaymentId: record.id,
+        emailSent: emailResult.sent
+      });
 
       return NextResponse.json({
         status: "zelle_pending",

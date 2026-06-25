@@ -174,6 +174,10 @@ export type DirectPaymentRow = {
   updated_at: string;
 };
 
+export type DirectPaymentPaidRow = DirectPaymentRow & {
+  wasAlreadyPaid: boolean;
+};
+
 export type AdminBookingRecord = BookingRow & {
   waiver?: WaiverRow | null;
   calendarEvent?: CalendarEventRow | null;
@@ -692,14 +696,24 @@ export async function markDirectPaymentPaid(input: {
   checkoutSessionId?: string;
   paymentIntentId?: string;
   amountPaid?: number;
-}) {
+}): Promise<DirectPaymentPaidRow> {
+  const existing = await supabaseRequest<DirectPaymentRow[]>(
+    `direct_payments?select=*&id=eq.${encodeFilter(input.directPaymentId)}&limit=1`
+  );
+  const current = existing[0];
+
+  if (!current) {
+    throw new Error("Direct payment record was not found.");
+  }
+
+  const wasAlreadyPaid = current.status === "paid";
   const rows = await supabaseRequest<DirectPaymentRow[]>(`direct_payments?id=eq.${encodeFilter(input.directPaymentId)}`, {
     method: "PATCH",
     body: JSON.stringify({
       status: "paid",
-      stripe_checkout_session_id: input.checkoutSessionId || null,
-      stripe_payment_intent_id: input.paymentIntentId || null,
-      amount_paid: input.amountPaid ?? 0
+      stripe_checkout_session_id: input.checkoutSessionId || current.stripe_checkout_session_id || null,
+      stripe_payment_intent_id: input.paymentIntentId || current.stripe_payment_intent_id || null,
+      amount_paid: (input.amountPaid ?? current.amount_paid) || current.amount_due
     })
   });
   const record = rows[0];
@@ -708,7 +722,10 @@ export async function markDirectPaymentPaid(input: {
     throw new Error("Direct payment record could not be marked paid.");
   }
 
-  return record;
+  return {
+    ...record,
+    wasAlreadyPaid
+  };
 }
 
 export async function updateDirectPaymentStatus(id: string, status: DirectPaymentStatus) {
