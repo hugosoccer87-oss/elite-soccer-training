@@ -1233,6 +1233,22 @@ export function BookingForm() {
                               <span className="mt-2 block text-sm font-bold opacity-90">
                                 {slot.trainingGroup}: {slot.trainingGroupAges}
                               </span>
+                              {slot.trainingFocus ? (
+                                <span
+                                  className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
+                                    isSelected
+                                      ? "border-white/20 bg-white/10 text-white"
+                                      : "border-electric/20 bg-blue-50 text-electric"
+                                  }`}
+                                >
+                                  {slot.trainingFocus}
+                                  {slot.trainingFocusDescription ? (
+                                    <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
+                                      {slot.trainingFocusDescription}
+                                    </span>
+                                  ) : null}
+                                </span>
+                              ) : null}
                               <span className="mt-1 block text-sm font-semibold opacity-80">
                                 {sessionLocationLines(slot.location).map((line) => (
                                   <span key={line} className="block">{line}</span>
@@ -1506,6 +1522,7 @@ export function BookingForm() {
                     availabilityDebug?.loadedSessions.map((slot) => (
                       <p key={slot.id}>
                         {slot.id} / {slot.date} / {slot.time} / {slot.trainingGroup} / {slot.remainingSpots} spots /{" "}
+                        {slot.trainingFocus ? `${slot.trainingFocus} / ` : ""}
                         {slot.included ? "included" : `removed: ${slot.removedReasons.join(", ")}`}
                       </p>
                     ))
@@ -1616,6 +1633,22 @@ export function BookingForm() {
                             <span className="mt-2 block text-sm font-bold opacity-90">
                               {slot.trainingGroup}: {slot.trainingGroupAges}
                             </span>
+                            {slot.trainingFocus ? (
+                              <span
+                                className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
+                                  isSelected
+                                    ? "border-white/20 bg-white/10 text-white"
+                                    : "border-electric/20 bg-blue-50 text-electric"
+                                }`}
+                              >
+                                {slot.trainingFocus}
+                                {slot.trainingFocusDescription ? (
+                                  <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
+                                    {slot.trainingFocusDescription}
+                                  </span>
+                                ) : null}
+                              </span>
+                            ) : null}
                             <span className="mt-1 block text-sm font-semibold opacity-80">
                               {sessionLocationLines(slot.location).map((line) => (
                                 <span key={line} className="block">{line}</span>
@@ -2015,6 +2048,11 @@ export function BookingForm() {
                   <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.startTime}</p>
                   <p>{usesExistingPass ? "1 player using Launch Pass credit" : `${fields.players} player(s) attending`}</p>
                   <p>{bookingGroup?.name ?? "Selected training group"}</p>
+                  {selectedSlot.trainingFocus ? (
+                    <p className="mt-2 rounded-md border border-electric/20 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-electric">
+                      {selectedSlot.trainingFocus}
+                    </p>
+                  ) : null}
                   <p className="mt-2 text-xs font-bold uppercase text-slate-500">{groupSizeMessage}</p>
                   <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
                     {usesExistingPass ? "Payment: Launch Pass credit" : `${fields.players} x ${sessionPriceLabel} = ${paymentTotal}`}

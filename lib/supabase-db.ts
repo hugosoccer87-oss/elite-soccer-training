@@ -13,6 +13,7 @@ import {
   type DirectPaymentOption,
   type LaunchPassType
 } from "@/lib/pricing";
+import { getTrainingFocusDisplay, type TrainingFocusValue } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { PublicAvailableSession, PublicAvailabilityDebugResponse, PublicAvailabilityResponse } from "@/lib/public-availability";
 
@@ -25,6 +26,7 @@ export type TrainingSessionRow = {
   id: string;
   training_group: TrainingGroupId;
   title: string;
+  training_focus?: string | null;
   start_datetime: string;
   end_datetime: string;
   timezone: string;
@@ -145,6 +147,7 @@ export type DirectPaymentRow = {
   id: string;
   player_count: number;
   session_count: number;
+  training_focus?: string | null;
   player_first_name: string;
   player_last_name: string;
   player_age: string;
@@ -195,6 +198,7 @@ export type AdminTrainingSession = TrainingSessionRow & {
 export type DirectPaymentInput = {
   playerCount: number;
   sessionCount: number;
+  trainingFocus: TrainingFocusValue;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
@@ -368,6 +372,7 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
   const start = displayParts(session.start_datetime, session.timezone || defaultTimeZone);
   const end = displayParts(session.end_datetime, session.timezone || defaultTimeZone);
   const group = getTrainingGroup(session.training_group);
+  const focus = getTrainingFocusDisplay(session.training_focus);
 
   return {
     id: session.id,
@@ -381,6 +386,8 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
     trainingGroupId: session.training_group,
     trainingGroup: group.name,
     trainingGroupAges: group.ages,
+    trainingFocus: focus?.label,
+    trainingFocusDescription: focus?.description,
     capacity: session.capacity,
     bookedCount: paidPlayers,
     remainingSpots: Math.max(0, session.capacity - paidPlayers),
@@ -527,6 +534,7 @@ export async function getSupabaseAvailabilityDebug(): Promise<PublicAvailability
         date: publicSession.date,
         time: publicSession.startTime,
         trainingGroup: publicSession.trainingGroup,
+        trainingFocus: publicSession.trainingFocus,
         status: session.status,
         capacity: session.capacity,
         bookedCount: paidPlayers,
@@ -548,6 +556,7 @@ export async function createTrainingSession(input: {
   trainingGroup: TrainingGroupId;
   date: string;
   time: string;
+  trainingFocus?: string;
   capacity?: number;
   location?: string;
   status?: "open" | "closed" | "cancelled";
@@ -555,25 +564,34 @@ export async function createTrainingSession(input: {
   const group = getTrainingGroup(input.trainingGroup);
   const start = zonedDateTimeToUtc(input.date, input.time, defaultTimeZone);
   const end = new Date(start.getTime() + 60 * 60_000);
+  const payload: Partial<TrainingSessionRow> & {
+    training_group: TrainingGroupId;
+    start_datetime: string;
+    end_datetime: string;
+  } = {
+    training_group: input.trainingGroup,
+    title: group.name,
+    start_datetime: start.toISOString(),
+    end_datetime: end.toISOString(),
+    timezone: defaultTimeZone,
+    location: input.location || business.location,
+    capacity: Math.min(slotCapacity, Math.max(1, Number(input.capacity) || slotCapacity)),
+    status: input.status || "open"
+  };
+
+  if (input.trainingFocus) {
+    payload.training_focus = input.trainingFocus;
+  }
 
   return supabaseRequest<TrainingSessionRow[]>("training_sessions", {
     method: "POST",
-    body: JSON.stringify({
-      training_group: input.trainingGroup,
-      title: group.name,
-      start_datetime: start.toISOString(),
-      end_datetime: end.toISOString(),
-      timezone: defaultTimeZone,
-      location: input.location || business.location,
-      capacity: Math.min(slotCapacity, Math.max(1, Number(input.capacity) || slotCapacity)),
-      status: input.status || "open"
-    })
+    body: JSON.stringify(payload)
   });
 }
 
 export async function updateTrainingSession(
   id: string,
-  updates: Partial<Pick<TrainingSessionRow, "capacity" | "location" | "status" | "title">>
+  updates: Partial<Pick<TrainingSessionRow, "capacity" | "location" | "status" | "title" | "training_focus">>
 ) {
   return supabaseRequest<TrainingSessionRow[]>(
     `training_sessions?id=eq.${encodeFilter(id)}`,
@@ -643,11 +661,10 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
   const sessionCount =
     input.paymentOption === "single_session" ? Math.min(6, Math.max(1, Math.floor(input.sessionCount || 1))) : 1;
   const status: DirectPaymentStatus = input.paymentMethod === "card" ? "pending_card_payment" : "zelle_pending";
-  const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
-    method: "POST",
-    body: JSON.stringify({
-      player_count: playerCount,
-      session_count: sessionCount,
+  const basePayload = {
+    player_count: playerCount,
+    session_count: sessionCount,
+    training_focus: input.trainingFocus,
       player_first_name: input.playerFirstName.trim(),
       player_last_name: input.playerLastName.trim(),
       player_age: input.playerAge.trim(),
@@ -671,15 +688,37 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
       emergency_phone: input.emergencyPhone.trim(),
       medical_notes: input.medicalNotes.trim(),
       ip_address: input.ipAddress || null
-    })
-  });
+  };
+  let inserted: DirectPaymentRow[];
+
+  try {
+    inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
+      method: "POST",
+      body: JSON.stringify(basePayload)
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (!message.toLowerCase().includes("training_focus")) {
+      throw error;
+    }
+
+    const { training_focus: _trainingFocus, ...fallbackPayload } = basePayload;
+    inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
+      method: "POST",
+      body: JSON.stringify(fallbackPayload)
+    });
+  }
   const record = inserted[0];
 
   if (!record) {
     throw new Error("Direct payment record could not be saved.");
   }
 
-  return record;
+  return {
+    ...record,
+    training_focus: record.training_focus || input.trainingFocus
+  };
 }
 
 export async function attachDirectPaymentStripeCheckoutSession(directPaymentId: string, checkoutSessionId: string) {

@@ -13,6 +13,8 @@ export type PublicAvailableSession = {
   trainingGroupId: TrainingGroupId;
   trainingGroup: string;
   trainingGroupAges: string;
+  trainingFocus?: string;
+  trainingFocusDescription?: string;
   capacity: number;
   bookedCount: number;
   remainingSpots: number;
@@ -42,6 +44,7 @@ export type PublicAvailabilityDebugResponse = PublicAvailabilityResponse & {
     date: string;
     time: string;
     trainingGroup: string;
+    trainingFocus?: string;
     status: string;
     capacity: number;
     bookedCount: number;

@@ -12,6 +12,7 @@ import {
   getSessionTotalCents,
   sessionPriceLabel
 } from "@/lib/pricing";
+import { getTrainingFocusLabel } from "@/lib/session-focus";
 import type { DirectPaymentRow, PassPurchaseRow } from "@/lib/supabase-db";
 import { buildSignedWaiverPdf, signedWaiverPdfFileName } from "@/lib/waiver-pdf";
 
@@ -563,14 +564,15 @@ function directPaymentSessionCount(record: DirectPaymentRow) {
 function directPaymentZelleMemo(record: DirectPaymentRow) {
   const option = getDirectPaymentOption(record.payment_option);
   const playerNames = directPaymentPlayerNames(record);
+  const trainingFocus = getTrainingFocusLabel(record.training_focus);
 
   if (record.payment_option === "single_session") {
     const sessions = directPaymentSessionCount(record);
 
-    return `${playerNames} - Single Session - ${sessions} ${sessions === 1 ? "Session" : "Sessions"}`;
+    return `${playerNames} - ${trainingFocus} - Single Session - ${sessions} ${sessions === 1 ? "Session" : "Sessions"}`;
   }
 
-  return `${playerNames} - ${option.title}`;
+  return `${playerNames} - ${trainingFocus} - ${option.title}`;
 }
 
 function directPaymentCommonRows(record: DirectPaymentRow, paymentStatus: string) {
@@ -582,6 +584,7 @@ function directPaymentCommonRows(record: DirectPaymentRow, paymentStatus: string
     ["Parent Phone", record.parent_phone],
     ["Player Name(s)", directPaymentPlayerNames(record)],
     ["Player Age(s)", directPaymentPlayerAges(record)],
+    ["Training Focus", getTrainingFocusLabel(record.training_focus)],
     ["Payment Option", option.title],
     ["Number of Players", String(record.player_count || 1)]
   ];

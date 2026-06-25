@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
+import { getTrainingFocusLabel } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession, DirectPaymentRow, DirectPaymentStatus } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
@@ -355,6 +356,7 @@ export function AdminAvailability() {
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>(trainingGroups[0].id);
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
+  const [newTrainingFocus, setNewTrainingFocus] = useState("");
   const [newCapacity, setNewCapacity] = useState(String(slotCapacity));
   const [newLocation, setNewLocation] = useState(business.location);
   const [blockDate, setBlockDate] = useState("");
@@ -438,6 +440,7 @@ export function AdminAvailability() {
           trainingGroup: newGroupId,
           date: newDate,
           time: newTime,
+          trainingFocus: newTrainingFocus || undefined,
           capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
           location: newLocation
         })
@@ -711,6 +714,13 @@ export function AdminAvailability() {
                 ))}
               </select>
             </label>
+            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+              Session Focus
+              <select className={inputClass} value={newTrainingFocus} onChange={(event) => setNewTrainingFocus(event.target.value)}>
+                <option value="">No special focus</option>
+                <option value="shooting_finishing">Shooting & Finishing</option>
+              </select>
+            </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
               Date
               <input className={inputClass} type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} />
@@ -908,7 +918,13 @@ export function AdminAvailability() {
           <div className="grid divide-y divide-slate-200">
             {directPayments.map((payment) => {
               const playerName = `${payment.player_first_name} ${payment.player_last_name}`.trim();
-              const zelleMemo = `${playerName} - ${directPaymentOptionLabel(payment.payment_option)}`;
+              const trainingFocusLabel = getTrainingFocusLabel(payment.training_focus);
+              const sessionCount =
+                payment.payment_option === "single_session" ? Math.max(1, Number(payment.session_count) || 1) : 1;
+              const zelleMemo =
+                payment.payment_option === "single_session"
+                  ? `${playerName} - ${trainingFocusLabel} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
+                  : `${playerName} - ${trainingFocusLabel} - ${directPaymentOptionLabel(payment.payment_option)}`;
 
               return (
                 <article key={payment.id} className="grid gap-4 p-5">
@@ -922,6 +938,7 @@ export function AdminAvailability() {
                         Parent: {payment.parent_name} - {payment.parent_email} - {payment.parent_phone}
                       </p>
                       <p className="mt-1 text-sm text-slate-600">Player age: {payment.player_age}</p>
+                      <p className="mt-1 text-sm text-slate-600">Training focus: {trainingFocusLabel}</p>
                       <p className="mt-1 text-xs font-black uppercase text-slate-500">
                         Submitted: {formatWaiverTimestamp(payment.created_at)}
                       </p>
@@ -1031,6 +1048,11 @@ export function AdminAvailability() {
                         {session.location || business.location} - {session.paidPlayers}/{session.capacity} players booked -{" "}
                         {isFull ? "full" : `${session.remainingSpots} ${session.remainingSpots === 1 ? "spot" : "spots"} remaining`}
                       </p>
+                      {session.training_focus ? (
+                        <p className="mt-1 text-sm font-black text-electric">
+                          Focus: {getTrainingFocusLabel(session.training_focus)}
+                        </p>
+                      ) : null}
                       <p className="mt-1 text-xs font-black uppercase text-slate-500">Status: {session.status}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">

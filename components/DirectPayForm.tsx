@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { directPaymentOptions, type DirectPaymentOption } from "@/lib/pricing";
+import { getTrainingFocusLabel, trainingFocusOptions, type TrainingFocusValue } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import { waiverSections, waiverVersion } from "@/lib/waiver-content";
 
@@ -13,6 +14,7 @@ type PaymentMethod = "card" | "zelle";
 type DirectPayFields = {
   playerCount: 1 | 2;
   sessionCount: 1 | 2 | 3 | 4 | 5 | 6;
+  trainingFocus: TrainingFocusValue;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
@@ -54,6 +56,7 @@ type DirectPayFieldErrors = Partial<Record<DirectPayErrorKey, string>>;
 const initialFields: DirectPayFields = {
   playerCount: 1,
   sessionCount: 1,
+  trainingFocus: "general_training",
   playerFirstName: "",
   playerLastName: "",
   playerAge: "",
@@ -140,9 +143,10 @@ export function DirectPayForm() {
   const primaryPlayerName = fields.playerFirstName.trim() || "Maddie";
   const secondPlayerName = fields.secondPlayerFirstName.trim() || "Logan";
   const playerMemoNames = fields.playerCount === 2 ? `${primaryPlayerName} + ${secondPlayerName}` : primaryPlayerName;
+  const trainingFocusLabel = getTrainingFocusLabel(fields.trainingFocus);
   const zelleMemoPreview = isSingleSession
-    ? `${playerMemoNames} - Single Session - ${fields.sessionCount} ${fields.sessionCount === 1 ? "Session" : "Sessions"}`
-    : `${playerMemoNames} - ${selectedOption.title}`;
+    ? `${playerMemoNames} - ${trainingFocusLabel} - Single Session - ${fields.sessionCount} ${fields.sessionCount === 1 ? "Session" : "Sessions"}`
+    : `${playerMemoNames} - ${trainingFocusLabel} - ${selectedOption.title}`;
 
   function setField<Key extends keyof DirectPayFields>(field: Key, value: DirectPayFields[Key]) {
     setFields((current) => ({ ...current, [field]: value }));
@@ -338,6 +342,21 @@ export function DirectPayForm() {
           </div>
         </div>
         <div className="mt-5 grid gap-3">
+          <label className="grid gap-2 text-sm font-bold text-navy">
+            Training Focus
+            <select
+              className={inputClass}
+              value={fields.trainingFocus}
+              onChange={(event) => setField("trainingFocus", event.target.value as TrainingFocusValue)}
+            >
+              {trainingFocusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           {paymentCards.map((card) => {
             const isSelected = fields.paymentOption === card.option;
 
@@ -428,16 +447,19 @@ export function DirectPayForm() {
             <p className="font-bold text-navy">Total amount owed: {formatCurrency(totalAmountCents)}</p>
             {isSingleSession ? (
               <>
-                <p>Memo: Player Name(s) + Single Session + Number of Sessions</p>
+                <p>Memo: Player Name(s) + Training Focus + Single Session + Number of Sessions</p>
                 <p>
-                  Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - Single Session -{" "}
-                  {fields.sessionCount} {fields.sessionCount === 1 ? "Session" : "Sessions"}
+                  Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - {trainingFocusLabel} - Single
+                  Session - {fields.sessionCount} {fields.sessionCount === 1 ? "Session" : "Sessions"}
                 </p>
               </>
             ) : (
               <>
-                <p>Memo: Player Name(s) + Payment Option</p>
-                <p>Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - {selectedOption.title}</p>
+                <p>Memo: Player Name(s) + Training Focus + Payment Option</p>
+                <p>
+                  Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - {trainingFocusLabel} -{" "}
+                  {selectedOption.title}
+                </p>
               </>
             )}
             {zelleMemo ? <p className="mt-2 font-black text-navy">Saved memo: {zelleMemo}</p> : null}
@@ -533,6 +555,10 @@ export function DirectPayForm() {
               <p>
                 <span className="block text-xs font-black uppercase text-slate-500">Selected Option</span>
                 <span className="font-black text-navy">{selectedOption.title}</span>
+              </p>
+              <p>
+                <span className="block text-xs font-black uppercase text-slate-500">Training Focus</span>
+                <span className="font-black text-navy">{trainingFocusLabel}</span>
               </p>
               <p>
                 <span className="block text-xs font-black uppercase text-slate-500">Number of Players</span>

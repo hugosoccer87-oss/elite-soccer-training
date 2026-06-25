@@ -4,6 +4,7 @@ create table if not exists public.training_sessions (
   id uuid primary key default gen_random_uuid(),
   training_group text not null check (training_group in ('future-elite', 'elite-performance')),
   title text not null,
+  training_focus text,
   start_datetime timestamptz not null,
   end_datetime timestamptz not null,
   timezone text not null default 'America/Los_Angeles',

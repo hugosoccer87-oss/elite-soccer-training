@@ -24,12 +24,14 @@ export async function PATCH(request: Request, context: RouteContext) {
     capacity?: number;
     location?: string;
     title?: string;
+    training_focus?: string | null;
   } | null;
   const updates: {
     status?: "open" | "closed" | "cancelled";
     capacity?: number;
     location?: string;
     title?: string;
+    training_focus?: string | null;
   } = {};
 
   if (payload?.status && ["open", "closed", "cancelled"].includes(payload.status)) {
@@ -46,6 +48,10 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   if (typeof payload?.title === "string") {
     updates.title = payload.title;
+  }
+
+  if (typeof payload?.training_focus === "string" || payload?.training_focus === null) {
+    updates.training_focus = payload.training_focus;
   }
 
   if (Object.keys(updates).length === 0) {

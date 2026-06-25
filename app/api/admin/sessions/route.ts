@@ -43,6 +43,7 @@ export async function POST(request: Request) {
     trainingGroup?: string;
     date?: string;
     time?: string;
+    trainingFocus?: string;
     capacity?: number;
     location?: string;
   } | null;
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
       trainingGroup: payload.trainingGroup,
       date: payload.date,
       time: payload.time,
+      trainingFocus: payload.trainingFocus === "shooting_finishing" ? payload.trainingFocus : undefined,
       capacity: payload.capacity,
       location: payload.location
     });
