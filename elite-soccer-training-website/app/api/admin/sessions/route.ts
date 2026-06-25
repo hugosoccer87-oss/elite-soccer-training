@@ -1,0 +1,70 @@
+import { NextResponse } from "next/server";
+import { verifyAdminSession } from "@/lib/admin-api";
+import {
+  createTrainingSession,
+  listAdminTrainingSessions
+} from "@/lib/supabase-db";
+import { type TrainingGroupId, trainingGroups } from "@/lib/booking-data";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function isTrainingGroupId(value: string): value is TrainingGroupId {
+  return trainingGroups.some((group) => group.id === value);
+}
+
+export async function GET() {
+  const admin = await verifyAdminSession();
+
+  if (!admin.authenticated) {
+    return NextResponse.json({ error: admin.error }, { status: admin.status });
+  }
+
+  try {
+    const sessions = await listAdminTrainingSessions();
+
+    return NextResponse.json({ status: "Synced", sessions });
+  } catch (error) {
+    return NextResponse.json(
+      { status: "Failed", error: error instanceof Error ? error.message : "Training sessions could not be loaded." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  const admin = await verifyAdminSession();
+
+  if (!admin.authenticated) {
+    return NextResponse.json({ error: admin.error }, { status: admin.status });
+  }
+
+  const payload = (await request.json().catch(() => null)) as {
+    trainingGroup?: string;
+    date?: string;
+    time?: string;
+    capacity?: number;
+    location?: string;
+  } | null;
+
+  if (!payload?.trainingGroup || !isTrainingGroupId(payload.trainingGroup) || !payload.date || !payload.time) {
+    return NextResponse.json({ error: "Training group, date, and start time are required." }, { status: 400 });
+  }
+
+  try {
+    const session = await createTrainingSession({
+      trainingGroup: payload.trainingGroup,
+      date: payload.date,
+      time: payload.time,
+      capacity: payload.capacity,
+      location: payload.location
+    });
+
+    return NextResponse.json({ status: "Created", session: session[0] });
+  } catch (error) {
+    return NextResponse.json(
+      { status: "Failed", error: error instanceof Error ? error.message : "Training session could not be created." },
+      { status: 500 }
+    );
+  }
+}
