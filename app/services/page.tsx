@@ -9,7 +9,7 @@ import { pricingOptions } from "@/lib/pricing";
 
 export const metadata: Metadata = {
   title: "Programs",
-  description: "Small group soccer training programs for 1-6 youth players in the Coachella Valley."
+  description: "Small group soccer training programs and focused finishing sessions for youth players in the Coachella Valley."
 };
 
 export default function ServicesPage() {
@@ -56,7 +56,7 @@ export default function ServicesPage() {
           <SectionHeader
             eyebrow="Session Focus"
             title="Every session has a plan, a tempo, and a clear soccer purpose."
-            description="Younger players build foundation and confidence. Older players train speed of play, intensity, finishing, and game-realistic decision making."
+            description="Younger players build foundation and confidence. Older players train speed of play, intensity, finishing, and game-realistic decision making. Shooting & Finishing sessions add focused attacking repetition for players who want more confidence in front of goal."
           />
           <div className="mt-10 grid gap-5 md:grid-cols-4">
             {["Warm-up + ball mastery", "Technical theme", "Pressure reps", "Finish with game actions"].map((item, index) => (

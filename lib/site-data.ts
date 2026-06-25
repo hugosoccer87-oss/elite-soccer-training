@@ -44,6 +44,23 @@ export const services = [
       "Agility and intensity",
       "Game-realistic development"
     ]
+  },
+  {
+    title: "Shooting & Finishing",
+    eyebrow: "Attacking confidence",
+    description:
+      "Focused attacking sessions designed to help players improve ball striking, finishing technique, movement in the final third, composure in front of goal, and confidence when creating or taking chances.",
+    detail:
+      "Shooting & Finishing sessions are built for players who want more confidence in front of goal. Players will get high-repetition finishing work with coaching detail on technique, movement, timing, and decision-making in attacking moments.",
+    highlights: [
+      "Ball striking technique",
+      "1-touch and 2-touch finishing",
+      "Finishing off the dribble",
+      "Movement before the shot",
+      "Shooting under pressure",
+      "Attacking confidence",
+      "Game-like finishing reps"
+    ]
   }
 ];
 

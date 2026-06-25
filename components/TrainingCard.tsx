@@ -1,10 +1,13 @@
-import { services } from "@/lib/site-data";
-
-type TrainingCardProps = (typeof services)[number] & {
+type TrainingCardProps = {
+  title: string;
+  eyebrow: string;
+  description: string;
+  detail?: string;
+  highlights: string[];
   index: number;
 };
 
-export function TrainingCard({ title, eyebrow, description, highlights, index }: TrainingCardProps) {
+export function TrainingCard({ title, eyebrow, description, detail, highlights, index }: TrainingCardProps) {
   return (
     <article className="panel p-6 sm:p-8">
       <div className="flex items-start justify-between gap-4">
@@ -17,6 +20,7 @@ export function TrainingCard({ title, eyebrow, description, highlights, index }:
         </span>
       </div>
       <p className="mt-4 leading-7 text-slate-600">{description}</p>
+      {detail ? <p className="mt-3 text-sm leading-6 text-slate-600">{detail}</p> : null}
       <ul className="mt-6 grid gap-3">
         {highlights.map((item) => (
           <li key={item} className="flex gap-3 text-sm leading-6 text-slate-700">
