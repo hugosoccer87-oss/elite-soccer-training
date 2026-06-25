@@ -12,6 +12,7 @@ type PaymentMethod = "card" | "zelle";
 
 type DirectPayFields = {
   playerCount: 1 | 2;
+  sessionCount: 1 | 2 | 3 | 4 | 5 | 6;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
@@ -52,6 +53,7 @@ type DirectPayFieldErrors = Partial<Record<DirectPayErrorKey, string>>;
 
 const initialFields: DirectPayFields = {
   playerCount: 1,
+  sessionCount: 1,
   playerFirstName: "",
   playerLastName: "",
   playerAge: "",
@@ -133,10 +135,14 @@ export function DirectPayForm() {
   const [zelleMemo, setZelleMemo] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const selectedOption = directPaymentOptions[fields.paymentOption];
-  const totalAmountCents = selectedOption.amountCents * fields.playerCount;
+  const isSingleSession = fields.paymentOption === "single_session";
+  const totalAmountCents = selectedOption.amountCents * fields.playerCount * (isSingleSession ? fields.sessionCount : 1);
   const primaryPlayerName = fields.playerFirstName.trim() || "Maddie";
   const secondPlayerName = fields.secondPlayerFirstName.trim() || "Logan";
   const playerMemoNames = fields.playerCount === 2 ? `${primaryPlayerName} + ${secondPlayerName}` : primaryPlayerName;
+  const zelleMemoPreview = isSingleSession
+    ? `${playerMemoNames} - Single Session - ${fields.sessionCount} ${fields.sessionCount === 1 ? "Session" : "Sessions"}`
+    : `${playerMemoNames} - ${selectedOption.title}`;
 
   function setField<Key extends keyof DirectPayFields>(field: Key, value: DirectPayFields[Key]) {
     setFields((current) => ({ ...current, [field]: value }));
@@ -286,7 +292,7 @@ export function DirectPayForm() {
       }
 
       setNotice("Your waiver was saved. Zelle payment is pending manual confirmation.");
-      setZelleMemo(result.memo || `${playerMemoNames} - ${selectedOption.title}`);
+      setZelleMemo(result.memo || zelleMemoPreview);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Payment could not be started.");
     } finally {
@@ -363,14 +369,41 @@ export function DirectPayForm() {
           })}
         </div>
 
+        {isSingleSession ? (
+          <div className="mt-5">
+            <p className="text-sm font-black uppercase text-navy">Number of Sessions</p>
+            <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">
+              Choose how many sessions you are paying for.
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {[1, 2, 3, 4, 5, 6].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setField("sessionCount", value as 1 | 2 | 3 | 4 | 5 | 6)}
+                  className={`rounded-lg border p-3 text-center text-sm font-black transition ${
+                    fields.sessionCount === value
+                      ? "border-electric bg-blue-50 text-navy shadow-lg shadow-electric/10"
+                      : "border-slate-200 bg-white text-navy hover:border-electric/60"
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-5 rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-700">
-          <p className="font-black text-navy">How Launch Passes Work</p>
-          <p className="mt-2">
-            Launch Passes let your player prepay for multiple training sessions at a discounted rate. After purchase,
-            credits can be used for future available EST CV sessions until all credits are used or the pass expiration
-            date is reached. Launch Passes are purchased per player. If purchasing for two players, each player receives
-            their own credits.
-          </p>
+          <p className="font-black text-navy">Payment Note</p>
+          {isSingleSession ? (
+            <p className="mt-2">Choose how many sessions you are paying for.</p>
+          ) : (
+            <p className="mt-2">
+              Launch Passes already include multiple training credits. Launch Passes are purchased per player. If
+              purchasing for two players, each player receives their own credits.
+            </p>
+          )}
         </div>
 
         <div className="mt-6">
@@ -406,8 +439,20 @@ export function DirectPayForm() {
               Send payment through Zelle to: <span className="font-black text-navy">3236848024</span>
             </p>
             <p className="font-bold text-navy">Total amount owed: {formatCurrency(totalAmountCents)}</p>
-            <p>Memo: Player Name(s) + Payment Option</p>
-            <p>Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - {selectedOption.title}</p>
+            {isSingleSession ? (
+              <>
+                <p>Memo: Player Name(s) + Single Session + Number of Sessions</p>
+                <p>
+                  Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - Single Session -{" "}
+                  {fields.sessionCount} {fields.sessionCount === 1 ? "Session" : "Sessions"}
+                </p>
+              </>
+            ) : (
+              <>
+                <p>Memo: Player Name(s) + Payment Option</p>
+                <p>Example: {fields.playerCount === 2 ? "Maddie + Logan" : "Maddie"} - {selectedOption.title}</p>
+              </>
+            )}
             {zelleMemo ? <p className="mt-2 font-black text-navy">Saved memo: {zelleMemo}</p> : null}
           </div>
         ) : null}
@@ -506,6 +551,12 @@ export function DirectPayForm() {
                 <span className="block text-xs font-black uppercase text-slate-500">Number of Players</span>
                 <span className="font-black text-navy">{fields.playerCount}</span>
               </p>
+              {isSingleSession ? (
+                <p>
+                  <span className="block text-xs font-black uppercase text-slate-500">Number of Sessions</span>
+                  <span className="font-black text-navy">{fields.sessionCount}</span>
+                </p>
+              ) : null}
               <p>
                 <span className="block text-xs font-black uppercase text-slate-500">Total Amount</span>
                 <span className="font-black text-navy">{formatCurrency(totalAmountCents)}</span>

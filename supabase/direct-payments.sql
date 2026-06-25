@@ -6,6 +6,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.direct_payments (
   id uuid primary key default gen_random_uuid(),
   player_count integer not null default 1 check (player_count in (1, 2)),
+  session_count integer not null default 1 check (session_count between 1 and 6),
   player_first_name text not null,
   player_last_name text not null,
   player_age text not null,
@@ -39,6 +40,9 @@ alter table public.direct_payments
   add column if not exists player_count integer not null default 1;
 
 alter table public.direct_payments
+  add column if not exists session_count integer not null default 1;
+
+alter table public.direct_payments
   add column if not exists second_player_first_name text;
 
 alter table public.direct_payments
@@ -57,6 +61,20 @@ begin
   ) then
     alter table public.direct_payments
       add constraint direct_payments_player_count_check check (player_count in (1, 2));
+  end if;
+end;
+$est$;
+
+do $est$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'direct_payments_session_count_check'
+      and conrelid = 'public.direct_payments'::regclass
+  ) then
+    alter table public.direct_payments
+      add constraint direct_payments_session_count_check check (session_count between 1 and 6);
   end if;
 end;
 $est$;

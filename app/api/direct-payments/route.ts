@@ -30,6 +30,7 @@ function getRequestIpAddress(request: Request) {
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
     playerCount?: number;
+    sessionCount?: number;
     playerFirstName?: string;
     playerLastName?: string;
     playerAge?: string;
@@ -49,6 +50,10 @@ export async function POST(request: Request) {
     medicalNotes?: string;
   } | null;
   const playerCount = payload?.playerCount === 2 ? 2 : 1;
+  const sessionCount =
+    payload?.paymentOption === "single_session" && payload.sessionCount && payload.sessionCount >= 1 && payload.sessionCount <= 6
+      ? Math.floor(payload.sessionCount)
+      : 1;
 
   if (
     !payload?.playerFirstName?.trim() ||
@@ -83,6 +88,7 @@ export async function POST(request: Request) {
     const signedAt = new Date().toISOString();
     const record = await createDirectPaymentRecord({
       playerCount,
+      sessionCount,
       playerFirstName: payload.playerFirstName,
       playerLastName: payload.playerLastName,
       playerAge: payload.playerAge,
@@ -113,12 +119,16 @@ export async function POST(request: Request) {
           ? `${payload.secondPlayerFirstName?.trim() ?? ""} ${payload.secondPlayerLastName?.trim() ?? ""}`.trim()
           : "";
       const playerName = [firstPlayerName, secondPlayerName].filter(Boolean).join(" + ");
+      const memo =
+        payload.paymentOption === "single_session"
+          ? `${playerName} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
+          : `${playerName} - ${option.title}`;
 
       return NextResponse.json({
         status: "zelle_pending",
         directPaymentId: record.id,
         zellePhone,
-        memo: `${playerName} - ${option.title}`,
+        memo,
         amountDue: record.amount_due,
         message: "Zelle payment must be confirmed manually."
       });

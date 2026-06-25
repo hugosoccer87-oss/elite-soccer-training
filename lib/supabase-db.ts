@@ -144,6 +144,7 @@ export type DirectPaymentStatus = "pending_card_payment" | "zelle_pending" | "pa
 export type DirectPaymentRow = {
   id: string;
   player_count: number;
+  session_count: number;
   player_first_name: string;
   player_last_name: string;
   player_age: string;
@@ -189,6 +190,7 @@ export type AdminTrainingSession = TrainingSessionRow & {
 
 export type DirectPaymentInput = {
   playerCount: number;
+  sessionCount: number;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
@@ -634,11 +636,14 @@ export async function listAdminDirectPayments() {
 export async function createDirectPaymentRecord(input: DirectPaymentInput) {
   const option = getDirectPaymentOption(input.paymentOption);
   const playerCount = input.playerCount === 2 ? 2 : 1;
+  const sessionCount =
+    input.paymentOption === "single_session" ? Math.min(6, Math.max(1, Math.floor(input.sessionCount || 1))) : 1;
   const status: DirectPaymentStatus = input.paymentMethod === "card" ? "pending_card_payment" : "zelle_pending";
   const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
     method: "POST",
     body: JSON.stringify({
       player_count: playerCount,
+      session_count: sessionCount,
       player_first_name: input.playerFirstName.trim(),
       player_last_name: input.playerLastName.trim(),
       player_age: input.playerAge.trim(),
@@ -651,7 +656,7 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
       payment_option: input.paymentOption,
       payment_method: input.paymentMethod,
       status,
-      amount_due: option.amountCents * playerCount,
+      amount_due: option.amountCents * playerCount * sessionCount,
       amount_paid: 0,
       waiver_signed: input.waiverSigned,
       typed_signature: input.typedSignature.trim(),
