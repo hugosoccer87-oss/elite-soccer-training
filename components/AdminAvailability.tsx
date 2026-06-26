@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
-import { getTrainingFocusLabel } from "@/lib/session-focus";
+import { isShootingFinishingFocus } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession, DirectPaymentRow, DirectPaymentStatus } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
@@ -92,6 +92,8 @@ type ActiveWaiverRecord = {
   session: AdminTrainingSession;
 };
 
+type SessionFilter = "all" | "regular" | "shooting" | "open" | "closed";
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -172,6 +174,40 @@ function directPaymentOptionLabel(option: string) {
 
 function directPaymentMethodLabel(method: string) {
   return method === "zelle" ? "Zelle" : "Card";
+}
+
+function sessionTypeLabel(session: Pick<AdminTrainingSession, "training_focus">) {
+  return isShootingFinishingFocus(session.training_focus) ? "Shooting & Finishing" : "Regular Training";
+}
+
+function sessionTypeBadgeClass(session: Pick<AdminTrainingSession, "training_focus">) {
+  return isShootingFinishingFocus(session.training_focus)
+    ? "border-electric/30 bg-blue-50 text-electric"
+    : "border-slate-200 bg-white text-slate-700";
+}
+
+function statusBadgeClass(status: string) {
+  if (status === "open") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "cancelled") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
+function endTimeFromStartInput(value: string) {
+  const [hours, minutes] = value.split(":").map((part) => Number(part));
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return "";
+  }
+
+  const endHours = (hours + 1) % 24;
+
+  return `${String(endHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function paymentStatusLabel(status: string) {
@@ -366,6 +402,10 @@ export function AdminAvailability() {
   const [isSaving, setIsSaving] = useState(false);
   const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null);
   const [activeWaiverRecord, setActiveWaiverRecord] = useState<ActiveWaiverRecord | null>(null);
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>("all");
+  const [sessionDateFilter, setSessionDateFilter] = useState("");
+  const [expandedSessionId, setExpandedSessionId] = useState("");
+  const [actionsSessionId, setActionsSessionId] = useState("");
 
   async function refreshAdminData(message?: string) {
     try {
@@ -418,6 +458,21 @@ export function AdminAvailability() {
       zellePending: directPayments.filter((payment) => payment.status === "zelle_pending").length
     }),
     [directPayments]
+  );
+  const filteredSessions = useMemo(
+    () =>
+      sessions.filter((session) => {
+        const matchesType =
+          sessionFilter === "all" ||
+          (sessionFilter === "regular" && !isShootingFinishingFocus(session.training_focus)) ||
+          (sessionFilter === "shooting" && isShootingFinishingFocus(session.training_focus)) ||
+          (sessionFilter === "open" && session.status === "open") ||
+          (sessionFilter === "closed" && session.status !== "open");
+        const matchesDate = !sessionDateFilter || formatDateOnly(session.start_datetime, session.timezone) === sessionDateFilter;
+
+        return matchesType && matchesDate;
+      }),
+    [sessionDateFilter, sessionFilter, sessions]
   );
 
   async function addSession() {
@@ -733,6 +788,10 @@ export function AdminAvailability() {
               <input className={inputClass} type="time" value={newTime} onChange={(event) => setNewTime(event.target.value)} />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
+              End Time
+              <input className={inputClass} type="time" value={endTimeFromStartInput(newTime)} readOnly />
+            </label>
+            <label className="grid gap-2 text-sm font-bold text-navy">
               Capacity
               <input
                 className={inputClass}
@@ -742,10 +801,6 @@ export function AdminAvailability() {
                 value={newCapacity}
                 onChange={(event) => setNewCapacity(event.target.value)}
               />
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Duration
-              <input className={inputClass} type="number" min="60" max="60" value="60" readOnly />
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
               Location
@@ -1018,71 +1073,190 @@ export function AdminAvailability() {
       </section>
 
       <section className="panel overflow-hidden">
-        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+        <div className="grid gap-5 border-b border-slate-200 p-5 sm:p-6">
           <div>
             <h3 className="text-xl font-black text-navy">Supabase Sessions</h3>
             <p className="mt-2 text-sm text-slate-600">
               These are the only sessions that can appear on the public booking page.
             </p>
           </div>
-          <button type="button" onClick={() => void refreshAdminData("Sessions refreshed.")} className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black text-navy">
-            Refresh
-          </button>
+          <div className="grid gap-3 xl:grid-cols-[1fr_auto] xl:items-end">
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["all", "All Sessions"],
+                ["regular", "Regular Training"],
+                ["shooting", "Shooting & Finishing"],
+                ["open", "Open"],
+                ["closed", "Closed/Cancelled"]
+              ].map(([value, label]) => {
+                const isActive = sessionFilter === value;
+
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setSessionFilter(value as SessionFilter)}
+                    className={`rounded-md border px-4 py-2 text-xs font-black uppercase transition ${
+                      isActive
+                        ? "border-navy bg-navy text-white"
+                        : "border-slate-300 bg-white text-navy hover:border-electric hover:text-electric"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[minmax(14rem,1fr)_auto_auto] sm:items-end">
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Filter by date
+                <input
+                  className={inputClass}
+                  type="date"
+                  value={sessionDateFilter}
+                  onChange={(event) => setSessionDateFilter(event.target.value)}
+                />
+              </label>
+              {sessionDateFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setSessionDateFilter("")}
+                  className="rounded-md border border-slate-300 px-4 py-3 text-xs font-black uppercase text-navy"
+                >
+                  Clear Date
+                </button>
+              ) : null}
+              <button type="button" onClick={() => void refreshAdminData("Sessions refreshed.")} className="rounded-md border border-slate-300 px-4 py-3 text-xs font-black uppercase text-navy">
+                Refresh
+              </button>
+            </div>
+          </div>
         </div>
         {sessions.length > 0 ? (
-          <div className="grid divide-y divide-slate-200">
-            {sessions.map((session) => {
+          <div className="grid gap-4 bg-mist p-4 sm:p-6">
+            {filteredSessions.map((session) => {
               const group = trainingGroups.find((item) => item.id === session.training_group);
               const isFull = session.remainingSpots <= 0;
+              const detailsOpen = expandedSessionId === session.id;
+              const actionsOpen = actionsSessionId === session.id;
+              const paidBookingNames = session.paidBookings.map((booking) => booking.player_name).join(", ");
 
               return (
-                <article key={session.id} className="grid gap-5 p-5">
-                  <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
-                    <div>
-                      <p className="text-xs font-black uppercase text-electric">
-                        {group?.name ?? session.title} {group ? `(${group.ages})` : ""}
-                      </p>
-                      <h4 className="mt-1 text-lg font-black text-navy">
-                        {formatDateTime(session.start_datetime, session.timezone)}
-                      </h4>
-                      <p className="mt-1 text-sm text-slate-600">
-                        {session.location || business.location} - {session.paidPlayers}/{session.capacity} players booked -{" "}
-                        {isFull ? "full" : `${session.remainingSpots} ${session.remainingSpots === 1 ? "spot" : "spots"} remaining`}
-                      </p>
-                      <p className="mt-1 text-sm font-black text-electric">
-                        Session type: {getTrainingFocusLabel(session.training_focus)}
-                      </p>
-                      <p className="mt-1 text-xs font-black uppercase text-slate-500">Status: {session.status}</p>
+                <article key={session.id} className="grid gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
+                    <div className="grid gap-4">
+                      <div className="flex flex-wrap gap-2">
+                        <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${sessionTypeBadgeClass(session)}`}>
+                          {sessionTypeLabel(session)}
+                        </span>
+                        <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(session.status)}`}>
+                          {session.status}
+                        </span>
+                        {isFull ? (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-black uppercase text-amber-700">
+                            Full
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-black uppercase text-electric">
+                          {group?.name ?? session.title} {group ? `(${group.ages})` : ""}
+                        </p>
+                        <h4 className="mt-1 text-2xl font-black text-navy">
+                          {formatDateTime(session.start_datetime, session.timezone)}
+                        </h4>
+                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+                          {session.location || business.location}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                          <p className="text-xl font-black text-navy">{session.capacity}</p>
+                          <p className="text-[10px] font-black uppercase text-slate-500">Capacity</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                          <p className="text-xl font-black text-navy">{session.paidPlayers}</p>
+                          <p className="text-[10px] font-black uppercase text-slate-500">Booked</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                          <p className="text-xl font-black text-navy">{session.remainingSpots}</p>
+                          <p className="text-[10px] font-black uppercase text-slate-500">Remaining</p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-600">
+                        <span className="font-black text-navy">Paid bookings:</span>{" "}
+                        {session.paidBookings.length > 0 ? paidBookingNames : "None yet"}
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => void updateSession(session.id, { status: "open" })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                        Open
+                    <div className="flex flex-col gap-2 sm:flex-row xl:flex-col">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedSessionId(detailsOpen ? "" : session.id)}
+                        className="rounded-md bg-navy px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-electric"
+                      >
+                        {detailsOpen ? "Hide Details" : "View Details"}
                       </button>
-                      <button type="button" onClick={() => void updateSession(session.id, { status: "closed" })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                        Close
-                      </button>
-                      <button type="button" onClick={() => void updateSession(session.id, { status: "cancelled" })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                        Cancel
-                      </button>
-                      <button type="button" onClick={() => editCapacity(session)} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                        Capacity
-                      </button>
-                      <button type="button" onClick={() => editLocation(session)} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                        Location
-                      </button>
-                      <button type="button" onClick={() => void updateSession(session.id, { training_focus: null })} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-black text-navy">
-                        Set Regular
-                      </button>
-                      <button type="button" onClick={() => void updateSession(session.id, { training_focus: "shooting_finishing" })} className="rounded-md border border-electric/30 px-3 py-2 text-xs font-black text-electric">
-                        Set Shooting
-                      </button>
-                      <button type="button" onClick={() => void removeSession(session.id)} className="rounded-md border border-red-200 px-3 py-2 text-xs font-black text-red-700">
-                        Delete
+                      <button
+                        type="button"
+                        onClick={() => setActionsSessionId(actionsOpen ? "" : session.id)}
+                        className="rounded-md border border-slate-300 px-4 py-3 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
+                      >
+                        {actionsOpen ? "Close Actions" : "Edit Session"}
                       </button>
                     </div>
                   </div>
 
-                  {session.paidBookings.length > 0 ? (
+                  {actionsOpen ? (
+                    <div className="grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-4">
+                      <div>
+                        <p className="text-xs font-black uppercase text-slate-500">Status</p>
+                        <div className="mt-3 grid gap-2">
+                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "open" })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
+                            Open
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "closed" })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
+                            Close
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "cancelled" })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black uppercase text-slate-500">Session Type</p>
+                        <div className="mt-3 grid gap-2">
+                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: null })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
+                            Set Regular
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: "shooting_finishing" })} className="rounded-md border border-electric/30 bg-white px-3 py-2 text-xs font-black text-electric disabled:cursor-not-allowed disabled:opacity-60">
+                            Set Shooting & Finishing
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black uppercase text-slate-500">Edit</p>
+                        <div className="mt-3 grid gap-2">
+                          <button type="button" disabled={isSaving} onClick={() => editCapacity(session)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
+                            Update Capacity
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => editLocation(session)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
+                            Update Location
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black uppercase text-red-700">Danger</p>
+                        <button type="button" disabled={isSaving} onClick={() => void removeSession(session.id)} className="mt-3 w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 disabled:cursor-not-allowed disabled:opacity-60">
+                          Delete Session
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {detailsOpen && session.paidBookings.length > 0 ? (
                     <div className="rounded-lg border border-slate-200 bg-mist p-4">
                       <p className="text-xs font-black uppercase text-electric">Paid Bookings</p>
                       <div className="mt-3 grid gap-4">
@@ -1164,14 +1338,19 @@ export function AdminAvailability() {
                         ))}
                       </div>
                     </div>
-                  ) : (
+                  ) : detailsOpen ? (
                     <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
                       No paid bookings for this session yet.
                     </p>
-                  )}
+                  ) : null}
                 </article>
               );
             })}
+            {filteredSessions.length === 0 ? (
+              <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm font-bold text-slate-600">
+                No sessions match the current filters.
+              </p>
+            ) : null}
           </div>
         ) : (
           <div className="p-5 sm:p-6">
