@@ -667,9 +667,8 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
   const sessionCount =
     input.paymentOption === "single_session" ? Math.min(6, Math.max(1, Math.floor(input.sessionCount || 1))) : 1;
   const status: DirectPaymentStatus = input.paymentMethod === "card" ? "pending_card_payment" : "zelle_pending";
-  const basePayload = {
+  const basePayload: Record<string, unknown> = {
     player_count: playerCount,
-    session_count: sessionCount,
     player_first_name: input.playerFirstName.trim(),
     player_last_name: input.playerLastName.trim(),
     player_age: input.playerAge.trim(),
@@ -694,6 +693,11 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
     medical_notes: input.medicalNotes.trim(),
     ip_address: input.ipAddress || null
   };
+
+  if (input.paymentOption === "single_session") {
+    basePayload.session_count = sessionCount;
+  }
+
   const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
     method: "POST",
     body: JSON.stringify(basePayload)
