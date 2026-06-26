@@ -3,7 +3,7 @@
 -- Safe pattern:
 --
 -- update public.training_sessions
--- set training_focus = 'shooting_finishing'
+-- set training_focus = 'Shooting & Finishing'
 -- where id = '00000000-0000-0000-0000-000000000000';
 --
 -- To remove the label from a session later:

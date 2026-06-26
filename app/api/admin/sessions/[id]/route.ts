@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyAdminSession } from "@/lib/admin-api";
 import { deleteTrainingSession, updateTrainingSession } from "@/lib/supabase-db";
+import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,7 +52,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   if (typeof payload?.training_focus === "string" || payload?.training_focus === null) {
-    updates.training_focus = payload.training_focus;
+    updates.training_focus = normalizeTrainingFocusForStorage(payload.training_focus);
   }
 
   if (Object.keys(updates).length === 0) {

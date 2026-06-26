@@ -13,7 +13,7 @@ import {
   type DirectPaymentOption,
   type LaunchPassType
 } from "@/lib/pricing";
-import { getTrainingFocusDisplay } from "@/lib/session-focus";
+import { getTrainingFocusDisplay, normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { PublicAvailableSession, PublicAvailabilityDebugResponse, PublicAvailabilityResponse } from "@/lib/public-availability";
 
@@ -583,8 +583,10 @@ export async function createTrainingSession(input: {
     status: input.status || "open"
   };
 
-  if (input.trainingFocus) {
-    payload.training_focus = input.trainingFocus;
+  const normalizedTrainingFocus = normalizeTrainingFocusForStorage(input.trainingFocus);
+
+  if (normalizedTrainingFocus) {
+    payload.training_focus = normalizedTrainingFocus;
   }
 
   return supabaseRequest<TrainingSessionRow[]>("training_sessions", {

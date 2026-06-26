@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
-import { isShootingFinishingFocus } from "@/lib/session-focus";
+import { isShootingFinishingFocus, shootingFinishingTrainingFocusValue } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession, DirectPaymentRow, DirectPaymentStatus } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
@@ -495,7 +495,7 @@ export function AdminAvailability() {
           trainingGroup: newGroupId,
           date: newDate,
           time: newTime,
-          trainingFocus: newTrainingFocus === "shooting_finishing" ? newTrainingFocus : undefined,
+          trainingFocus: newTrainingFocus === shootingFinishingTrainingFocusValue ? shootingFinishingTrainingFocusValue : null,
           capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
           location: newLocation
         })
@@ -776,7 +776,7 @@ export function AdminAvailability() {
               Session Type
               <select className={inputClass} value={newTrainingFocus} onChange={(event) => setNewTrainingFocus(event.target.value)}>
                 <option value="regular">Regular Training</option>
-                <option value="shooting_finishing">Shooting & Finishing</option>
+                <option value={shootingFinishingTrainingFocusValue}>Shooting & Finishing</option>
               </select>
             </label>
             <label className="grid gap-2 text-sm font-bold text-navy">
@@ -1231,7 +1231,7 @@ export function AdminAvailability() {
                           <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: null })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
                             Set Regular
                           </button>
-                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: "shooting_finishing" })} className="rounded-md border border-electric/30 bg-white px-3 py-2 text-xs font-black text-electric disabled:cursor-not-allowed disabled:opacity-60">
+                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: shootingFinishingTrainingFocusValue })} className="rounded-md border border-electric/30 bg-white px-3 py-2 text-xs font-black text-electric disabled:cursor-not-allowed disabled:opacity-60">
                             Set Shooting & Finishing
                           </button>
                         </div>

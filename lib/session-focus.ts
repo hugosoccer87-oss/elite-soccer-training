@@ -1,4 +1,6 @@
-export type TrainingFocusValue = "regular" | "general_training" | "shooting_finishing";
+export const shootingFinishingTrainingFocusValue = "Shooting & Finishing";
+
+export type TrainingFocusValue = "regular" | "general_training" | "shooting_finishing" | typeof shootingFinishingTrainingFocusValue;
 
 export type TrainingFocusDisplay = {
   value: string;
@@ -12,7 +14,7 @@ export const trainingFocusOptions: Array<{
 }> = [
   { value: "regular", label: "Regular Training" },
   { value: "general_training", label: "General Training" },
-  { value: "shooting_finishing", label: "Shooting & Finishing" }
+  { value: shootingFinishingTrainingFocusValue, label: "Shooting & Finishing" }
 ];
 
 function normalizedFocus(value: string | null | undefined) {
@@ -39,6 +41,20 @@ export function isRegularTrainingFocus(value: string | null | undefined) {
     normalized === "general" ||
     normalized === "general_training"
   );
+}
+
+export function normalizeTrainingFocusForStorage(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed || isRegularTrainingFocus(trimmed)) {
+    return null;
+  }
+
+  if (isShootingFinishingFocus(trimmed)) {
+    return shootingFinishingTrainingFocusValue;
+  }
+
+  return trimmed;
 }
 
 export function getTrainingFocusLabel(value: string | null | undefined) {

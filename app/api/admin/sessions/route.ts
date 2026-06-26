@@ -5,6 +5,7 @@ import {
   listAdminTrainingSessions
 } from "@/lib/supabase-db";
 import { type TrainingGroupId, trainingGroups } from "@/lib/booking-data";
+import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     trainingGroup?: string;
     date?: string;
     time?: string;
-    trainingFocus?: string;
+    trainingFocus?: string | null;
     capacity?: number;
     location?: string;
   } | null;
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
       trainingGroup: payload.trainingGroup,
       date: payload.date,
       time: payload.time,
-      trainingFocus: payload.trainingFocus === "shooting_finishing" ? payload.trainingFocus : undefined,
+      trainingFocus: normalizeTrainingFocusForStorage(payload.trainingFocus) ?? undefined,
       capacity: payload.capacity,
       location: payload.location
     });

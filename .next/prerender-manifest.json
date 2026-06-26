@@ -26,7 +26,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/booking/cancel": {
+    "/admin": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -39,8 +39,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/booking/cancel",
-      "dataRoute": "/booking/cancel.rsc",
+      "srcRoute": "/admin",
+      "dataRoute": "/admin.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -74,7 +74,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/about": {
+    "/payment": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -87,56 +87,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/about",
-      "dataRoute": "/about.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
-    "/contact": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "next-action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/contact",
-      "dataRoute": "/contact.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
-    "/waiver": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "next-action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/waiver",
-      "dataRoute": "/waiver.rsc",
+      "srcRoute": "/payment",
+      "dataRoute": "/payment.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -170,7 +122,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/payment": {
+    "/waiver": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -183,8 +135,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/payment",
-      "dataRoute": "/payment.rsc",
+      "srcRoute": "/waiver",
+      "dataRoute": "/waiver.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -194,7 +146,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/pay": {
+    "/booking/cancel": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -207,8 +159,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/pay",
-      "dataRoute": "/pay.rsc",
+      "srcRoute": "/booking/cancel",
+      "dataRoute": "/booking/cancel.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -218,7 +170,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/admin": {
+    "/about": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -231,8 +183,32 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/admin",
-      "dataRoute": "/admin.rsc",
+      "srcRoute": "/about",
+      "dataRoute": "/about.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/pay/cancel": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/pay/cancel",
+      "dataRoute": "/pay/cancel.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -266,6 +242,30 @@
         "x-next-revalidate-tag-token"
       ]
     },
+    "/pay": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/pay",
+      "dataRoute": "/pay.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
     "/reviews": {
       "experimentalBypassFor": [
         {
@@ -290,7 +290,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/pay/cancel": {
+    "/contact": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -303,8 +303,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/pay/cancel",
-      "dataRoute": "/pay/cancel.rsc",
+      "srcRoute": "/contact",
+      "dataRoute": "/contact.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
