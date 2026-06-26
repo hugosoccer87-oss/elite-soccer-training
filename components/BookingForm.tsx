@@ -31,7 +31,6 @@ import {
   sessionPriceLabel,
   type LaunchPassType
 } from "@/lib/pricing";
-import { isShootingFinishingFocus } from "@/lib/session-focus";
 import { waiverSections, waiverVersion } from "@/lib/waiver-content";
 
 const inputClass =
@@ -39,9 +38,10 @@ const inputClass =
 
 const publicStepLabels = ["Choose Your Training Session", "Athlete Information", "Parent Waiver + Secure Payment"];
 const specialTrainingRequestValue = "special-training-request";
+const activeBookingGroupId: TrainingGroupId = "elite-performance";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
-type BookingOption = "single_session" | "shooting_finishing" | LaunchPassType | "use_existing_pass";
+type BookingOption = "single_session" | LaunchPassType | "use_existing_pass";
 type LaunchPassUseMode = "choose_now" | "choose_later";
 
 type BookingFields = {
@@ -289,16 +289,12 @@ function spotsLabel(count: number) {
   return `${count} ${count === 1 ? "spot" : "spots"} remaining`;
 }
 
-function isShootingFinishingSession(slot: PublicAvailableSession) {
-  return isShootingFinishingFocus(slot.trainingFocusValue ?? slot.trainingFocus);
+function sessionFocusTitle(slot: Pick<PublicAvailableSession, "trainingFocus">) {
+  return slot.trainingFocus || "General Training";
 }
 
-function sessionFocusTitle(slot: PublicAvailableSession) {
-  if (isShootingFinishingSession(slot)) {
-    return "Shooting & Finishing Session";
-  }
-
-  return slot.trainingFocus;
+function sessionTimeRange(slot: PublicAvailableSession) {
+  return `${slot.startTime}-${slot.endTime}`;
 }
 
 function isValidEmailAddress(value: string) {
@@ -370,7 +366,7 @@ function bookingOptionFromTypeParam(value: string | null): BookingOption | null 
   }
 
   if (normalized === "shooting-finishing") {
-    return "shooting_finishing";
+    return "single_session";
   }
 
   if (normalized === "4-pass") {
@@ -405,7 +401,7 @@ export function BookingForm() {
     parentPhone: "",
     playerName: "",
     playerAge: "",
-    trainingGroup: trainingGroups[0].id
+    trainingGroup: activeBookingGroupId
   });
   const [passLookupFields, setPassLookupFields] = useState<PassLookupFields>({
     parentEmail: "",
@@ -475,26 +471,8 @@ export function BookingForm() {
   }, []);
 
   const availableSessions = useMemo(
-    () => {
-      const groupFilteredSessions = selectedGroupId
-        ? apiSessions.filter((session) => session.trainingGroupId === selectedGroupId)
-        : apiSessions;
-
-      return groupFilteredSessions.filter((session) => {
-        const isShootingSession = isShootingFinishingSession(session);
-
-        if (bookingOption === "shooting_finishing") {
-          return isShootingSession;
-        }
-
-        if (bookingOption === "single_session") {
-          return !isShootingSession;
-        }
-
-        return true;
-      });
-    },
-    [apiSessions, bookingOption, selectedGroupId]
+    () => apiSessions.filter((session) => session.trainingGroupId === activeBookingGroupId),
+    [apiSessions]
   );
   const sessionsByDate = useMemo(
     () =>
@@ -514,8 +492,8 @@ export function BookingForm() {
     bookingOption === "four_session_launch_pass" || bookingOption === "six_session_launch_pass";
   const selectedLaunchPassOption = isPassPurchaseOption ? getLaunchPassOption(bookingOption as LaunchPassType) : null;
   const passPurchaseAvailableSessions = useMemo(
-    () => apiSessions.filter((session) => session.trainingGroupId === passPurchaseFields.trainingGroup),
-    [apiSessions, passPurchaseFields.trainingGroup]
+    () => apiSessions.filter((session) => session.trainingGroupId === activeBookingGroupId),
+    [apiSessions]
   );
   const selectedPassSessions = useMemo(
     () =>
@@ -571,14 +549,14 @@ export function BookingForm() {
         .filter((sessionId) => {
           const session = apiSessions.find((item) => item.id === sessionId);
 
-          return session?.trainingGroupId === passPurchaseFields.trainingGroup;
+          return session?.trainingGroupId === activeBookingGroupId;
         })
         .slice(0, selectedPassCreditLimit || current.length)
     );
-  }, [apiSessions, isPassPurchaseOption, passPurchaseFields.trainingGroup, selectedPassCreditLimit]);
+  }, [apiSessions, isPassPurchaseOption, selectedPassCreditLimit]);
 
   const selectedSlot = availableSessions.find((slot) => slot.id === selectedSlotId);
-  const selectedGroup = selectedGroupId ? getTrainingGroup(selectedGroupId) : null;
+  const selectedGroup = getTrainingGroup(activeBookingGroupId);
   const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.trainingGroupId) : selectedGroup;
   const displaySlot = selectedSlot;
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
@@ -589,10 +567,7 @@ export function BookingForm() {
     ? [1]
     : Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = usesExistingPass ? "Launch Pass credit" : formatCurrencyFromCents(getSessionTotalCents(fields.players));
-  const paidSessionSummaryLabel =
-    bookingOption === "shooting_finishing"
-      ? "Elite Soccer Training CV - Shooting & Finishing"
-      : "Elite Soccer Training CV - Single Session";
+  const paidSessionSummaryLabel = "Elite Soccer Training CV - Single Session";
 
   function clearFieldError(field: BookingFieldErrorKey) {
     setFieldErrors((current) => {
@@ -672,7 +647,7 @@ export function BookingForm() {
     setSelectedPassSessionIds([]);
     setError("");
 
-    if (option === "single_session" || option === "shooting_finishing") {
+    if (option === "single_session") {
       setSelectedPassId("");
       setFoundPasses([]);
       return;
@@ -684,7 +659,7 @@ export function BookingForm() {
       return;
     }
 
-    setSelectedGroupId("");
+    setSelectedGroupId(activeBookingGroupId);
     setLaunchPassUseMode("choose_later");
   }
 
@@ -993,7 +968,7 @@ export function BookingForm() {
       waiverVersion,
       mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined",
       programId: slot.trainingGroupId,
-      programName: slot.trainingGroup,
+      programName: `${sessionFocusTitle(slot)} - ${slot.trainingGroup}`,
       sessionId: slot.id,
       sessionDateIso: slot.date,
       sessionDate: slot.dateLabel,
@@ -1019,16 +994,9 @@ export function BookingForm() {
     const latestAvailability = await readAvailableSessions();
     const latestSlot = latestAvailability?.sessions.find((slot) => slot.id === selectedSlot.id);
     const latestRemainingSpots = latestSlot?.remainingSpots ?? 0;
-    const latestSlotMatchesBookingOption = latestSlot
-      ? bookingOption === "shooting_finishing"
-        ? isShootingFinishingSession(latestSlot)
-        : !isShootingFinishingSession(latestSlot)
-      : false;
-
     if (
       !latestSlot ||
-      !latestSlotMatchesBookingOption ||
-      latestSlot.trainingGroupId !== selectedSlot.trainingGroupId ||
+      latestSlot.trainingGroupId !== activeBookingGroupId ||
       !Number.isInteger(requestedPlayers) ||
       requestedPlayers < 1 ||
       requestedPlayers > latestRemainingSpots
@@ -1119,7 +1087,7 @@ export function BookingForm() {
               <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
                 <p className="font-black text-white">Selected Session</p>
                 <p className="mt-1 text-slate-200">
-                  {displaySlot.dateLabel} at {displaySlot.startTime}
+                  {displaySlot.dateLabel} at {sessionTimeRange(displaySlot)}
                 </p>
                 <p className="mt-1 text-slate-300">{displaySlot.duration}</p>
                 <p className="mt-2 text-xs font-bold uppercase text-electric">{groupSizeMessage}</p>
@@ -1150,19 +1118,17 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Choose a single session, Shooting & Finishing session, purchase a June Launch Pass, or book with existing Launch Pass credits.
+                Choose a single session, purchase a June Launch Pass, or book with existing Launch Pass credits.
               </p>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-lg border border-electric/20 bg-blue-50 p-4 text-sm font-bold leading-6 text-navy">
+              Current sessions are focused on Elite Performance players ages 13-18.
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {[
                 ["single_session", "Single Session", "$55", "Book online"],
-                [
-                  "shooting_finishing",
-                  "Shooting & Finishing",
-                  "$55",
-                  "Focused attacking reps"
-                ],
                 [
                   "four_session_launch_pass",
                   "4-Session Launch Pass",
@@ -1231,14 +1197,8 @@ export function BookingForm() {
                     <input className={inputClass} inputMode="numeric" value={passPurchaseFields.playerAge} onChange={(event) => setPassPurchaseField("playerAge", event.target.value)} />
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
-                    Preferred Training Group
-                    <select className={inputClass} value={passPurchaseFields.trainingGroup} onChange={(event) => setPassPurchaseField("trainingGroup", event.target.value as TrainingGroupId)}>
-                      {trainingGroups.map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name}: {group.ages}
-                        </option>
-                      ))}
-                    </select>
+                    Training Group
+                    <input className={inputClass} value={`${selectedGroup.name}: ${selectedGroup.ages}`} readOnly />
                   </label>
                 </div>
                 <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
@@ -1306,26 +1266,24 @@ export function BookingForm() {
                               <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
                                 {slot.dayLabel}, {slot.dateLabel}
                               </span>
-                              <span className="mt-1 block text-2xl font-black">{slot.startTime}</span>
+                              <span className="mt-1 block text-2xl font-black">{sessionTimeRange(slot)}</span>
                               <span className="mt-2 block text-sm font-bold opacity-90">
                                 {slot.trainingGroup}: {slot.trainingGroupAges}
                               </span>
-                              {slot.trainingFocus ? (
-                                <span
-                                  className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
-                                    isSelected
-                                      ? "border-white/20 bg-white/10 text-white"
-                                      : "border-electric/20 bg-blue-50 text-electric"
-                                  }`}
-                                >
-                                  {sessionFocusTitle(slot)}
-                                  {slot.trainingFocusDescription ? (
-                                    <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
-                                      {slot.trainingFocusDescription}
-                                    </span>
-                                  ) : null}
-                                </span>
-                              ) : null}
+                              <span
+                                className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
+                                  isSelected
+                                    ? "border-white/20 bg-white/10 text-white"
+                                    : "border-electric/20 bg-blue-50 text-electric"
+                                }`}
+                              >
+                                {sessionFocusTitle(slot)}
+                                {slot.trainingFocusDescription ? (
+                                  <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
+                                    {slot.trainingFocusDescription}
+                                  </span>
+                                ) : null}
+                              </span>
                               <span className="mt-1 block text-sm font-semibold opacity-80">
                                 {sessionLocationLines(slot.location).map((line) => (
                                   <span key={line} className="block">{line}</span>
@@ -1351,7 +1309,7 @@ export function BookingForm() {
                         <div className="mt-3 grid gap-1 font-semibold">
                           {selectedPassSessions.map((slot) => (
                             <p key={slot.id}>
-                              {slot.dateLabel} at {slot.startTime} - {slot.trainingGroup}
+                              {slot.dateLabel} at {sessionTimeRange(slot)} - {sessionFocusTitle(slot)}
                             </p>
                           ))}
                         </div>
@@ -1518,43 +1476,34 @@ export function BookingForm() {
               </div>
             ) : (
               <>
-                <label className="grid gap-2 text-sm font-bold text-navy">
-                  Select Training Group
-                  <select
-                    className={inputClass}
-                    value={isSpecialRequest ? specialTrainingRequestValue : selectedGroupId}
-                    onChange={(event) => selectTrainingGroup(event.target.value)}
-                  >
-                    <option value="">All Available Training Groups</option>
-                    {trainingGroups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}: {group.ages}
-                      </option>
+                <div className="rounded-lg border border-slate-200 bg-mist p-5">
+                  <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
+                  <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+                  <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-2">
+                    {selectedGroup.focus.map((item) => (
+                      <p key={item}>{item}</p>
                     ))}
-                    <option value={specialTrainingRequestValue}>Special Training Request</option>
-                  </select>
-                </label>
-                {selectedGroup ? (
-                  <div className="rounded-lg border border-slate-200 bg-mist p-5">
-                    <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
-                    <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
-                    <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-2">
-                      {selectedGroup.focus.map((item) => (
-                        <p key={item}>{item}</p>
-                      ))}
-                    </div>
                   </div>
-                ) : (
-                  <div className="rounded-lg border border-slate-200 bg-mist p-5">
-                    <p className="text-xs font-black uppercase text-electric">Available Sessions</p>
-                    <h4 className="mt-2 text-2xl font-black text-navy">Choose from open training times</h4>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      View all open Future Elite and Elite Performance sessions, or select a group above to narrow the schedule.
-                    </p>
-                    <p className="mt-3 text-sm font-bold text-slate-700">{groupSizeMessage}</p>
-                  </div>
-                )}
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white p-5">
+                  <h4 className="text-xl font-black text-navy">Need a different time, date, or session focus?</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Submit a special training request and Coach Hugo will do his best to make something work.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSpecialRequest(true);
+                      setSelectedSlotId("");
+                      setError("");
+                    }}
+                    className="mt-4 rounded-md border border-electric px-5 py-3 text-xs font-black uppercase text-electric transition hover:bg-electric hover:text-white"
+                  >
+                    Request a Session
+                  </button>
+                </div>
 
                 <button
                   type="button"
@@ -1599,7 +1548,7 @@ export function BookingForm() {
                     availabilityDebug?.loadedSessions.map((slot) => (
                       <p key={slot.id}>
                         {slot.id} / {slot.date} / {slot.time} / {slot.trainingGroup} / {slot.remainingSpots} spots /{" "}
-                        {slot.trainingFocus ? `${slot.trainingFocus} / ` : ""}
+                        {sessionFocusTitle(slot)} /{" "}
                         {slot.included ? "included" : `removed: ${slot.removedReasons.join(", ")}`}
                       </p>
                     ))
@@ -1706,26 +1655,24 @@ export function BookingForm() {
                             <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
                               {slot.dayLabel}, {slot.dateLabel}
                             </span>
-                            <span className="mt-1 block text-2xl font-black">{slot.startTime}</span>
+                            <span className="mt-1 block text-2xl font-black">{sessionTimeRange(slot)}</span>
                             <span className="mt-2 block text-sm font-bold opacity-90">
                               {slot.trainingGroup}: {slot.trainingGroupAges}
                             </span>
-                            {slot.trainingFocus ? (
-                              <span
-                                className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
-                                  isSelected
-                                    ? "border-white/20 bg-white/10 text-white"
-                                    : "border-electric/20 bg-blue-50 text-electric"
-                                }`}
-                              >
-                                {sessionFocusTitle(slot)}
-                                {slot.trainingFocusDescription ? (
-                                  <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
-                                    {slot.trainingFocusDescription}
-                                  </span>
-                                ) : null}
-                              </span>
-                            ) : null}
+                            <span
+                              className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
+                                isSelected
+                                  ? "border-white/20 bg-white/10 text-white"
+                                  : "border-electric/20 bg-blue-50 text-electric"
+                              }`}
+                            >
+                              {sessionFocusTitle(slot)}
+                              {slot.trainingFocusDescription ? (
+                                <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
+                                  {slot.trainingFocusDescription}
+                                </span>
+                              ) : null}
+                            </span>
                             <span className="mt-1 block text-sm font-semibold opacity-80">
                               {sessionLocationLines(slot.location).map((line) => (
                                 <span key={line} className="block">{line}</span>
@@ -1739,7 +1686,7 @@ export function BookingForm() {
                               isSelected ? "bg-electric text-white" : "bg-mist text-navy"
                             }`}
                           >
-                            {isSelected ? "Selected" : "Select Session"}
+                            {isSelected ? "Selected" : "Book Session"}
                           </span>
                         </div>
                       </button>
@@ -1907,7 +1854,7 @@ export function BookingForm() {
             )}
             {selectedSlot ? (
               <p className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600 sm:col-span-2">
-                {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {selectedSlot.startTime}. {groupSizeMessage}
+                {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {sessionTimeRange(selectedSlot)}. {groupSizeMessage}
               </p>
             ) : null}
             <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
@@ -2122,14 +2069,12 @@ export function BookingForm() {
               </p>
               {selectedSlot ? (
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
-                  <p className="font-black text-navy">{selectedSlot.dateLabel} at {selectedSlot.startTime}</p>
+                  <p className="font-black text-navy">{selectedSlot.dateLabel} at {sessionTimeRange(selectedSlot)}</p>
                   <p>{usesExistingPass ? "1 player using Launch Pass credit" : `${fields.players} player(s) attending`}</p>
                   <p>{bookingGroup?.name ?? "Selected training group"}</p>
-                  {selectedSlot.trainingFocus ? (
-                    <p className="mt-2 rounded-md border border-electric/20 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-electric">
-                      {sessionFocusTitle(selectedSlot)}
-                    </p>
-                  ) : null}
+                  <p className="mt-2 rounded-md border border-electric/20 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-electric">
+                    {sessionFocusTitle(selectedSlot)}
+                  </p>
                   <p className="mt-2 text-xs font-bold uppercase text-slate-500">{groupSizeMessage}</p>
                   <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
                     {usesExistingPass ? "Payment: Launch Pass credit" : `${fields.players} x ${sessionPriceLabel} = ${paymentTotal}`}

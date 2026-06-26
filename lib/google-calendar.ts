@@ -979,7 +979,7 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     method: "POST",
     headers: calendarHeaders(token.accessToken),
     body: JSON.stringify({
-      summary: `Elite Soccer Training CV - Paid Booking: ${booking.playerName}`,
+      summary: `EST CV - ${booking.programName}: ${booking.playerName}`,
       description: bookingDescription(booking),
       location: business.location,
       start: {

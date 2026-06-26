@@ -17,6 +17,15 @@ export const trainingFocusOptions: Array<{
   { value: shootingFinishingTrainingFocusValue, label: "Shooting & Finishing" }
 ];
 
+export const sessionFocusExamples = [
+  "Technical Work",
+  "Wingers / Wing Backs",
+  "First Touch & Passing",
+  "Defending Session",
+  "Shooting / Attacking Session",
+  "Speed of Play & Decision Making"
+];
+
 function normalizedFocus(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/&/g, "and").replace(/\s+/g, "_") ?? "";
 }
@@ -75,6 +84,10 @@ export function getTrainingFocusLabel(value: string | null | undefined) {
   }
 
   return normalized || "General Training";
+}
+
+export function getSessionFocusLabel(value: string | null | undefined) {
+  return isRegularTrainingFocus(value) ? "General Training" : getTrainingFocusLabel(value);
 }
 
 export function getTrainingFocusDisplay(value: string | null | undefined): TrainingFocusDisplay | null {

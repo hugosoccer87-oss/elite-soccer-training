@@ -396,7 +396,7 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
 }
 
 function publicSessionProgramName(publicSession: PublicAvailableSession) {
-  return publicSession.trainingFocus ? `${publicSession.trainingFocus} - ${publicSession.trainingGroup}` : publicSession.trainingGroup;
+  return `${publicSession.trainingFocus || "General Training"} - ${publicSession.trainingGroup}`;
 }
 
 export async function listTrainingSessions() {
