@@ -358,6 +358,32 @@ function readableDate(dateIso: string) {
   }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
+function bookingOptionFromTypeParam(value: string | null): BookingOption | null {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "single") {
+    return "single_session";
+  }
+
+  if (normalized === "shooting-finishing") {
+    return "shooting_finishing";
+  }
+
+  if (normalized === "4-pass") {
+    return "four_session_launch_pass";
+  }
+
+  if (normalized === "6-pass") {
+    return "six_session_launch_pass";
+  }
+
+  return null;
+}
+
 export function BookingForm() {
   const [step, setStep] = useState<BookingStep>("program");
   const [bookingOption, setBookingOption] = useState<BookingOption>("single_session");
@@ -433,7 +459,14 @@ export function BookingForm() {
       return;
     }
 
-    const shouldShowDebug = new URLSearchParams(window.location.search).get("debugAvailability") === "1";
+    const searchParams = new URLSearchParams(window.location.search);
+    const directBookingOption = bookingOptionFromTypeParam(searchParams.get("type"));
+    const shouldShowDebug = searchParams.get("debugAvailability") === "1";
+
+    if (directBookingOption) {
+      selectBookingOption(directBookingOption);
+    }
+
     setShowAvailabilityDebug(shouldShowDebug);
 
     if (shouldShowDebug) {
