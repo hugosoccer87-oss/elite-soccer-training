@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { directPaymentOptions, type DirectPaymentOption } from "@/lib/pricing";
-import { getTrainingFocusLabel, type TrainingFocusValue } from "@/lib/session-focus";
 import { createStripeDirectPaymentCheckoutSession } from "@/lib/stripe";
 import {
   attachDirectPaymentStripeCheckoutSession,
@@ -12,7 +11,6 @@ import { waiverVersion } from "@/lib/waiver-content";
 export const runtime = "nodejs";
 
 const zellePhone = "3236848024";
-const allowedTrainingFocusValues: TrainingFocusValue[] = ["general_training", "shooting_finishing"];
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -20,12 +18,6 @@ function isValidEmail(value: string) {
 
 function isDirectPaymentOption(value: string): value is DirectPaymentOption {
   return value in directPaymentOptions;
-}
-
-function normalizeTrainingFocus(value: string | undefined): TrainingFocusValue {
-  return allowedTrainingFocusValues.includes(value as TrainingFocusValue)
-    ? (value as TrainingFocusValue)
-    : "general_training";
 }
 
 function getRequestIpAddress(request: Request) {
@@ -40,7 +32,6 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
     playerCount?: number;
     sessionCount?: number;
-    trainingFocus?: string;
     playerFirstName?: string;
     playerLastName?: string;
     playerAge?: string;
@@ -60,7 +51,6 @@ export async function POST(request: Request) {
     medicalNotes?: string;
   } | null;
   const playerCount = payload?.playerCount === 2 ? 2 : 1;
-  const trainingFocus = normalizeTrainingFocus(payload?.trainingFocus);
   const sessionCount =
     payload?.paymentOption === "single_session" && payload.sessionCount && payload.sessionCount >= 1 && payload.sessionCount <= 6
       ? Math.floor(payload.sessionCount)
@@ -100,7 +90,6 @@ export async function POST(request: Request) {
     const record = await createDirectPaymentRecord({
       playerCount,
       sessionCount,
-      trainingFocus,
       playerFirstName: payload.playerFirstName,
       playerLastName: payload.playerLastName,
       playerAge: payload.playerAge,
@@ -131,11 +120,10 @@ export async function POST(request: Request) {
           ? `${payload.secondPlayerFirstName?.trim() ?? ""} ${payload.secondPlayerLastName?.trim() ?? ""}`.trim()
           : "";
       const playerName = [firstPlayerName, secondPlayerName].filter(Boolean).join(" + ");
-      const trainingFocusLabel = getTrainingFocusLabel(record.training_focus);
       const memo =
         payload.paymentOption === "single_session"
-          ? `${playerName} - ${trainingFocusLabel} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
-          : `${playerName} - ${trainingFocusLabel} - ${option.title}`;
+          ? `${playerName} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
+          : `${playerName} - ${option.title}`;
       const emailResult = await sendDirectPaymentTransactionalEmails(record);
 
       console.info("[EST Direct Pay] Zelle direct payment emails processed", {

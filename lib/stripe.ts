@@ -345,14 +345,12 @@ export async function createStripeDirectPaymentCheckoutSession(record: DirectPay
     "payment_intent_data[metadata][payment_option]": record.payment_option,
     "payment_intent_data[metadata][player_count]": String(playerCount),
     "payment_intent_data[metadata][session_count]": String(sessionCount),
-    "payment_intent_data[metadata][training_focus]": record.training_focus || "general_training",
     "payment_intent_data[metadata][player_name]": playerName,
     "metadata[purchase_type]": "direct_payment",
     "metadata[directPaymentId]": record.id,
     "metadata[payment_option]": record.payment_option,
     "metadata[player_count]": String(playerCount),
     "metadata[session_count]": String(sessionCount),
-    "metadata[training_focus]": record.training_focus || "general_training",
     "metadata[player_name]": playerName
   });
 

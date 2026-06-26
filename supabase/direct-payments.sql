@@ -7,7 +7,6 @@ create table if not exists public.direct_payments (
   id uuid primary key default gen_random_uuid(),
   player_count integer not null default 1 check (player_count in (1, 2)),
   session_count integer not null default 1 check (session_count between 1 and 6),
-  training_focus text,
   player_first_name text not null,
   player_last_name text not null,
   player_age text not null,
@@ -42,9 +41,6 @@ alter table public.direct_payments
 
 alter table public.direct_payments
   add column if not exists session_count integer not null default 1;
-
-alter table public.direct_payments
-  add column if not exists training_focus text;
 
 alter table public.direct_payments
   add column if not exists second_player_first_name text;

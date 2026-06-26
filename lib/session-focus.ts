@@ -15,13 +15,19 @@ export const trainingFocusOptions: Array<{
 ];
 
 export function getTrainingFocusLabel(value: string | null | undefined) {
+  const normalized = value?.trim();
+
+  if (normalized === "Shooting & Finishing" || normalized === "shooting-finishing") {
+    return "Shooting & Finishing";
+  }
+
   const match = trainingFocusOptions.find((option) => option.value === value);
 
   if (match) {
     return match.label;
   }
 
-  return value?.trim() || "General Training";
+  return normalized || "General Training";
 }
 
 export function getTrainingFocusDisplay(value: string | null | undefined): TrainingFocusDisplay | null {
@@ -31,7 +37,11 @@ export function getTrainingFocusDisplay(value: string | null | undefined): Train
     return null;
   }
 
-  if (normalized === "shooting_finishing" || normalized === "shooting-finishing") {
+  if (
+    normalized === "shooting_finishing" ||
+    normalized === "shooting-finishing" ||
+    normalized === "Shooting & Finishing"
+  ) {
     return {
       value: normalized,
       label: "Shooting & Finishing",

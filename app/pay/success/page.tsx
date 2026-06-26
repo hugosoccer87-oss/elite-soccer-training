@@ -77,10 +77,7 @@ async function verifyDirectPayment(sessionId: string | undefined) {
     });
 
     if (!directPayment.wasAlreadyPaid) {
-      const emailResult = await sendDirectPaymentTransactionalEmails({
-        ...directPayment,
-        training_focus: directPayment.training_focus || session.metadata?.training_focus || "general_training"
-      });
+      const emailResult = await sendDirectPaymentTransactionalEmails(directPayment);
 
       console.info("[EST Direct Pay] Card direct payment emails processed from success page", {
         directPaymentId,

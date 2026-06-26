@@ -147,7 +147,6 @@ export type DirectPaymentRow = {
   id: string;
   player_count: number;
   session_count: number;
-  training_focus?: string | null;
   player_first_name: string;
   player_last_name: string;
   player_age: string;
@@ -198,7 +197,6 @@ export type AdminTrainingSession = TrainingSessionRow & {
 export type DirectPaymentInput = {
   playerCount: number;
   sessionCount: number;
-  trainingFocus: TrainingFocusValue;
   playerFirstName: string;
   playerLastName: string;
   playerAge: string;
@@ -664,61 +662,41 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
   const basePayload = {
     player_count: playerCount,
     session_count: sessionCount,
-    training_focus: input.trainingFocus,
-      player_first_name: input.playerFirstName.trim(),
-      player_last_name: input.playerLastName.trim(),
-      player_age: input.playerAge.trim(),
-      second_player_first_name: playerCount === 2 ? input.secondPlayerFirstName?.trim() || null : null,
-      second_player_last_name: playerCount === 2 ? input.secondPlayerLastName?.trim() || null : null,
-      second_player_age: playerCount === 2 ? input.secondPlayerAge?.trim() || null : null,
-      parent_name: input.parentName.trim(),
-      parent_email: input.parentEmail.trim().toLowerCase(),
-      parent_phone: input.parentPhone.trim(),
-      payment_option: input.paymentOption,
-      payment_method: input.paymentMethod,
-      status,
-      amount_due: option.amountCents * playerCount * sessionCount,
-      amount_paid: 0,
-      waiver_signed: input.waiverSigned,
-      typed_signature: input.typedSignature.trim(),
-      signed_at: input.signedAt,
-      waiver_version: input.waiverVersion,
-      media_consent: input.mediaConsent,
-      emergency_name: input.emergencyName.trim(),
-      emergency_phone: input.emergencyPhone.trim(),
-      medical_notes: input.medicalNotes.trim(),
-      ip_address: input.ipAddress || null
+    player_first_name: input.playerFirstName.trim(),
+    player_last_name: input.playerLastName.trim(),
+    player_age: input.playerAge.trim(),
+    second_player_first_name: playerCount === 2 ? input.secondPlayerFirstName?.trim() || null : null,
+    second_player_last_name: playerCount === 2 ? input.secondPlayerLastName?.trim() || null : null,
+    second_player_age: playerCount === 2 ? input.secondPlayerAge?.trim() || null : null,
+    parent_name: input.parentName.trim(),
+    parent_email: input.parentEmail.trim().toLowerCase(),
+    parent_phone: input.parentPhone.trim(),
+    payment_option: input.paymentOption,
+    payment_method: input.paymentMethod,
+    status,
+    amount_due: option.amountCents * playerCount * sessionCount,
+    amount_paid: 0,
+    waiver_signed: input.waiverSigned,
+    typed_signature: input.typedSignature.trim(),
+    signed_at: input.signedAt,
+    waiver_version: input.waiverVersion,
+    media_consent: input.mediaConsent,
+    emergency_name: input.emergencyName.trim(),
+    emergency_phone: input.emergencyPhone.trim(),
+    medical_notes: input.medicalNotes.trim(),
+    ip_address: input.ipAddress || null
   };
-  let inserted: DirectPaymentRow[];
-
-  try {
-    inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
-      method: "POST",
-      body: JSON.stringify(basePayload)
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    if (!message.toLowerCase().includes("training_focus")) {
-      throw error;
-    }
-
-    const { training_focus: _trainingFocus, ...fallbackPayload } = basePayload;
-    inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
-      method: "POST",
-      body: JSON.stringify(fallbackPayload)
-    });
-  }
+  const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
+    method: "POST",
+    body: JSON.stringify(basePayload)
+  });
   const record = inserted[0];
 
   if (!record) {
     throw new Error("Direct payment record could not be saved.");
   }
 
-  return {
-    ...record,
-    training_focus: record.training_focus || input.trainingFocus
-  };
+  return record;
 }
 
 export async function attachDirectPaymentStripeCheckoutSession(directPaymentId: string, checkoutSessionId: string) {

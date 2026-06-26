@@ -918,13 +918,12 @@ export function AdminAvailability() {
           <div className="grid divide-y divide-slate-200">
             {directPayments.map((payment) => {
               const playerName = `${payment.player_first_name} ${payment.player_last_name}`.trim();
-              const trainingFocusLabel = getTrainingFocusLabel(payment.training_focus);
               const sessionCount =
                 payment.payment_option === "single_session" ? Math.max(1, Number(payment.session_count) || 1) : 1;
               const zelleMemo =
                 payment.payment_option === "single_session"
-                  ? `${playerName} - ${trainingFocusLabel} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
-                  : `${playerName} - ${trainingFocusLabel} - ${directPaymentOptionLabel(payment.payment_option)}`;
+                  ? `${playerName} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
+                  : `${playerName} - ${directPaymentOptionLabel(payment.payment_option)}`;
 
               return (
                 <article key={payment.id} className="grid gap-4 p-5">
@@ -938,7 +937,6 @@ export function AdminAvailability() {
                         Parent: {payment.parent_name} - {payment.parent_email} - {payment.parent_phone}
                       </p>
                       <p className="mt-1 text-sm text-slate-600">Player age: {payment.player_age}</p>
-                      <p className="mt-1 text-sm text-slate-600">Training focus: {trainingFocusLabel}</p>
                       <p className="mt-1 text-xs font-black uppercase text-slate-500">
                         Submitted: {formatWaiverTimestamp(payment.created_at)}
                       </p>

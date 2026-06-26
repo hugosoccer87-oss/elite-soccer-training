@@ -72,10 +72,6 @@ export async function POST(request: Request) {
           status: directPayment.status,
           wasAlreadyPaid: directPayment.wasAlreadyPaid
         });
-        const directPaymentForEmail = {
-          ...directPayment,
-          training_focus: directPayment.training_focus || session.metadata?.training_focus || "general_training"
-        };
         const emailResult = directPayment.wasAlreadyPaid
           ? {
               sent: false,
@@ -83,7 +79,7 @@ export async function POST(request: Request) {
               adminSent: false,
               message: "Direct payment emails were already handled for this paid record."
             }
-          : await sendDirectPaymentTransactionalEmails(directPaymentForEmail);
+          : await sendDirectPaymentTransactionalEmails(directPayment);
 
         console.info("[EST Stripe] Direct payment email notifications complete", {
           eventId: event.id,
