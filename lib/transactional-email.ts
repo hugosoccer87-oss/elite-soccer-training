@@ -563,17 +563,21 @@ function makeupCreditCustomerEmail(input: {
   adjustment: CreditAdjustmentRow;
   booking: BookingRow;
   session: TrainingSessionRow;
+  pass?: PassPurchaseRow | null;
 }): EmailMessage {
   const sessionDate = formatSessionDate(input.session.start_datetime, input.session.timezone);
   const sessionTime = formatSessionTime(input.session.start_datetime, input.session.timezone);
+  const remainingCredits = input.pass?.remaining_credits ?? null;
   const text = [
-    "EST CV Session Credit Added",
+    "EST CV Session Credit Returned",
     "",
     `Hi ${input.booking.parent_name},`,
     "",
-    `The EST CV session scheduled for ${sessionDate} at ${sessionTime} was cancelled.`,
+    `The EST CV session scheduled for ${sessionDate} at ${sessionTime} has been cancelled.`,
     "",
-    `We have added 1 training credit back to ${input.booking.player_name}'s Launch Pass.`,
+    `Because ${input.booking.player_name} used a Launch Pass credit for this session, we have added 1 credit back to their Launch Pass.`,
+    "",
+    `Updated remaining credits: ${remainingCredits ?? "Updated"}`,
     "",
     "This credit can be used toward a future available EST CV training session.",
     "",
@@ -583,12 +587,13 @@ function makeupCreditCustomerEmail(input: {
     "Elite Soccer Training CV"
   ].join("\n");
   const html = brandedEmailShell({
-    title: "Session Credit Added",
-    intro: "A training credit has been added back to your Launch Pass.",
+    title: "Session Credit Returned",
+    intro: "A training credit has been returned to your Launch Pass.",
     body: `
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(input.booking.parent_name)},</p>
-      <p style="margin:0 0 18px;color:#334155;line-height:1.7">The EST CV session scheduled for <strong style="color:#06152b">${escapeHtml(sessionDate)}</strong> at <strong style="color:#06152b">${escapeHtml(sessionTime)}</strong> was cancelled.</p>
-      <p style="margin:0 0 18px;color:#334155;line-height:1.7">We have added <strong style="color:#06152b">1 training credit</strong> back to ${escapeHtml(input.booking.player_name)}'s Launch Pass.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">The EST CV session scheduled for <strong style="color:#06152b">${escapeHtml(sessionDate)}</strong> at <strong style="color:#06152b">${escapeHtml(sessionTime)}</strong> has been cancelled.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Because ${escapeHtml(input.booking.player_name)} used a Launch Pass credit for this session, we have added <strong style="color:#06152b">1 credit</strong> back to their Launch Pass.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7"><strong style="color:#06152b">Updated remaining credits:</strong> ${escapeHtml(String(remainingCredits ?? "Updated"))}</p>
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">This credit can be used toward a future available EST CV training session.</p>
       <p style="margin:24px 0 0;color:#334155;line-height:1.7">Thank you for your understanding.<br />Coach Hugo<br />Elite Soccer Training CV</p>
     `
@@ -598,7 +603,53 @@ function makeupCreditCustomerEmail(input: {
     from: process.env.EMAIL_FROM as string,
     to: input.booking.parent_email,
     replyTo: business.email,
-    subject: "EST CV Session Credit Added",
+    subject: "EST CV Session Credit Returned",
+    text,
+    html
+  };
+}
+
+function manualCreditCustomerEmail(input: {
+  adjustment: CreditAdjustmentRow;
+  pass: PassPurchaseRow;
+}): EmailMessage {
+  const reason = input.adjustment.reason || "Makeup credit";
+  const text = [
+    "EST CV Training Credit Added",
+    "",
+    `Hi ${input.pass.parent_name},`,
+    "",
+    `A training credit has been added to ${input.pass.player_name}'s EST CV Launch Pass.`,
+    "",
+    `Credit added: ${input.adjustment.credit_amount}`,
+    `Reason: ${reason}`,
+    `Updated remaining credits: ${input.pass.remaining_credits}`,
+    "",
+    "You can use this credit toward a future available EST CV training session.",
+    "",
+    "Thank you,",
+    "Coach Hugo",
+    "Elite Soccer Training CV"
+  ].join("\n");
+  const html = brandedEmailShell({
+    title: "Training Credit Added",
+    intro: "A training credit has been added to your EST CV Launch Pass.",
+    body: `
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(input.pass.parent_name)},</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">A training credit has been added to ${escapeHtml(input.pass.player_name)}'s EST CV Launch Pass.</p>
+      <p style="margin:0 0 8px;color:#334155;line-height:1.7"><strong style="color:#06152b">Credit added:</strong> ${input.adjustment.credit_amount}</p>
+      <p style="margin:0 0 8px;color:#334155;line-height:1.7"><strong style="color:#06152b">Reason:</strong> ${escapeHtml(reason)}</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7"><strong style="color:#06152b">Updated remaining credits:</strong> ${input.pass.remaining_credits}</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">You can use this credit toward a future available EST CV training session.</p>
+      <p style="margin:24px 0 0;color:#334155;line-height:1.7">Thank you,<br />Coach Hugo<br />Elite Soccer Training CV</p>
+    `
+  });
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: input.pass.parent_email,
+    replyTo: business.email,
+    subject: "EST CV Training Credit Added",
     text,
     html
   };
@@ -1169,6 +1220,7 @@ export async function sendMakeupCreditEmail(input: {
   adjustment: CreditAdjustmentRow;
   booking: BookingRow;
   session: TrainingSessionRow;
+  pass?: PassPurchaseRow | null;
 }): Promise<CustomerOnlyEmailResult> {
   const customer = makeupCreditCustomerEmail(input);
   const baseAttempt = {
@@ -1236,6 +1288,93 @@ export async function sendMakeupCreditEmail(input: {
     console.error("[EST Email] Customer email failed:", {
       to: customer.to,
       bookingId: input.booking.id,
+      creditAdjustmentId: input.adjustment.id,
+      error: message
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
+    };
+  }
+}
+
+export async function sendManualCreditEmail(input: {
+  adjustment: CreditAdjustmentRow;
+  pass: PassPurchaseRow;
+}): Promise<CustomerOnlyEmailResult> {
+  const customer = manualCreditCustomerEmail(input);
+  const baseAttempt = {
+    bookingId: input.adjustment.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Manual credit was added, but parent email was not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      passPurchaseId: input.pass.id,
+      creditAdjustmentId: input.adjustment.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
+    };
+  }
+
+  console.info("[EST Email] Preparing customer confirmation email", {
+    passPurchaseId: input.pass.id,
+    creditAdjustmentId: input.adjustment.id,
+    type: "manual_credit"
+  });
+  console.info("[EST Email] Customer recipient:", {
+    passPurchaseId: input.pass.id,
+    to: customer.to
+  });
+
+  try {
+    const transport = await createTransport();
+    const result = await transport.sendMail(customer);
+
+    console.info("[EST Email] Customer email sent successfully", {
+      to: customer.to,
+      passPurchaseId: input.pass.id,
+      creditAdjustmentId: input.adjustment.id,
+      messageId: result.messageId
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "sent",
+      adminStatus: "not_attempted"
+    });
+
+    return {
+      sent: true
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Manual credit email failed to send.";
+
+    console.error("[EST Email] Customer email failed:", {
+      to: customer.to,
+      passPurchaseId: input.pass.id,
       creditAdjustmentId: input.adjustment.id,
       error: message
     });

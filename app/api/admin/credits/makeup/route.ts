@@ -30,7 +30,8 @@ export async function POST(request: Request) {
     const emailResult = await sendMakeupCreditEmail({
       adjustment: issued.adjustment,
       booking: issued.booking,
-      session: issued.session
+      session: issued.session,
+      pass: issued.pass
     });
     await updateCreditAdjustmentEmailStatus({
       adjustmentId: issued.adjustment.id,

@@ -109,15 +109,19 @@ export type CreditRedemptionRow = {
 export type CreditAdjustmentRow = {
   id: string;
   pass_purchase_id: string;
-  original_booking_id: string;
-  original_session_id: string;
+  original_booking_id?: string | null;
+  original_session_id?: string | null;
   player_name: string;
   parent_email: string;
   credit_amount: number;
   reason: string;
+  note?: string | null;
+  adjustment_type?: "automatic_cancellation_credit" | "manual_credit" | string | null;
   created_by?: string | null;
   email_status: "not_sent" | "sent" | "failed";
   email_error?: string | null;
+  email_sent?: boolean | null;
+  email_sent_at?: string | null;
   created_at: string;
 };
 
@@ -259,6 +263,19 @@ export type DirectPaymentInput = {
   emergencyPhone: string;
   medicalNotes: string;
   ipAddress?: string;
+};
+
+export type ContactInfoInput = {
+  parentName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
+  playerName?: string;
+  playerFirstName?: string;
+  playerLastName?: string;
+  playerAge?: string;
+  secondPlayerFirstName?: string;
+  secondPlayerLastName?: string;
+  secondPlayerAge?: string;
 };
 
 export type SupabaseDiagnostics = {
@@ -672,7 +689,11 @@ export async function listAdminBookings() {
   const calendarMap = new Map(calendarEvents.map((event) => [event.booking_id, event]));
   const passMap = new Map(passPurchases.map((pass) => [pass.id, pass]));
   const redemptionMap = new Map(redemptions.map((redemption) => [redemption.booking_id, redemption]));
-  const adjustmentMap = new Map(adjustments.map((adjustment) => [adjustment.original_booking_id, adjustment]));
+  const adjustmentMap = new Map(
+    adjustments
+      .filter((adjustment) => Boolean(adjustment.original_booking_id))
+      .map((adjustment) => [adjustment.original_booking_id as string, adjustment])
+  );
 
   return bookings.map((booking) => ({
     ...booking,
@@ -919,6 +940,97 @@ export async function updateDirectPaymentStatus(id: string, status: DirectPaymen
   return rows[0] ?? null;
 }
 
+export async function updateBookingContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updatePassPurchaseContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<PassPurchaseRow[]>(`pass_purchases?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updateDirectPaymentContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.playerFirstName === "string") payload.player_first_name = input.playerFirstName.trim();
+  if (typeof input.playerLastName === "string") payload.player_last_name = input.playerLastName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+  if (typeof input.secondPlayerFirstName === "string") payload.second_player_first_name = input.secondPlayerFirstName.trim();
+  if (typeof input.secondPlayerLastName === "string") payload.second_player_last_name = input.secondPlayerLastName.trim();
+  if (typeof input.secondPlayerAge === "string") payload.second_player_age = input.secondPlayerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<DirectPaymentRow[]>(`direct_payments?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updateEmailSubscriberContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.phone = input.parentPhone.trim();
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<EmailSubscriberRow[]>(`email_subscribers?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...payload,
+      updated_at: new Date().toISOString()
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
 export async function listAdminTrainingSessions(): Promise<AdminTrainingSession[]> {
   const [sessions, bookings] = await Promise.all([listTrainingSessions(), listAdminBookings()]);
 
@@ -968,6 +1080,10 @@ export async function issueLaunchPassMakeupCredit(input: {
     throw new Error("Makeup credit could not be issued.");
   }
 
+  if (!adjustment.original_booking_id || !adjustment.original_session_id) {
+    throw new Error("Credited booking details could not be loaded.");
+  }
+
   const bookingRows = await supabaseRequest<BookingRow[]>(
     `bookings?select=*&id=eq.${encodeFilter(adjustment.original_booking_id)}&limit=1`
   );
@@ -992,6 +1108,50 @@ export async function issueLaunchPassMakeupCredit(input: {
   };
 }
 
+export async function issueManualLaunchPassCredit(input: {
+  passPurchaseId: string;
+  creditAmount: number;
+  reason: string;
+  note?: string;
+  createdBy?: string;
+}) {
+  const issued = await supabaseRequest<CreditAdjustmentRow[] | CreditAdjustmentRow>(
+    "rpc/issue_manual_launch_pass_credit",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_pass_purchase_id: input.passPurchaseId,
+        p_credit_amount: Math.max(1, Math.floor(Number(input.creditAmount) || 1)),
+        p_reason: input.reason,
+        p_note: input.note || null,
+        p_created_by: input.createdBy || "admin"
+      })
+    }
+  );
+  const adjustment = Array.isArray(issued) ? issued[0] : issued;
+
+  if (!adjustment) {
+    throw new Error("Manual credit could not be added.");
+  }
+
+  const pass = await getPassPurchaseById(adjustment.pass_purchase_id);
+
+  if (!pass) {
+    throw new Error("Credited Launch Pass could not be loaded.");
+  }
+
+  return {
+    adjustment,
+    pass
+  };
+}
+
+export async function listPaidBookingsForSession(sessionId: string) {
+  const bookings = await listAdminBookings();
+
+  return bookings.filter((booking) => booking.session_id === sessionId && booking.status === "paid");
+}
+
 export async function updateCreditAdjustmentEmailStatus(input: {
   adjustmentId: string;
   status: "sent" | "failed";
@@ -1003,7 +1163,9 @@ export async function updateCreditAdjustmentEmailStatus(input: {
       method: "PATCH",
       body: JSON.stringify({
         email_status: input.status,
-        email_error: input.status === "failed" ? input.errorMessage || "Email could not be sent." : null
+        email_error: input.status === "failed" ? input.errorMessage || "Email could not be sent." : null,
+        email_sent: input.status === "sent",
+        email_sent_at: input.status === "sent" ? new Date().toISOString() : null
       })
     }
   );

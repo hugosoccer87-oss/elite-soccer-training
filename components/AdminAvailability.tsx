@@ -119,6 +119,29 @@ type ActiveWaiverRecord = {
   session?: AdminTrainingSession;
 };
 
+type ContactEditRecordType = "booking" | "pass" | "direct_payment" | "email_subscriber";
+type ContactEditState = {
+  recordType: ContactEditRecordType;
+  id: string;
+  title: string;
+  showPlayerFullName?: boolean;
+  showPlayerSplitName?: boolean;
+  showSecondPlayer?: boolean;
+};
+
+type ContactFormState = {
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  playerName: string;
+  playerFirstName: string;
+  playerLastName: string;
+  playerAge: string;
+  secondPlayerFirstName: string;
+  secondPlayerLastName: string;
+  secondPlayerAge: string;
+};
+
 type AdminSection = "dashboard" | "sessions" | "bookings" | "passes" | "direct-payments" | "email-list";
 type SessionFilter =
   | "all"
@@ -185,6 +208,14 @@ const dayOptions = [
   { value: 5, label: "Friday" },
   { value: 6, label: "Saturday" },
   { value: 0, label: "Sunday" }
+];
+const manualCreditReasons = [
+  "Session cancelled by EST CV",
+  "Weather cancellation",
+  "Makeup credit",
+  "Admin correction",
+  "Goodwill credit",
+  "Other"
 ];
 const defaultBulkPatterns: BulkSessionPattern[] = [
   { id: "monday-6", dayOfWeek: 1, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
@@ -808,8 +839,26 @@ export function AdminAvailability() {
   const [bookingDateFilter, setBookingDateFilter] = useState("");
   const [expandedBookingId, setExpandedBookingId] = useState("");
   const [passFilter, setPassFilter] = useState<PassFilter>("active");
+  const [manualCreditPassId, setManualCreditPassId] = useState("");
+  const [manualCreditAmount, setManualCreditAmount] = useState("1");
+  const [manualCreditReason, setManualCreditReason] = useState("Makeup credit");
+  const [manualCreditNote, setManualCreditNote] = useState("");
+  const [manualCreditSendEmail, setManualCreditSendEmail] = useState(true);
   const [directPaymentFilter, setDirectPaymentFilter] = useState<DirectPaymentFilter>("all");
   const [expandedDirectPaymentId, setExpandedDirectPaymentId] = useState("");
+  const [activeContactEdit, setActiveContactEdit] = useState<ContactEditState | null>(null);
+  const [contactForm, setContactForm] = useState<ContactFormState>({
+    parentName: "",
+    parentEmail: "",
+    parentPhone: "",
+    playerName: "",
+    playerFirstName: "",
+    playerLastName: "",
+    playerAge: "",
+    secondPlayerFirstName: "",
+    secondPlayerLastName: "",
+    secondPlayerAge: ""
+  });
 
   async function refreshAdminData(message?: string) {
     try {
@@ -870,6 +919,12 @@ export function AdminAvailability() {
     () => passes.filter((pass) => pass.status === "paid" && pass.remaining_credits > 0 && new Date(pass.expires_at).getTime() >= Date.now()),
     [passes]
   );
+  const paidPasses = useMemo(() => passes.filter((pass) => pass.status === "paid"), [passes]);
+  const selectedManualCreditPass = useMemo(
+    () => paidPasses.find((pass) => pass.id === manualCreditPassId) ?? null,
+    [manualCreditPassId, paidPasses]
+  );
+  const manualCreditAmountNumber = Math.max(1, Math.floor(Number(manualCreditAmount) || 1));
   const passCounts = useMemo(
     () => ({
       paid: passes.filter((pass) => pass.status === "paid").length,
@@ -1104,7 +1159,7 @@ export function AdminAvailability() {
           status: newStatus
         })
       });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
 
       if (!response.ok) {
         throw new Error(result.error || "The session could not be added.");
@@ -1246,13 +1301,13 @@ export function AdminAvailability() {
         },
         body: JSON.stringify(updates)
       });
-      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
 
       if (!response.ok) {
         throw new Error(result.error || "The session could not be updated.");
       }
 
-      await refreshAdminData("Training session updated.");
+      await refreshAdminData(result.message || "Training session updated.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "The session could not be updated.");
     } finally {
@@ -1288,6 +1343,191 @@ export function AdminAvailability() {
       setError(creditError instanceof Error ? creditError.message : "Makeup credit could not be issued.");
     } finally {
       setCreditingBookingId("");
+    }
+  }
+
+  async function addManualCredit() {
+    if (!selectedManualCreditPass) {
+      setError("Choose a Launch Pass before adding manual credit.");
+      return;
+    }
+
+    const nextRemaining = selectedManualCreditPass.remaining_credits + manualCreditAmountNumber;
+    const confirmed = window.confirm(
+      `Add ${manualCreditAmountNumber} credit${manualCreditAmountNumber === 1 ? "" : "s"} to ${selectedManualCreditPass.player_name}'s Launch Pass?\n\nCurrent credits: ${selectedManualCreditPass.remaining_credits}\nNew credits: ${nextRemaining}`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch("/api/admin/credits/manual", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          passPurchaseId: selectedManualCreditPass.id,
+          creditAmount: manualCreditAmountNumber,
+          reason: manualCreditReason,
+          note: manualCreditNote,
+          sendEmail: manualCreditSendEmail
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Manual credit could not be added.");
+      }
+
+      setManualCreditAmount("1");
+      setManualCreditReason("Makeup credit");
+      setManualCreditNote("");
+      setManualCreditSendEmail(true);
+      await refreshAdminData(result.message || "Manual credit added.");
+    } catch (creditError) {
+      setError(creditError instanceof Error ? creditError.message : "Manual credit could not be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function openContactEdit(state: ContactEditState, form: Partial<ContactFormState>) {
+    setActiveContactEdit(state);
+    setContactForm({
+      parentName: form.parentName || "",
+      parentEmail: form.parentEmail || "",
+      parentPhone: form.parentPhone || "",
+      playerName: form.playerName || "",
+      playerFirstName: form.playerFirstName || "",
+      playerLastName: form.playerLastName || "",
+      playerAge: form.playerAge || "",
+      secondPlayerFirstName: form.secondPlayerFirstName || "",
+      secondPlayerLastName: form.secondPlayerLastName || "",
+      secondPlayerAge: form.secondPlayerAge || ""
+    });
+  }
+
+  function editBookingContact(booking: AdminBookingRecord) {
+    openContactEdit(
+      {
+        recordType: "booking",
+        id: booking.id,
+        title: `Edit ${booking.player_name}`,
+        showPlayerFullName: true
+      },
+      {
+        parentName: booking.parent_name,
+        parentEmail: booking.parent_email,
+        parentPhone: booking.parent_phone,
+        playerName: booking.player_name,
+        playerAge: booking.player_age
+      }
+    );
+  }
+
+  function editPassContact(pass: AdminPassPurchase) {
+    openContactEdit(
+      {
+        recordType: "pass",
+        id: pass.id,
+        title: `Edit ${pass.player_name}`,
+        showPlayerFullName: true
+      },
+      {
+        parentName: pass.parent_name,
+        parentEmail: pass.parent_email,
+        parentPhone: pass.parent_phone,
+        playerName: pass.player_name,
+        playerAge: pass.player_age
+      }
+    );
+  }
+
+  function editDirectPaymentContact(payment: DirectPaymentRow) {
+    openContactEdit(
+      {
+        recordType: "direct_payment",
+        id: payment.id,
+        title: `Edit ${playerNamesForDirectPayment(payment)}`,
+        showPlayerSplitName: true,
+        showSecondPlayer: payment.player_count === 2
+      },
+      {
+        parentName: payment.parent_name,
+        parentEmail: payment.parent_email,
+        parentPhone: payment.parent_phone,
+        playerFirstName: payment.player_first_name,
+        playerLastName: payment.player_last_name,
+        playerAge: payment.player_age,
+        secondPlayerFirstName: payment.second_player_first_name || "",
+        secondPlayerLastName: payment.second_player_last_name || "",
+        secondPlayerAge: payment.second_player_age || ""
+      }
+    );
+  }
+
+  function editEmailSubscriberContact(subscriber: EmailSubscriberRow) {
+    openContactEdit(
+      {
+        recordType: "email_subscriber",
+        id: subscriber.id,
+        title: `Edit ${subscriber.parent_name || subscriber.email}`,
+        showPlayerFullName: true
+      },
+      {
+        parentName: subscriber.parent_name || "",
+        parentEmail: subscriber.email,
+        parentPhone: subscriber.phone || "",
+        playerName: subscriber.player_name || "",
+        playerAge: subscriber.player_age || ""
+      }
+    );
+  }
+
+  async function saveContactInfo() {
+    if (!activeContactEdit) {
+      return;
+    }
+
+    if (!contactForm.parentEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactForm.parentEmail.trim())) {
+      setError("Enter a valid parent email before saving contact information.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch("/api/admin/contact-info", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          recordType: activeContactEdit.recordType,
+          id: activeContactEdit.id,
+          ...contactForm
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Contact information could not be updated.");
+      }
+
+      setActiveContactEdit(null);
+      await refreshAdminData(result.message || "Contact information updated successfully.");
+    } catch (contactError) {
+      setError(contactError instanceof Error ? contactError.message : "Contact information could not be updated.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -2129,6 +2369,15 @@ export function AdminAvailability() {
                             Boolean(booking.pass_purchase_id) ||
                             Boolean(booking.credit_redemption_id)
                         );
+                        const creditedLaunchPassBookings = launchPassBookings.filter((booking) => booking.creditAdjustment);
+                        const cardPaidBookings = session.paidBookings.filter(
+                          (booking) =>
+                            !(
+                              booking.payment_type === "launch_pass_credit" ||
+                              Boolean(booking.pass_purchase_id) ||
+                              Boolean(booking.credit_redemption_id)
+                            )
+                        );
 
                         return (
                           <article key={session.id} className="grid gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -2271,6 +2520,18 @@ export function AdminAvailability() {
                                       This cancelled session has Launch Pass bookings. You may issue makeup credits to affected players.
                                     </p>
                                   ) : null}
+                                  {session.status === "cancelled" && creditedLaunchPassBookings.length > 0 ? (
+                                    <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-800">
+                                      {creditedLaunchPassBookings.length} Launch Pass credit
+                                      {creditedLaunchPassBookings.length === 1 ? " was" : "s were"} returned:{" "}
+                                      {creditedLaunchPassBookings.map((booking) => booking.player_name).join(", ")}.
+                                    </p>
+                                  ) : null}
+                                  {session.status === "cancelled" && cardPaidBookings.length > 0 ? (
+                                    <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-bold leading-6 text-red-700">
+                                      This session has card-paid bookings. Refunds must be handled separately in Stripe or manually.
+                                    </p>
+                                  ) : null}
                                   <div className="mt-3 grid gap-4">
                                     {session.paidBookings.map((booking) => {
                                       const isLaunchPassBooking =
@@ -2332,6 +2593,9 @@ export function AdminAvailability() {
                                                     {creditingBookingId === booking.id ? "Issuing..." : "Issue Makeup Credit"}
                                                   </button>
                                                 ) : null}
+                                                <button type="button" onClick={() => editBookingContact(booking)} className={secondaryButtonClass}>
+                                                  Edit Contact Info
+                                                </button>
                                                 <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
                                                   View Waiver Record
                                                 </button>
@@ -2483,6 +2747,9 @@ export function AdminAvailability() {
                               : "No email logs yet"}
                           </p>
                           <div className="mt-2 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => editBookingContact(booking)} className={secondaryButtonClass}>
+                              Edit Contact Info
+                            </button>
                             <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
                               View Waiver
                             </button>
@@ -2557,6 +2824,82 @@ export function AdminAvailability() {
             </div>
           </div>
 
+          <div className="border-b border-slate-200 bg-mist p-5 sm:p-6">
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Manual Credit Adjustment</p>
+                  <h4 className="mt-1 text-xl font-black text-navy">Add Manual Credit</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Use this for weather, past cancellations, corrections, or goodwill credits. Manual credits require confirmation before saving.
+                  </p>
+                </div>
+                {selectedManualCreditPass ? (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                    <p className="font-black">Current remaining: {selectedManualCreditPass.remaining_credits}</p>
+                    <p className="mt-1 font-black">After credit: {selectedManualCreditPass.remaining_credits + manualCreditAmountNumber}</p>
+                  </div>
+                ) : null}
+              </div>
+              <div className="mt-5 grid gap-4 lg:grid-cols-4">
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
+                  Select Launch Pass
+                  <select className={inputClass} value={manualCreditPassId} onChange={(event) => setManualCreditPassId(event.target.value)}>
+                    <option value="">Choose a paid Launch Pass</option>
+                    {paidPasses.map((pass) => (
+                      <option key={pass.id} value={pass.id}>
+                        {pass.player_name} - {pass.parent_email} - {pass.remaining_credits}/{pass.total_credits} credits
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Credit Amount
+                  <input
+                    className={inputClass}
+                    min={1}
+                    type="number"
+                    value={manualCreditAmount}
+                    onChange={(event) => setManualCreditAmount(event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Reason
+                  <select className={inputClass} value={manualCreditReason} onChange={(event) => setManualCreditReason(event.target.value)}>
+                    {manualCreditReasons.map((reason) => (
+                      <option key={reason} value={reason}>
+                        {reason}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-3">
+                  Optional Note
+                  <input
+                    className={inputClass}
+                    value={manualCreditNote}
+                    onChange={(event) => setManualCreditNote(event.target.value)}
+                    placeholder="Internal note for this adjustment"
+                  />
+                </label>
+                <div className="grid gap-3">
+                  <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-mist p-3 text-sm font-bold text-slate-700">
+                    <input
+                      className="mt-1"
+                      type="checkbox"
+                      checked={manualCreditSendEmail}
+                      onChange={(event) => setManualCreditSendEmail(event.target.checked)}
+                    />
+                    Send parent email confirmation
+                  </label>
+                  <button type="button" disabled={isSaving || !selectedManualCreditPass} onClick={() => void addManualCredit()} className={primaryButtonClass}>
+                    Add Manual Credit
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {filteredPasses.length > 0 ? (
             <div className="grid divide-y divide-slate-200">
               {filteredPasses.map((pass) => {
@@ -2584,6 +2927,9 @@ export function AdminAvailability() {
                           Expires: {new Date(pass.expires_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
                         </p>
                         <p className="mt-1 text-slate-600">Paid: {formatMoney(pass.amount_paid)}</p>
+                        <button type="button" onClick={() => editPassContact(pass)} className={`${secondaryButtonClass} mt-3 w-full`}>
+                          Edit Contact Info
+                        </button>
                       </div>
                     </div>
                     {(pass.selected_session_ids ?? []).length > 0 ? (
@@ -2629,14 +2975,16 @@ export function AdminAvailability() {
                         <p className="text-xs font-black uppercase text-emerald-700">Credit Adjustments</p>
                         <div className="mt-3 grid gap-2 text-sm text-emerald-900">
                           {pass.adjustments.map((adjustment) => {
-                            const relatedSession = sessionById.get(adjustment.original_session_id);
+                            const relatedSession = adjustment.original_session_id
+                              ? sessionById.get(adjustment.original_session_id)
+                              : null;
 
                             return (
                               <p key={adjustment.id}>
                                 Credit added: {adjustment.credit_amount} - {adjustment.reason} -{" "}
                                 {formatWaiverTimestamp(adjustment.created_at)}
                                 {relatedSession ? ` (${formatDateTime(relatedSession.start_datetime, relatedSession.timezone)})` : ""}
-                                {` - Email: ${adjustment.email_status}`}
+                                {` - Type: ${adjustment.adjustment_type || "credit"} - Email: ${adjustment.email_status}`}
                               </p>
                             );
                           })}
@@ -2751,6 +3099,9 @@ export function AdminAvailability() {
                         ) : null}
                         <button type="button" onClick={() => setExpandedDirectPaymentId(isExpanded ? "" : payment.id)} className={secondaryButtonClass}>
                           {isExpanded ? "Hide Details" : "View Details"}
+                        </button>
+                        <button type="button" onClick={() => editDirectPaymentContact(payment)} className={secondaryButtonClass}>
+                          Edit Contact Info
                         </button>
                       </div>
                     </div>
@@ -2876,6 +3227,14 @@ export function AdminAvailability() {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2 lg:justify-end">
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => editEmailSubscriberContact(subscriber)}
+                          className={secondaryButtonClass}
+                        >
+                          Edit Contact Info
+                        </button>
                         {subscriber.unsubscribed ? (
                           <button
                             type="button"
@@ -2915,6 +3274,140 @@ export function AdminAvailability() {
             )}
           </div>
         </section>
+      ) : null}
+
+      {activeContactEdit ? (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-navy/70 px-4 py-8">
+          <div className="mx-auto max-w-3xl rounded-xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+            <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase text-electric">Admin Edit</p>
+                <h3 className="mt-1 text-2xl font-black text-navy">{activeContactEdit.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Update names, email, phone, or player age without changing payment status, waiver language, or credit balances.
+                </p>
+              </div>
+              <button type="button" onClick={() => setActiveContactEdit(null)} className={secondaryButtonClass}>
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Parent/Guardian Name
+                <input
+                  className={inputClass}
+                  value={contactForm.parentName}
+                  onChange={(event) => setContactForm((current) => ({ ...current, parentName: event.target.value }))}
+                />
+              </label>
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Parent Email
+                <input
+                  className={inputClass}
+                  type="email"
+                  value={contactForm.parentEmail}
+                  onChange={(event) => setContactForm((current) => ({ ...current, parentEmail: event.target.value }))}
+                />
+              </label>
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Parent Phone
+                <input
+                  className={inputClass}
+                  value={contactForm.parentPhone}
+                  onChange={(event) => setContactForm((current) => ({ ...current, parentPhone: event.target.value }))}
+                />
+              </label>
+
+              {activeContactEdit.showPlayerFullName ? (
+                <>
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Player Full Name
+                    <input
+                      className={inputClass}
+                      value={contactForm.playerName}
+                      onChange={(event) => setContactForm((current) => ({ ...current, playerName: event.target.value }))}
+                    />
+                  </label>
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Player Age
+                    <input
+                      className={inputClass}
+                      value={contactForm.playerAge}
+                      onChange={(event) => setContactForm((current) => ({ ...current, playerAge: event.target.value }))}
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              {activeContactEdit.showPlayerSplitName ? (
+                <>
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Player 1 First Name
+                    <input
+                      className={inputClass}
+                      value={contactForm.playerFirstName}
+                      onChange={(event) => setContactForm((current) => ({ ...current, playerFirstName: event.target.value }))}
+                    />
+                  </label>
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Player 1 Last Name
+                    <input
+                      className={inputClass}
+                      value={contactForm.playerLastName}
+                      onChange={(event) => setContactForm((current) => ({ ...current, playerLastName: event.target.value }))}
+                    />
+                  </label>
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Player 1 Age
+                    <input
+                      className={inputClass}
+                      value={contactForm.playerAge}
+                      onChange={(event) => setContactForm((current) => ({ ...current, playerAge: event.target.value }))}
+                    />
+                  </label>
+                  {activeContactEdit.showSecondPlayer ? (
+                    <>
+                      <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                        Player 2 First Name
+                        <input
+                          className={inputClass}
+                          value={contactForm.secondPlayerFirstName}
+                          onChange={(event) => setContactForm((current) => ({ ...current, secondPlayerFirstName: event.target.value }))}
+                        />
+                      </label>
+                      <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                        Player 2 Last Name
+                        <input
+                          className={inputClass}
+                          value={contactForm.secondPlayerLastName}
+                          onChange={(event) => setContactForm((current) => ({ ...current, secondPlayerLastName: event.target.value }))}
+                        />
+                      </label>
+                      <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                        Player 2 Age
+                        <input
+                          className={inputClass}
+                          value={contactForm.secondPlayerAge}
+                          onChange={(event) => setContactForm((current) => ({ ...current, secondPlayerAge: event.target.value }))}
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setActiveContactEdit(null)} className={secondaryButtonClass}>
+                Cancel
+              </button>
+              <button type="button" disabled={isSaving} onClick={() => void saveContactInfo()} className={primaryButtonClass}>
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {activeWaiverRecord ? (

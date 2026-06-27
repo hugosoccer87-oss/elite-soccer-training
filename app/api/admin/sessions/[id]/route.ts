@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { verifyAdminSession } from "@/lib/admin-api";
-import { deleteTrainingSession, updateTrainingSession } from "@/lib/supabase-db";
+import {
+  deleteTrainingSession,
+  issueLaunchPassMakeupCredit,
+  listPaidBookingsForSession,
+  updateCreditAdjustmentEmailStatus,
+  updateTrainingSession
+} from "@/lib/supabase-db";
 import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
+import { sendMakeupCreditEmail } from "@/lib/transactional-email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,8 +68,81 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   try {
     const session = await updateTrainingSession(id, updates);
+    const updatedSession = session[0];
 
-    return NextResponse.json({ status: "Updated", session: session[0] });
+    if (updates.status === "cancelled") {
+      const paidBookings = await listPaidBookingsForSession(id);
+      const launchPassBookings = paidBookings.filter(
+        (booking) =>
+          booking.payment_type === "launch_pass_credit" ||
+          Boolean(booking.pass_purchase_id) ||
+          Boolean(booking.credit_redemption_id)
+      );
+      const cardPaidBookings = paidBookings.filter(
+        (booking) =>
+          !(
+            booking.payment_type === "launch_pass_credit" ||
+            Boolean(booking.pass_purchase_id) ||
+            Boolean(booking.credit_redemption_id)
+          )
+      );
+      const returned: Array<{ playerName: string; parentEmail: string; emailSent: boolean }> = [];
+      const skipped: Array<{ playerName: string; reason: string }> = [];
+
+      for (const booking of launchPassBookings) {
+        try {
+          const issued = await issueLaunchPassMakeupCredit({
+            bookingId: booking.id,
+            createdBy: "system"
+          });
+          const emailResult = await sendMakeupCreditEmail({
+            adjustment: issued.adjustment,
+            booking: issued.booking,
+            session: issued.session,
+            pass: issued.pass
+          });
+          await updateCreditAdjustmentEmailStatus({
+            adjustmentId: issued.adjustment.id,
+            status: emailResult.sent ? "sent" : "failed",
+            errorMessage: emailResult.message
+          });
+          returned.push({
+            playerName: issued.booking.player_name,
+            parentEmail: issued.booking.parent_email,
+            emailSent: emailResult.sent
+          });
+        } catch (creditError) {
+          skipped.push({
+            playerName: booking.player_name,
+            reason: creditError instanceof Error ? creditError.message : "Credit could not be returned."
+          });
+        }
+      }
+
+      const emailSentCount = returned.filter((item) => item.emailSent).length;
+      const creditMessage =
+        launchPassBookings.length === 0
+          ? "Session cancelled. No Launch Pass credits needed to be returned."
+          : `Session cancelled. ${returned.length} Launch Pass credit${returned.length === 1 ? "" : "s"} returned. ${emailSentCount} parent email${emailSentCount === 1 ? "" : "s"} sent.`;
+      const cardNotice =
+        cardPaidBookings.length > 0
+          ? " This session has card-paid bookings. Refunds must be handled separately in Stripe or manually."
+          : "";
+
+      return NextResponse.json({
+        status: "Updated",
+        session: updatedSession,
+        cancellationCredits: {
+          returned,
+          skipped,
+          launchPassBookings: launchPassBookings.length,
+          cardPaidBookings: cardPaidBookings.length
+        },
+        message: `${creditMessage}${cardNotice}`
+      });
+    }
+
+    return NextResponse.json({ status: "Updated", session: updatedSession });
   } catch (error) {
     return NextResponse.json(
       { status: "Failed", error: error instanceof Error ? error.message : "Training session could not be updated." },
