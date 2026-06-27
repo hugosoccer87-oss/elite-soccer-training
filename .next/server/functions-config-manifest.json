@@ -1,22 +1,24 @@
 {
   "version": 1,
   "functions": {
-    "/api/admin/bookings": {},
-    "/api/admin/direct-payments": {},
     "/api/admin/direct-payments/[id]": {},
+    "/api/admin/direct-payments": {},
+    "/api/admin/email-subscribers": {},
     "/api/admin/passes": {},
     "/api/admin/send-test-email": {},
-    "/api/admin/email-diagnostics": {},
+    "/api/admin/bookings": {},
     "/api/admin/sessions/[id]": {},
-    "/api/availability/debug": {},
-    "/api/availability": {},
+    "/api/admin/email-subscribers/[id]": {},
     "/api/admin/sessions": {},
+    "/api/availability/debug": {},
+    "/api/admin/email-diagnostics": {},
+    "/api/availability": {},
     "/api/passes/lookup": {},
     "/api/direct-payments": {},
-    "/api/reviews": {},
     "/api/passes/redeem": {},
-    "/api/stripe/pass-checkout": {},
+    "/api/reviews": {},
     "/api/stripe/verify-session": {},
+    "/api/stripe/pass-checkout": {},
     "/api/stripe/webhook": {}
   }
 }

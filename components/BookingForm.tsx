@@ -58,6 +58,7 @@ type BookingFields = {
   waiverAgreement: boolean;
   mediaConsent: "" | "yes" | "no";
   guardianSignature: string;
+  marketingOptIn: boolean;
 };
 
 type BookingFieldErrorKey = keyof BookingFields | "session";
@@ -76,7 +77,8 @@ const initialFields: BookingFields = {
   emergencyPhone: "",
   waiverAgreement: false,
   mediaConsent: "",
-  guardianSignature: ""
+  guardianSignature: "",
+  marketingOptIn: false
 };
 
 type StripeCheckoutResult = {
@@ -155,7 +157,8 @@ async function createLaunchPassCheckout(
   passType: LaunchPassType,
   fields: PassPurchaseFields,
   selectedSessionIds: string[] = [],
-  bookingDetails?: LaunchPassBookingDetails
+  bookingDetails?: LaunchPassBookingDetails,
+  marketingOptIn = false
 ) {
   try {
     const response = await fetch("/api/stripe/pass-checkout", {
@@ -167,7 +170,8 @@ async function createLaunchPassCheckout(
         ...fields,
         passType,
         selectedSessionIds,
-        bookingDetails
+        bookingDetails,
+        marketingOptIn
       })
     });
     const result = (await response.json()) as StripeCheckoutResult & { passPurchaseId?: string };
@@ -766,7 +770,8 @@ export function BookingForm() {
             waiverAcceptedAt: new Date().toISOString(),
             mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined"
           }
-        : undefined
+        : undefined,
+      fields.marketingOptIn
     );
 
     if (!checkout.checkoutUrl) {
@@ -979,7 +984,8 @@ export function BookingForm() {
       notificationStatus: "Ready",
       calendarStatus: "Ready",
       paymentType,
-      passPurchaseId: selectedPass?.id
+      passPurchaseId: selectedPass?.id,
+      marketingOptIn: fields.marketingOptIn
     } satisfies BookingRecord;
   }
 
@@ -1199,6 +1205,15 @@ export function BookingForm() {
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     Training Group
                     <input className={inputClass} value={`${selectedGroup.name}: ${selectedGroup.ages}`} readOnly />
+                  </label>
+                  <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
+                    <input
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                      type="checkbox"
+                      checked={fields.marketingOptIn}
+                      onChange={(event) => setField("marketingOptIn", event.target.checked)}
+                    />
+                    <span>Yes, I&apos;d like to receive EST CV training schedules, updates, and special offers by email.</span>
                   </label>
                 </div>
                 <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
@@ -1828,6 +1843,15 @@ export function BookingForm() {
                 aria-invalid={Boolean(fieldErrors.emergencyPhone)}
               />
               {fieldErrorMessage("emergencyPhone")}
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
+              <input
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                type="checkbox"
+                checked={fields.marketingOptIn}
+                onChange={(event) => setField("marketingOptIn", event.target.checked)}
+              />
+              <span>Yes, I&apos;d like to receive EST CV training schedules, updates, and special offers by email.</span>
             </label>
             {usesExistingPass ? (
               <div className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600">

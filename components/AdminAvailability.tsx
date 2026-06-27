@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { getSessionFocusLabel, sessionFocusExamples } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
-import type { AdminBookingRecord, AdminPassPurchase, AdminTrainingSession, DirectPaymentRow, DirectPaymentStatus } from "@/lib/supabase-db";
+import type {
+  AdminBookingRecord,
+  AdminPassPurchase,
+  AdminTrainingSession,
+  DirectPaymentRow,
+  DirectPaymentStatus,
+  EmailSubscriberRow
+} from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
 
 const inputClass =
@@ -84,6 +91,12 @@ type PassesResponse = {
 type DirectPaymentsResponse = {
   status?: string;
   directPayments?: DirectPaymentRow[];
+  error?: string;
+};
+
+type EmailSubscribersResponse = {
+  status?: string;
+  subscribers?: EmailSubscriberRow[];
   error?: string;
 };
 
@@ -224,6 +237,52 @@ function paymentStatusLabel(status: string) {
 
 function formatMoney(amountCents: number) {
   return `$${(amountCents / 100).toFixed(2)}`;
+}
+
+function csvCell(value: string | number | boolean | null | undefined) {
+  const text = String(value ?? "");
+
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function subscriberCsv(subscribers: EmailSubscriberRow[]) {
+  const columns = [
+    "parent_name",
+    "email",
+    "phone",
+    "player_name",
+    "player_age",
+    "source",
+    "opted_in_at",
+    "unsubscribed"
+  ];
+  const rows = subscribers.map((subscriber) =>
+    [
+      subscriber.parent_name,
+      subscriber.email,
+      subscriber.phone,
+      subscriber.player_name,
+      subscriber.player_age,
+      subscriber.source,
+      subscriber.opted_in_at,
+      subscriber.unsubscribed
+    ].map(csvCell).join(",")
+  );
+
+  return [columns.join(","), ...rows].join("\n");
+}
+
+function downloadTextFile(filename: string, contents: string, mimeType: string) {
+  const blob = new Blob([contents], { type: mimeType });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTrainingSession) {
@@ -385,10 +444,27 @@ async function readAdminDirectPayments() {
   return result.directPayments ?? [];
 }
 
+async function readAdminEmailSubscribers() {
+  const response = await fetch(`/api/admin/email-subscribers?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as EmailSubscribersResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Email subscribers could not be loaded.");
+  }
+
+  return result.subscribers ?? [];
+}
+
 export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
   const [passes, setPasses] = useState<AdminPassPurchase[]>([]);
   const [directPayments, setDirectPayments] = useState<DirectPaymentRow[]>([]);
+  const [emailSubscribers, setEmailSubscribers] = useState<EmailSubscriberRow[]>([]);
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>("elite-performance");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
@@ -410,15 +486,17 @@ export function AdminAvailability() {
   async function refreshAdminData(message?: string) {
     try {
       setError("");
-      const [nextSessions, nextPasses, nextDirectPayments, nextDiagnostics] = await Promise.all([
+      const [nextSessions, nextPasses, nextDirectPayments, nextEmailSubscribers, nextDiagnostics] = await Promise.all([
         readAdminSessions(),
         readAdminPasses(),
         readAdminDirectPayments(),
+        readAdminEmailSubscribers(),
         readAdminDiagnostics()
       ]);
       setSessions(nextSessions);
       setPasses(nextPasses);
       setDirectPayments(nextDirectPayments);
+      setEmailSubscribers(nextEmailSubscribers);
       setDiagnostics(nextDiagnostics);
       if (message) {
         setNotice(message);
@@ -458,6 +536,10 @@ export function AdminAvailability() {
       zellePending: directPayments.filter((payment) => payment.status === "zelle_pending").length
     }),
     [directPayments]
+  );
+  const activeEmailSubscribers = useMemo(
+    () => emailSubscribers.filter((subscriber) => subscriber.opted_in && !subscriber.unsubscribed),
+    [emailSubscribers]
   );
   const filteredSessions = useMemo(
     () =>
@@ -652,6 +734,64 @@ export function AdminAvailability() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function updateEmailSubscriber(id: string, unsubscribed: boolean) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/email-subscribers/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ unsubscribed })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Email subscriber could not be updated.");
+      }
+
+      await refreshAdminData(unsubscribed ? "Subscriber marked unsubscribed." : "Subscriber reactivated.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Email subscriber could not be updated.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeEmailSubscriber(id: string) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/email-subscribers/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Email subscriber could not be removed.");
+      }
+
+      await refreshAdminData("Subscriber removed.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Email subscriber could not be removed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function exportEmailSubscribersCsv() {
+    downloadTextFile(
+      "est-cv-brevo-email-subscribers.csv",
+      subscriberCsv(activeEmailSubscribers),
+      "text/csv;charset=utf-8"
+    );
   }
 
   return (
@@ -970,6 +1110,125 @@ export function AdminAvailability() {
             </p>
           </div>
         )}
+      </section>
+
+      <section className="panel overflow-hidden">
+        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+          <div>
+            <p className="text-xs font-black uppercase text-electric">Email List</p>
+            <h3 className="mt-2 text-xl font-black text-navy">Marketing opt-ins for Brevo</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Export only parents who checked the email list box. Transactional booking emails are separate.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-center sm:min-w-64">
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{activeEmailSubscribers.length}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Active</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-mist p-3">
+              <p className="text-xl font-black text-navy">{emailSubscribers.length}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Total</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 p-5 sm:p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm font-semibold leading-6 text-slate-600">
+              CSV export includes active subscribers only: opted in and not unsubscribed.
+            </p>
+            <button
+              type="button"
+              onClick={exportEmailSubscribersCsv}
+              disabled={activeEmailSubscribers.length === 0}
+              className="rounded-md bg-electric px-5 py-3 text-xs font-black uppercase text-white shadow-lg shadow-electric/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Export CSV
+            </button>
+          </div>
+
+          {emailSubscribers.length > 0 ? (
+            <div className="grid gap-3">
+              {emailSubscribers.map((subscriber) => {
+                const isActive = subscriber.opted_in && !subscriber.unsubscribed;
+
+                return (
+                  <article key={subscriber.id} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                    <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Parent Name</span>
+                        <span className="font-black text-navy">{subscriber.parent_name || "Not provided"}</span>
+                      </p>
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Email</span>
+                        <span className="break-words font-black text-navy">{subscriber.email}</span>
+                      </p>
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Phone</span>
+                        <span className="font-semibold">{subscriber.phone || "Not provided"}</span>
+                      </p>
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Player</span>
+                        <span className="font-semibold">
+                          {subscriber.player_name || "Not provided"}
+                          {subscriber.player_age ? `, ${subscriber.player_age}` : ""}
+                        </span>
+                      </p>
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Source</span>
+                        <span className="font-semibold">{subscriber.source || "Not recorded"}</span>
+                      </p>
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Opt-in Date</span>
+                        <span className="font-semibold">{formatWaiverTimestamp(subscriber.opted_in_at)}</span>
+                      </p>
+                      <p>
+                        <span className="block text-[10px] font-black uppercase text-slate-500">Status</span>
+                        <span className={`font-black ${isActive ? "text-field" : "text-red-700"}`}>
+                          {isActive ? "Active" : "Unsubscribed"}
+                        </span>
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      {subscriber.unsubscribed ? (
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => void updateEmailSubscriber(subscriber.id, false)}
+                          className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Reactivate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => void updateEmailSubscriber(subscriber.id, true)}
+                          className="rounded-md border border-amber-200 px-4 py-2 text-xs font-black uppercase text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Unsubscribe
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void removeEmailSubscriber(subscriber.id)}
+                        className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-xs font-black uppercase text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+              No email opt-ins yet.
+            </p>
+          )}
+        </div>
       </section>
 
       <section className="panel overflow-hidden">

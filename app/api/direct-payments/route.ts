@@ -3,7 +3,8 @@ import { directPaymentOptions, type DirectPaymentOption } from "@/lib/pricing";
 import { createStripeDirectPaymentCheckoutSession } from "@/lib/stripe";
 import {
   attachDirectPaymentStripeCheckoutSession,
-  createDirectPaymentRecord
+  createDirectPaymentRecord,
+  saveEmailSubscriberOptIn
 } from "@/lib/supabase-db";
 import { sendDirectPaymentTransactionalEmails } from "@/lib/transactional-email";
 import { waiverVersion } from "@/lib/waiver-content";
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
     emergencyName?: string;
     emergencyPhone?: string;
     medicalNotes?: string;
+    marketingOptIn?: boolean;
   } | null;
   const playerCount = payload?.playerCount === 2 ? 2 : 1;
   const sessionCount =
@@ -111,6 +113,22 @@ export async function POST(request: Request) {
       medicalNotes: payload.medicalNotes,
       ipAddress: getRequestIpAddress(request)
     });
+    if (payload.marketingOptIn) {
+      const firstPlayerName = `${payload.playerFirstName.trim()} ${payload.playerLastName.trim()}`.trim();
+      const secondPlayerName =
+        playerCount === 2
+          ? `${payload.secondPlayerFirstName?.trim() ?? ""} ${payload.secondPlayerLastName?.trim() ?? ""}`.trim()
+          : "";
+
+      await saveEmailSubscriberOptIn({
+        parentName: record.parent_name,
+        email: record.parent_email,
+        phone: record.parent_phone,
+        playerName: [firstPlayerName, secondPlayerName].filter(Boolean).join(" + "),
+        playerAge: playerCount === 2 ? `${record.player_age} / ${record.second_player_age ?? ""}`.trim() : record.player_age,
+        source: record.payment_method === "zelle" ? "direct_pay_zelle" : "direct_pay_card"
+      });
+    }
 
     if (payload.paymentMethod === "zelle") {
       const option = directPaymentOptions[payload.paymentOption];

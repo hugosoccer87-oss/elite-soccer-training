@@ -30,6 +30,7 @@ type DirectPayFields = {
   mediaConsent: "" | "yes" | "no";
   waiverAgreement: boolean;
   guardianSignature: string;
+  marketingOptIn: boolean;
 };
 
 type DirectPayErrorKey =
@@ -70,7 +71,8 @@ const initialFields: DirectPayFields = {
   medicalNotes: "",
   mediaConsent: "",
   waiverAgreement: false,
-  guardianSignature: ""
+  guardianSignature: "",
+  marketingOptIn: false
 };
 
 const paymentCards: Array<{
@@ -524,6 +526,15 @@ export function DirectPayForm() {
               Parent Phone *
               <input className={fieldClass("parentPhone")} type="tel" value={fields.parentPhone} onChange={(event) => setField("parentPhone", event.target.value)} />
               {fieldError("parentPhone")}
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
+              <input
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                type="checkbox"
+                checked={fields.marketingOptIn}
+                onChange={(event) => setField("marketingOptIn", event.target.checked)}
+              />
+              <span>Yes, I&apos;d like to receive EST CV training schedules, updates, and special offers by email.</span>
             </label>
           </section>
 

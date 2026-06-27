@@ -141,6 +141,31 @@ export type EmailLogRow = {
   created_at: string;
 };
 
+export type EmailSubscriberRow = {
+  id: string;
+  parent_name?: string | null;
+  email: string;
+  phone?: string | null;
+  player_name?: string | null;
+  player_age?: string | null;
+  source?: string | null;
+  opted_in: boolean;
+  opted_in_at?: string | null;
+  unsubscribed: boolean;
+  unsubscribed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type EmailSubscriberInput = {
+  parentName?: string;
+  email: string;
+  phone?: string;
+  playerName?: string;
+  playerAge?: string;
+  source?: string;
+};
+
 export type DirectPaymentStatus = "pending_card_payment" | "zelle_pending" | "paid" | "cancelled";
 
 export type DirectPaymentRow = {
@@ -659,6 +684,98 @@ export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
 
 export async function listAdminDirectPayments() {
   return supabaseRequest<DirectPaymentRow[]>("direct_payments?select=*&order=created_at.desc").catch(() => []);
+}
+
+export async function listAdminEmailSubscribers() {
+  return supabaseRequest<EmailSubscriberRow[]>("email_subscribers?select=*&order=opted_in_at.desc").catch(() => []);
+}
+
+async function upsertEmailSubscriber(input: EmailSubscriberInput) {
+  const email = input.email.trim().toLowerCase();
+
+  if (!email) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const payload = {
+    parent_name: input.parentName?.trim() || null,
+    email,
+    phone: input.phone?.trim() || null,
+    player_name: input.playerName?.trim() || null,
+    player_age: input.playerAge?.trim() || null,
+    source: input.source?.trim() || null,
+    opted_in: true,
+    opted_in_at: now,
+    updated_at: now
+  };
+  const existing = await supabaseRequest<EmailSubscriberRow[]>(
+    `email_subscribers?select=*&email=eq.${encodeFilter(email)}&limit=1`
+  );
+  const current = existing[0];
+
+  if (current) {
+    const updated = await supabaseRequest<EmailSubscriberRow[]>(`email_subscribers?id=eq.${encodeFilter(current.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+
+    return updated[0] ?? current;
+  }
+
+  const inserted = await supabaseRequest<EmailSubscriberRow[]>("email_subscribers", {
+    method: "POST",
+    body: JSON.stringify({
+      ...payload,
+      unsubscribed: false
+    })
+  });
+
+  return inserted[0] ?? null;
+}
+
+export async function saveEmailSubscriberOptIn(input: EmailSubscriberInput) {
+  try {
+    const subscriber = await upsertEmailSubscriber(input);
+
+    if (subscriber) {
+      console.info("[EST Email List] Opt-in saved", {
+        email: subscriber.email,
+        source: subscriber.source
+      });
+    }
+
+    return subscriber;
+  } catch (error) {
+    console.error("[EST Email List] Opt-in could not be saved", {
+      email: input.email,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return null;
+  }
+}
+
+export async function updateEmailSubscriberStatus(id: string, unsubscribed: boolean) {
+  const rows = await supabaseRequest<EmailSubscriberRow[]>(`email_subscribers?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      unsubscribed,
+      unsubscribed_at: unsubscribed ? new Date().toISOString() : null
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function deleteEmailSubscriber(id: string) {
+  await supabaseRequest<null>(`email_subscribers?id=eq.${encodeFilter(id)}`, {
+    method: "DELETE",
+    headers: {
+      Prefer: "return=minimal"
+    }
+  });
 }
 
 export async function createDirectPaymentRecord(input: DirectPaymentInput) {

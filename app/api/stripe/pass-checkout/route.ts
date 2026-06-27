@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { type LaunchPassType, launchPassOptions } from "@/lib/pricing";
 import { createStripeLaunchPassCheckoutSession, getStripeEnvironmentDiagnostics } from "@/lib/stripe";
-import { attachPassStripeCheckoutSession, createPendingPassPurchase, getSupabaseAvailability } from "@/lib/supabase-db";
+import {
+  attachPassStripeCheckoutSession,
+  createPendingPassPurchase,
+  getSupabaseAvailability,
+  saveEmailSubscriberOptIn
+} from "@/lib/supabase-db";
 import { waiverVersion } from "@/lib/waiver-content";
 
 export const runtime = "nodejs";
@@ -47,6 +52,7 @@ export async function POST(request: Request) {
       waiverAcceptedAt?: string;
       mediaConsent?: "Granted" | "Declined";
     };
+    marketingOptIn?: boolean;
   } | null;
 
   if (
@@ -154,6 +160,17 @@ export async function POST(request: Request) {
 
     const session = await createStripeLaunchPassCheckoutSession(pass);
     await attachPassStripeCheckoutSession(pass.id, session.id);
+
+    if (payload.marketingOptIn) {
+      await saveEmailSubscriberOptIn({
+        parentName: pass.parent_name,
+        email: pass.parent_email,
+        phone: pass.parent_phone,
+        playerName: pass.player_name,
+        playerAge: pass.player_age,
+        source: selectedSessionIds.length > 0 ? "launch_pass_with_sessions" : "launch_pass_purchase"
+      });
+    }
 
     console.info("[EST Stripe] Redirecting to Stripe Checkout", {
       purchaseType: "launch_pass",

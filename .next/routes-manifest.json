@@ -28,6 +28,14 @@
       "namedRegex": "^/api/admin/direct\\-payments/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/admin/email-subscribers/[id]",
+      "regex": "^/api/admin/email\\-subscribers/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/admin/email\\-subscribers/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/admin/sessions/[id]",
       "regex": "^/api/admin/sessions/([^/]+?)(?:/)?$",
       "routeKeys": {

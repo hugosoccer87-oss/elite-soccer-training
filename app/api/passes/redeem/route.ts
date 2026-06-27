@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { type BookingRecord } from "@/lib/booking-data";
 import { confirmLaunchPassCreditBooking } from "@/lib/booking-confirmation";
-import { redeemLaunchPassCreditAndSaveWaiver } from "@/lib/supabase-db";
+import { redeemLaunchPassCreditAndSaveWaiver, saveEmailSubscriberOptIn } from "@/lib/supabase-db";
 
 export const runtime = "nodejs";
 
@@ -50,6 +50,16 @@ export async function POST(request: Request) {
       payload.passPurchaseId,
       getRequestIpAddress(request) || booking.ipAddress
     );
+    if (booking.marketingOptIn) {
+      await saveEmailSubscriberOptIn({
+        parentName: paidBooking.parentName,
+        email: paidBooking.email,
+        phone: paidBooking.phone,
+        playerName: paidBooking.playerName,
+        playerAge: paidBooking.playerAge,
+        source: "launch_pass_credit_booking"
+      });
+    }
     const confirmation = await confirmLaunchPassCreditBooking(paidBooking);
 
     return NextResponse.json({
