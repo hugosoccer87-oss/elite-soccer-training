@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     trainingGroup?: string;
     date?: string;
     time?: string;
+    endTime?: string;
     trainingFocus?: string | null;
     capacity?: number;
     location?: string;
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
       trainingGroup: payload.trainingGroup,
       date: payload.date,
       time: payload.time,
+      endTime: payload.endTime,
       trainingFocus: normalizeTrainingFocusForStorage(payload.trainingFocus) ?? undefined,
       capacity: payload.capacity,
       location: payload.location,

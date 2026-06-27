@@ -585,6 +585,7 @@ export async function createTrainingSession(input: {
   trainingGroup: TrainingGroupId;
   date: string;
   time: string;
+  endTime?: string;
   trainingFocus?: string;
   capacity?: number;
   location?: string;
@@ -592,7 +593,8 @@ export async function createTrainingSession(input: {
 }) {
   const group = getTrainingGroup(input.trainingGroup);
   const start = zonedDateTimeToUtc(input.date, input.time, defaultTimeZone);
-  const end = new Date(start.getTime() + 60 * 60_000);
+  const explicitEnd = input.endTime ? zonedDateTimeToUtc(input.date, input.endTime, defaultTimeZone) : null;
+  const end = explicitEnd && explicitEnd.getTime() > start.getTime() ? explicitEnd : new Date(start.getTime() + 60 * 60_000);
   const payload: Partial<TrainingSessionRow> & {
     training_group: TrainingGroupId;
     start_datetime: string;

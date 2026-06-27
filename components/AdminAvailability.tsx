@@ -142,6 +142,29 @@ type DirectPaymentFilter =
   | "four-pass"
   | "six-pass";
 
+type BulkSessionPattern = {
+  id: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  trainingFocus: string;
+};
+
+type BulkPreviewSession = {
+  key: string;
+  date: string;
+  dayLabel: string;
+  trainingGroup: TrainingGroupId;
+  trainingGroupLabel: string;
+  startTime: string;
+  endTime: string;
+  trainingFocus: string;
+  capacity: number;
+  location: string;
+  alreadyExists: boolean;
+  duplicateInPreview: boolean;
+};
+
 const adminSections: Array<{ id: AdminSection; label: string; note: string }> = [
   { id: "dashboard", label: "Dashboard", note: "Today and this week" },
   { id: "sessions", label: "Sessions", note: "Create and manage openings" },
@@ -154,6 +177,27 @@ const adminSections: Array<{ id: AdminSection; label: string; note: string }> = 
 const focusChoices = Array.from(
   new Set(["General Training", ...sessionFocusExamples, shootingFinishingTrainingFocusValue])
 );
+const dayOptions = [
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+  { value: 0, label: "Sunday" }
+];
+const defaultBulkPatterns: BulkSessionPattern[] = [
+  { id: "monday-6", dayOfWeek: 1, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
+  { id: "monday-7", dayOfWeek: 1, startTime: "07:00", endTime: "08:00", trainingFocus: "Wingers / Wing Backs" },
+  { id: "tuesday-6", dayOfWeek: 2, startTime: "06:00", endTime: "07:00", trainingFocus: "First Touch & Passing" },
+  { id: "tuesday-7", dayOfWeek: 2, startTime: "07:00", endTime: "08:00", trainingFocus: "Defending Session" },
+  { id: "wednesday-6", dayOfWeek: 3, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
+  { id: "wednesday-7", dayOfWeek: 3, startTime: "07:00", endTime: "08:00", trainingFocus: "Shooting / Attacking Session" },
+  { id: "thursday-6", dayOfWeek: 4, startTime: "06:00", endTime: "07:00", trainingFocus: "Speed of Play & Decision Making" },
+  { id: "thursday-7", dayOfWeek: 4, startTime: "07:00", endTime: "08:00", trainingFocus: "Defending Session" },
+  { id: "friday-6", dayOfWeek: 5, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
+  { id: "friday-7", dayOfWeek: 5, startTime: "07:00", endTime: "08:00", trainingFocus: "Shooting / Attacking Session" }
+];
 
 function escapeHtml(value: string) {
   return value
@@ -232,6 +276,40 @@ function formatTimeInput(value: string, timeZone = "America/Los_Angeles") {
     }, {});
 
   return `${parts.hour ?? "17"}:${parts.minute ?? "00"}`;
+}
+
+function dateFromDateInput(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function dateInputFromDate(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function dayLabelFromDateInput(value: string) {
+  const day = dateFromDateInput(value).getUTCDay();
+
+  return dayOptions.find((option) => option.value === day)?.label ?? "Session";
+}
+
+function bulkSessionKey(input: {
+  trainingGroup: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}) {
+  return [input.trainingGroup, input.date, input.startTime, input.endTime].join("|");
+}
+
+function existingSessionBulkKey(session: AdminTrainingSession) {
+  return bulkSessionKey({
+    trainingGroup: session.training_group,
+    date: formatDateOnly(session.start_datetime, session.timezone),
+    startTime: formatTimeInput(session.start_datetime, session.timezone),
+    endTime: formatTimeInput(session.end_datetime, session.timezone)
+  });
 }
 
 function formatWaiverTimestamp(value?: string | null) {
@@ -704,6 +782,14 @@ export function AdminAvailability() {
   const [newStatus, setNewStatus] = useState<"open" | "closed" | "cancelled">("open");
   const [createAnother, setCreateAnother] = useState(true);
   const [showCreateSession, setShowCreateSession] = useState(false);
+  const [showBulkCreate, setShowBulkCreate] = useState(false);
+  const [bulkStartDate, setBulkStartDate] = useState("");
+  const [bulkEndDate, setBulkEndDate] = useState("");
+  const [bulkGroupId, setBulkGroupId] = useState<TrainingGroupId>("elite-performance");
+  const [bulkCapacity, setBulkCapacity] = useState(String(slotCapacity));
+  const [bulkLocation, setBulkLocation] = useState("Desert Christian Academy, 40700 Yucca Lane, Bermuda Dunes, CA 92203");
+  const [bulkPatterns, setBulkPatterns] = useState<BulkSessionPattern[]>(defaultBulkPatterns);
+  const [bulkPreviewVisible, setBulkPreviewVisible] = useState(false);
   const [blockDate, setBlockDate] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -843,6 +929,58 @@ export function AdminAvailability() {
       return groups;
     }, []);
   }, [filteredSessions]);
+  const bulkPreviewSessions = useMemo<BulkPreviewSession[]>(() => {
+    if (!bulkStartDate || !bulkEndDate || bulkPatterns.length === 0) {
+      return [];
+    }
+
+    const start = dateFromDateInput(bulkStartDate);
+    const end = dateFromDateInput(bulkEndDate);
+
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start.getTime() > end.getTime()) {
+      return [];
+    }
+
+    const existingKeys = new Set(sessions.map(existingSessionBulkKey));
+    const previewKeys = new Set<string>();
+    const preview: BulkPreviewSession[] = [];
+
+    for (let current = new Date(start); current.getTime() <= end.getTime(); current.setUTCDate(current.getUTCDate() + 1)) {
+      const dayOfWeek = current.getUTCDay();
+      const date = dateInputFromDate(current);
+      const matchingPatterns = bulkPatterns.filter((pattern) => pattern.dayOfWeek === dayOfWeek);
+
+      for (const pattern of matchingPatterns) {
+        const key = bulkSessionKey({
+          trainingGroup: bulkGroupId,
+          date,
+          startTime: pattern.startTime,
+          endTime: pattern.endTime
+        });
+        const duplicateInPreview = previewKeys.has(key);
+
+        previewKeys.add(key);
+        preview.push({
+          key,
+          date,
+          dayLabel: dayLabelFromDateInput(date),
+          trainingGroup: bulkGroupId,
+          trainingGroupLabel: trainingGroupLabel(bulkGroupId),
+          startTime: pattern.startTime,
+          endTime: pattern.endTime,
+          trainingFocus: pattern.trainingFocus,
+          capacity: Math.min(slotCapacity, Math.max(1, Number(bulkCapacity) || slotCapacity)),
+          location: bulkLocation.trim() || business.location,
+          alreadyExists: existingKeys.has(key),
+          duplicateInPreview
+        });
+      }
+    }
+
+    return preview;
+  }, [bulkCapacity, bulkEndDate, bulkGroupId, bulkLocation, bulkPatterns, bulkStartDate, sessions]);
+  const bulkNewSessionsCount = bulkPreviewSessions.filter((session) => !session.alreadyExists && !session.duplicateInPreview).length;
+  const bulkSkippedSessionsCount = bulkPreviewSessions.length - bulkNewSessionsCount;
   const filteredBookings = useMemo(
     () =>
       bookings.filter((booking) => {
@@ -978,6 +1116,114 @@ export function AdminAvailability() {
       await refreshAdminData("Training session added to Supabase availability.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "The session could not be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function updateBulkPattern(id: string, updates: Partial<BulkSessionPattern>) {
+    setBulkPatterns((current) =>
+      current.map((pattern) => (pattern.id === id ? { ...pattern, ...updates } : pattern))
+    );
+    setBulkPreviewVisible(false);
+  }
+
+  function addBulkPattern() {
+    setBulkPatterns((current) => [
+      ...current,
+      {
+        id: `pattern-${Date.now()}`,
+        dayOfWeek: 1,
+        startTime: "06:00",
+        endTime: "07:00",
+        trainingFocus: "General Training"
+      }
+    ]);
+    setBulkPreviewVisible(false);
+  }
+
+  function removeBulkPattern(id: string) {
+    setBulkPatterns((current) => current.filter((pattern) => pattern.id !== id));
+    setBulkPreviewVisible(false);
+  }
+
+  function previewBulkSchedule() {
+    setError("");
+    setNotice("");
+
+    if (!bulkStartDate || !bulkEndDate) {
+      setError("Choose a start date and end date for the bulk schedule.");
+      return;
+    }
+
+    if (dateFromDateInput(bulkStartDate).getTime() > dateFromDateInput(bulkEndDate).getTime()) {
+      setError("The bulk schedule end date must be after the start date.");
+      return;
+    }
+
+    if (bulkPatterns.length === 0) {
+      setError("Add at least one weekly session pattern.");
+      return;
+    }
+
+    if (bulkPatterns.some((pattern) => pattern.endTime <= pattern.startTime)) {
+      setError("Each weekly pattern needs an end time after its start time.");
+      return;
+    }
+
+    if (bulkPreviewSessions.length === 0) {
+      setError("No sessions match this date range and weekly pattern.");
+      return;
+    }
+
+    setBulkPreviewVisible(true);
+  }
+
+  async function createBulkSessions() {
+    if (!bulkPreviewVisible || bulkPreviewSessions.length === 0) {
+      previewBulkSchedule();
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch("/api/admin/sessions/bulk", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          sessions: bulkPreviewSessions.map((session) => ({
+            trainingGroup: session.trainingGroup,
+            date: session.date,
+            time: session.startTime,
+            endTime: session.endTime,
+            trainingFocus: session.trainingFocus === "General Training" ? null : session.trainingFocus,
+            capacity: session.capacity,
+            location: session.location,
+            status: "open"
+          }))
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        createdCount?: number;
+        skippedCount?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Bulk sessions could not be created.");
+      }
+
+      await refreshAdminData(
+        `Created ${result.createdCount ?? 0} sessions. Skipped ${result.skippedCount ?? 0} existing sessions.`
+      );
+      setBulkPreviewVisible(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Bulk sessions could not be created.");
     } finally {
       setIsSaving(false);
     }
@@ -1487,6 +1733,251 @@ export function AdminAvailability() {
                     Save Session
                   </button>
                 </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="panel p-5 sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase text-electric">Bulk Create Sessions</p>
+                <h3 className="mt-2 text-2xl font-black text-navy">Create a month of openings.</h3>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                  Add weekly patterns, preview every session first, then create only the new sessions. Existing matching
+                  sessions are skipped.
+                </p>
+              </div>
+              <button type="button" onClick={() => setShowBulkCreate((value) => !value)} className={secondaryButtonClass}>
+                {showBulkCreate ? "Close Bulk Tool" : "Bulk Create Sessions"}
+              </button>
+            </div>
+
+            {showBulkCreate ? (
+              <div className="mt-6 grid gap-5">
+                <div className="rounded-xl border border-slate-200 bg-mist p-4 sm:p-5">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Start Date
+                      <input
+                        className={inputClass}
+                        type="date"
+                        value={bulkStartDate}
+                        onChange={(event) => {
+                          setBulkStartDate(event.target.value);
+                          setBulkPreviewVisible(false);
+                        }}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      End Date
+                      <input
+                        className={inputClass}
+                        type="date"
+                        value={bulkEndDate}
+                        onChange={(event) => {
+                          setBulkEndDate(event.target.value);
+                          setBulkPreviewVisible(false);
+                        }}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy lg:col-span-2">
+                      Training Group
+                      <select
+                        className={inputClass}
+                        value={bulkGroupId}
+                        onChange={(event) => {
+                          setBulkGroupId(event.target.value as TrainingGroupId);
+                          setBulkPreviewVisible(false);
+                        }}
+                      >
+                        {trainingGroups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.name} ({group.ages})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Capacity
+                      <input
+                        className={inputClass}
+                        type="number"
+                        min="1"
+                        max="6"
+                        value={bulkCapacity}
+                        onChange={(event) => {
+                          setBulkCapacity(event.target.value);
+                          setBulkPreviewVisible(false);
+                        }}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2 lg:col-span-3">
+                      Location
+                      <input
+                        className={inputClass}
+                        value={bulkLocation}
+                        onChange={(event) => {
+                          setBulkLocation(event.target.value);
+                          setBulkPreviewVisible(false);
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h4 className="text-lg font-black text-navy">Weekly session patterns</h4>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">
+                        Add one row for each weekly time block and focus.
+                      </p>
+                    </div>
+                    <button type="button" onClick={addBulkPattern} className={secondaryButtonClass}>
+                      Add Pattern
+                    </button>
+                  </div>
+
+                  <div className="mt-5 grid gap-3">
+                    {bulkPatterns.map((pattern, index) => (
+                      <div key={pattern.id} className="grid gap-3 rounded-lg border border-slate-200 bg-mist p-3 lg:grid-cols-[1fr_1fr_1fr_2fr_auto] lg:items-end">
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Day of Week
+                          <select
+                            className={inputClass}
+                            value={pattern.dayOfWeek}
+                            onChange={(event) => updateBulkPattern(pattern.id, { dayOfWeek: Number(event.target.value) })}
+                          >
+                            {dayOptions.map((day) => (
+                              <option key={day.value} value={day.value}>
+                                {day.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Start Time
+                          <input
+                            className={inputClass}
+                            type="time"
+                            value={pattern.startTime}
+                            onChange={(event) => updateBulkPattern(pattern.id, { startTime: event.target.value })}
+                          />
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          End Time
+                          <input
+                            className={inputClass}
+                            type="time"
+                            value={pattern.endTime}
+                            onChange={(event) => updateBulkPattern(pattern.id, { endTime: event.target.value })}
+                          />
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Session Focus
+                          <select
+                            className={inputClass}
+                            value={pattern.trainingFocus}
+                            onChange={(event) => updateBulkPattern(pattern.id, { trainingFocus: event.target.value })}
+                          >
+                            {focusChoices.map((focus) => (
+                              <option key={focus} value={focus}>
+                                {focus}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => removeBulkPattern(pattern.id)}
+                          disabled={bulkPatterns.length === 1}
+                          className={bulkPatterns.length === 1 ? secondaryButtonClass : dangerButtonClass}
+                        >
+                          Remove
+                          <span className="sr-only"> pattern {index + 1}</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <button type="button" onClick={previewBulkSchedule} className={navyButtonClass}>
+                    Preview Schedule
+                  </button>
+                  {bulkPreviewVisible ? (
+                    <p className="text-sm font-bold text-slate-600">
+                      Preview: {bulkNewSessionsCount} new / {bulkSkippedSessionsCount} skipped
+                    </p>
+                  ) : null}
+                </div>
+
+                {bulkPreviewVisible ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                    <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <h4 className="text-lg font-black text-navy">Preview Schedule</h4>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          Review every session before creating. Matching existing sessions are marked and skipped.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isSaving || bulkNewSessionsCount === 0}
+                        onClick={() => void createBulkSessions()}
+                        className={primaryButtonClass}
+                      >
+                        Create Sessions
+                      </button>
+                    </div>
+
+                    <div className="mt-4 grid gap-3">
+                      {bulkPreviewSessions.map((session) => {
+                        const skipped = session.alreadyExists || session.duplicateInPreview;
+
+                        return (
+                          <div
+                            key={session.key}
+                            className={`grid gap-3 rounded-lg border p-4 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-center ${
+                              skipped ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-mist"
+                            }`}
+                          >
+                            <div>
+                              <p className="text-xs font-black uppercase text-slate-500">{session.dayLabel}</p>
+                              <p className="mt-1 text-lg font-black text-navy">{session.date}</p>
+                              <p className="mt-1 text-sm font-semibold text-slate-600">
+                                {session.startTime}-{session.endTime}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-black uppercase text-slate-500">Session Focus</p>
+                              <p className="mt-1 font-black text-navy">{session.trainingFocus}</p>
+                              <p className="mt-1 text-sm text-slate-600">{session.trainingGroupLabel}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs font-black uppercase text-slate-500">Details</p>
+                              <p className="mt-1 text-sm font-semibold text-slate-600">Capacity {session.capacity}</p>
+                              <p className="mt-1 text-sm text-slate-600">{session.location}</p>
+                            </div>
+                            <span
+                              className={`rounded-full border px-3 py-1 text-center text-[11px] font-black uppercase ${
+                                skipped
+                                  ? "border-amber-300 bg-white text-amber-700"
+                                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              }`}
+                            >
+                              {session.alreadyExists
+                                ? "Already exists"
+                                : session.duplicateInPreview
+                                  ? "Duplicate in preview"
+                                  : "New"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
