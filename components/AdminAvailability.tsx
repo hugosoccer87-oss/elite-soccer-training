@@ -802,6 +802,7 @@ export function AdminAvailability() {
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [expandedSessionId, setExpandedSessionId] = useState("");
   const [actionsSessionId, setActionsSessionId] = useState("");
+  const [creditingBookingId, setCreditingBookingId] = useState("");
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>("upcoming");
   const [bookingFocusFilter, setBookingFocusFilter] = useState("");
   const [bookingDateFilter, setBookingDateFilter] = useState("");
@@ -1256,6 +1257,37 @@ export function AdminAvailability() {
       setError(saveError instanceof Error ? saveError.message : "The session could not be updated.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function issueMakeupCredit(booking: AdminBookingRecord) {
+    if (!window.confirm(`Add 1 Launch Pass credit back for ${booking.player_name} and notify the parent?`)) {
+      return;
+    }
+
+    setCreditingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch("/api/admin/credits/makeup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ bookingId: booking.id })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Makeup credit could not be issued.");
+      }
+
+      await refreshAdminData(result.message || "1 credit was added back and the parent was notified.");
+    } catch (creditError) {
+      setError(creditError instanceof Error ? creditError.message : "Makeup credit could not be issued.");
+    } finally {
+      setCreditingBookingId("");
     }
   }
 
@@ -2091,6 +2123,12 @@ export function AdminAvailability() {
                         const detailsOpen = expandedSessionId === session.id;
                         const actionsOpen = actionsSessionId === session.id;
                         const paidBookingNames = session.paidBookings.map((booking) => booking.player_name).join(", ");
+                        const launchPassBookings = session.paidBookings.filter(
+                          (booking) =>
+                            booking.payment_type === "launch_pass_credit" ||
+                            Boolean(booking.pass_purchase_id) ||
+                            Boolean(booking.credit_redemption_id)
+                        );
 
                         return (
                           <article key={session.id} className="grid gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -2228,57 +2266,87 @@ export function AdminAvailability() {
                               session.paidBookings.length > 0 ? (
                                 <div className="rounded-lg border border-slate-200 bg-mist p-4">
                                   <p className="text-xs font-black uppercase text-electric">Paid Bookings</p>
+                                  {session.status === "cancelled" && launchPassBookings.length > 0 ? (
+                                    <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-800">
+                                      This cancelled session has Launch Pass bookings. You may issue makeup credits to affected players.
+                                    </p>
+                                  ) : null}
                                   <div className="mt-3 grid gap-4">
-                                    {session.paidBookings.map((booking) => (
-                                      <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                                        <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                                          <div>
-                                            <h5 className="font-black text-navy">{booking.player_name}</h5>
-                                            <p className="mt-1 text-sm text-slate-600">
-                                              {booking.player_count} player(s) - Payment: {booking.status}
-                                            </p>
-                                            <p className="mt-1 text-sm text-slate-600">
-                                              Payment type:{" "}
-                                              {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}
-                                            </p>
-                                            <p className="mt-1 text-sm text-slate-600">Amount paid: {formatMoney(booking.amount_paid)}</p>
-                                          </div>
-                                          <div className="grid gap-1 text-sm text-slate-600">
-                                            <p><span className="font-black text-navy">Parent:</span> {booking.parent_name}</p>
-                                            <p><span className="font-black text-navy">Phone:</span> {booking.parent_phone}</p>
-                                            <p><span className="font-black text-navy">Email:</span> {booking.parent_email}</p>
-                                            <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
-                                            <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
-                                            <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
-                                          </div>
-                                        </div>
+                                    {session.paidBookings.map((booking) => {
+                                      const isLaunchPassBooking =
+                                        booking.payment_type === "launch_pass_credit" ||
+                                        Boolean(booking.pass_purchase_id) ||
+                                        Boolean(booking.credit_redemption_id);
+                                      const canIssueMakeupCredit =
+                                        session.status === "cancelled" && isLaunchPassBooking && !booking.creditAdjustment;
 
-                                        <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4">
-                                          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                                      return (
+                                        <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                                          <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
                                             <div>
-                                              <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
-                                              <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
-                                                <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiver?.waiver_signed ? "Yes" : "Not recorded"}</p>
-                                                <p><span className="font-black text-navy">Typed Signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
-                                                <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
-                                                <p><span className="font-black text-navy">Media Consent:</span> {booking.waiver?.media_consent || "Not recorded"}</p>
+                                              <h5 className="font-black text-navy">{booking.player_name}</h5>
+                                              <p className="mt-1 text-sm text-slate-600">
+                                                {booking.player_count} player(s) - Payment: {booking.status}
+                                              </p>
+                                              <p className="mt-1 text-sm text-slate-600">
+                                                Payment type:{" "}
+                                                {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}
+                                              </p>
+                                              <p className="mt-1 text-sm text-slate-600">Amount paid: {formatMoney(booking.amount_paid)}</p>
+                                              {booking.creditAdjustment ? (
+                                                <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-700">
+                                                  Makeup credit added on {formatWaiverTimestamp(booking.creditAdjustment.created_at)}. Email:{" "}
+                                                  {booking.creditAdjustment.email_status}
+                                                </p>
+                                              ) : null}
+                                            </div>
+                                            <div className="grid gap-1 text-sm text-slate-600">
+                                              <p><span className="font-black text-navy">Parent:</span> {booking.parent_name}</p>
+                                              <p><span className="font-black text-navy">Phone:</span> {booking.parent_phone}</p>
+                                              <p><span className="font-black text-navy">Email:</span> {booking.parent_email}</p>
+                                              <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
+                                              <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
+                                              <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
+                                            </div>
+                                          </div>
+
+                                          <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4">
+                                            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                                              <div>
+                                                <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
+                                                <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                                                  <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiver?.waiver_signed ? "Yes" : "Not recorded"}</p>
+                                                  <p><span className="font-black text-navy">Typed Signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
+                                                  <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
+                                                  <p><span className="font-black text-navy">Media Consent:</span> {booking.waiver?.media_consent || "Not recorded"}</p>
+                                                </div>
+                                              </div>
+                                              <div className="flex flex-col gap-2">
+                                                {canIssueMakeupCredit ? (
+                                                  <button
+                                                    type="button"
+                                                    disabled={creditingBookingId === booking.id}
+                                                    onClick={() => void issueMakeupCredit(booking)}
+                                                    className={primaryButtonClass}
+                                                  >
+                                                    {creditingBookingId === booking.id ? "Issuing..." : "Issue Makeup Credit"}
+                                                  </button>
+                                                ) : null}
+                                                <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
+                                                  View Waiver Record
+                                                </button>
+                                                <button type="button" onClick={() => printWaiverRecord(booking, session)} className={secondaryButtonClass}>
+                                                  Print Waiver
+                                                </button>
+                                                <button type="button" onClick={() => downloadWaiverRecord(booking, session)} className={secondaryButtonClass}>
+                                                  Download Waiver
+                                                </button>
                                               </div>
                                             </div>
-                                            <div className="flex flex-col gap-2">
-                                              <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
-                                                View Waiver Record
-                                              </button>
-                                              <button type="button" onClick={() => printWaiverRecord(booking, session)} className={secondaryButtonClass}>
-                                                Print Waiver
-                                              </button>
-                                              <button type="button" onClick={() => downloadWaiverRecord(booking, session)} className={secondaryButtonClass}>
-                                                Download Waiver
-                                              </button>
-                                            </div>
                                           </div>
-                                        </div>
-                                      </article>
-                                    ))}
+                                        </article>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               ) : (
@@ -2556,6 +2624,25 @@ export function AdminAvailability() {
                         No credits used yet.
                       </p>
                     )}
+                    {pass.adjustments.length > 0 ? (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                        <p className="text-xs font-black uppercase text-emerald-700">Credit Adjustments</p>
+                        <div className="mt-3 grid gap-2 text-sm text-emerald-900">
+                          {pass.adjustments.map((adjustment) => {
+                            const relatedSession = sessionById.get(adjustment.original_session_id);
+
+                            return (
+                              <p key={adjustment.id}>
+                                Credit added: {adjustment.credit_amount} - {adjustment.reason} -{" "}
+                                {formatWaiverTimestamp(adjustment.created_at)}
+                                {relatedSession ? ` (${formatDateTime(relatedSession.start_datetime, relatedSession.timezone)})` : ""}
+                                {` - Email: ${adjustment.email_status}`}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}

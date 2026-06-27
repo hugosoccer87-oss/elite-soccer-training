@@ -106,8 +106,24 @@ export type CreditRedemptionRow = {
   created_at: string;
 };
 
+export type CreditAdjustmentRow = {
+  id: string;
+  pass_purchase_id: string;
+  original_booking_id: string;
+  original_session_id: string;
+  player_name: string;
+  parent_email: string;
+  credit_amount: number;
+  reason: string;
+  created_by?: string | null;
+  email_status: "not_sent" | "sent" | "failed";
+  email_error?: string | null;
+  created_at: string;
+};
+
 export type AdminPassPurchase = PassPurchaseRow & {
   redemptions: Array<CreditRedemptionRow & { booking?: BookingRow | null }>;
+  adjustments: CreditAdjustmentRow[];
 };
 
 export type WaiverRow = {
@@ -211,6 +227,7 @@ export type AdminBookingRecord = BookingRow & {
   emailLogs: EmailLogRow[];
   passPurchase?: PassPurchaseRow | null;
   creditRedemption?: CreditRedemptionRow | null;
+  creditAdjustment?: CreditAdjustmentRow | null;
 };
 
 export type AdminTrainingSession = TrainingSessionRow & {
@@ -642,18 +659,20 @@ export async function deleteTrainingSession(id: string) {
 }
 
 export async function listAdminBookings() {
-  const [bookings, waivers, calendarEvents, emailLogs, passPurchases, redemptions] = await Promise.all([
+  const [bookings, waivers, calendarEvents, emailLogs, passPurchases, redemptions, adjustments] = await Promise.all([
     supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc"),
     supabaseRequest<WaiverRow[]>("waivers?select=*"),
     supabaseRequest<CalendarEventRow[]>("calendar_events?select=*"),
     supabaseRequest<EmailLogRow[]>("email_logs?select=*&order=created_at.desc"),
     supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
-    supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => [])
+    supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<CreditAdjustmentRow[]>("credit_adjustments?select=*&order=created_at.desc").catch(() => [])
   ]);
   const waiverMap = new Map(waivers.map((waiver) => [waiver.booking_id, waiver]));
   const calendarMap = new Map(calendarEvents.map((event) => [event.booking_id, event]));
   const passMap = new Map(passPurchases.map((pass) => [pass.id, pass]));
   const redemptionMap = new Map(redemptions.map((redemption) => [redemption.booking_id, redemption]));
+  const adjustmentMap = new Map(adjustments.map((adjustment) => [adjustment.original_booking_id, adjustment]));
 
   return bookings.map((booking) => ({
     ...booking,
@@ -661,14 +680,16 @@ export async function listAdminBookings() {
     calendarEvent: calendarMap.get(booking.id) ?? null,
     emailLogs: emailLogs.filter((log) => log.booking_id === booking.id),
     passPurchase: booking.pass_purchase_id ? passMap.get(booking.pass_purchase_id) ?? null : null,
-    creditRedemption: redemptionMap.get(booking.id) ?? null
+    creditRedemption: redemptionMap.get(booking.id) ?? null,
+    creditAdjustment: adjustmentMap.get(booking.id) ?? null
   }));
 }
 
 export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
-  const [passes, redemptions, bookings] = await Promise.all([
+  const [passes, redemptions, adjustments, bookings] = await Promise.all([
     supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<CreditAdjustmentRow[]>("credit_adjustments?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc").catch(() => [])
   ]);
   const bookingMap = new Map(bookings.map((booking) => [booking.id, booking]));
@@ -680,7 +701,8 @@ export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
       .map((redemption) => ({
         ...redemption,
         booking: bookingMap.get(redemption.booking_id) ?? null
-      }))
+      })),
+    adjustments: adjustments.filter((adjustment) => adjustment.pass_purchase_id === pass.id)
   }));
 }
 
@@ -924,6 +946,69 @@ async function getSessionOrThrow(sessionId: string) {
   }
 
   return session;
+}
+
+export async function issueLaunchPassMakeupCredit(input: {
+  bookingId: string;
+  createdBy?: string;
+}) {
+  const issued = await supabaseRequest<CreditAdjustmentRow[] | CreditAdjustmentRow>(
+    "rpc/issue_launch_pass_makeup_credit",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_booking_id: input.bookingId,
+        p_created_by: input.createdBy || "admin"
+      })
+    }
+  );
+  const adjustment = Array.isArray(issued) ? issued[0] : issued;
+
+  if (!adjustment) {
+    throw new Error("Makeup credit could not be issued.");
+  }
+
+  const bookingRows = await supabaseRequest<BookingRow[]>(
+    `bookings?select=*&id=eq.${encodeFilter(adjustment.original_booking_id)}&limit=1`
+  );
+  const booking = bookingRows[0];
+
+  if (!booking) {
+    throw new Error("Credited booking could not be loaded.");
+  }
+
+  const session = await getSessionOrThrow(adjustment.original_session_id);
+  const pass = await getPassPurchaseById(adjustment.pass_purchase_id);
+
+  if (!pass) {
+    throw new Error("Credited Launch Pass could not be loaded.");
+  }
+
+  return {
+    adjustment,
+    booking,
+    session,
+    pass
+  };
+}
+
+export async function updateCreditAdjustmentEmailStatus(input: {
+  adjustmentId: string;
+  status: "sent" | "failed";
+  errorMessage?: string;
+}) {
+  const rows = await supabaseRequest<CreditAdjustmentRow[]>(
+    `credit_adjustments?id=eq.${encodeFilter(input.adjustmentId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        email_status: input.status,
+        email_error: input.status === "failed" ? input.errorMessage || "Email could not be sent." : null
+      })
+    }
+  );
+
+  return rows[0] ?? null;
 }
 
 export async function createPendingBooking(rawBooking: BookingRecord, ipAddress = "") {

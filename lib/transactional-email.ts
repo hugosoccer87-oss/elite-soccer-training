@@ -12,7 +12,7 @@ import {
   getSessionTotalCents,
   sessionPriceLabel
 } from "@/lib/pricing";
-import type { DirectPaymentRow, PassPurchaseRow } from "@/lib/supabase-db";
+import type { BookingRow, CreditAdjustmentRow, DirectPaymentRow, PassPurchaseRow, TrainingSessionRow } from "@/lib/supabase-db";
 import { buildSignedWaiverPdf, signedWaiverPdfFileName } from "@/lib/waiver-pdf";
 
 type NodemailerModule = {
@@ -66,6 +66,11 @@ type PassEmailResult = {
   sent: boolean;
   customerSent: boolean;
   adminSent: boolean;
+  message?: string;
+};
+
+type CustomerOnlyEmailResult = {
+  sent: boolean;
   message?: string;
 };
 
@@ -534,6 +539,69 @@ function formatDirectPaymentTimestamp(value: string) {
     timeStyle: "short",
     timeZone: "America/Los_Angeles"
   });
+}
+
+function formatSessionDate(value: string, timeZone = "America/Los_Angeles") {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date(value));
+}
+
+function formatSessionTime(value: string, timeZone = "America/Los_Angeles") {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function makeupCreditCustomerEmail(input: {
+  adjustment: CreditAdjustmentRow;
+  booking: BookingRow;
+  session: TrainingSessionRow;
+}): EmailMessage {
+  const sessionDate = formatSessionDate(input.session.start_datetime, input.session.timezone);
+  const sessionTime = formatSessionTime(input.session.start_datetime, input.session.timezone);
+  const text = [
+    "EST CV Session Credit Added",
+    "",
+    `Hi ${input.booking.parent_name},`,
+    "",
+    `The EST CV session scheduled for ${sessionDate} at ${sessionTime} was cancelled.`,
+    "",
+    `We have added 1 training credit back to ${input.booking.player_name}'s Launch Pass.`,
+    "",
+    "This credit can be used toward a future available EST CV training session.",
+    "",
+    "Thank you for your understanding.",
+    "",
+    "Coach Hugo",
+    "Elite Soccer Training CV"
+  ].join("\n");
+  const html = brandedEmailShell({
+    title: "Session Credit Added",
+    intro: "A training credit has been added back to your Launch Pass.",
+    body: `
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(input.booking.parent_name)},</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">The EST CV session scheduled for <strong style="color:#06152b">${escapeHtml(sessionDate)}</strong> at <strong style="color:#06152b">${escapeHtml(sessionTime)}</strong> was cancelled.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">We have added <strong style="color:#06152b">1 training credit</strong> back to ${escapeHtml(input.booking.player_name)}'s Launch Pass.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">This credit can be used toward a future available EST CV training session.</p>
+      <p style="margin:24px 0 0;color:#334155;line-height:1.7">Thank you for your understanding.<br />Coach Hugo<br />Elite Soccer Training CV</p>
+    `
+  });
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: input.booking.parent_email,
+    replyTo: business.email,
+    subject: "EST CV Session Credit Added",
+    text,
+    html
+  };
 }
 
 function directPaymentPlayerNames(record: DirectPaymentRow) {
@@ -1093,6 +1161,94 @@ export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): 
       customerSent: false,
       adminSent: false,
       message: error instanceof Error ? error.message : "Launch Pass email failed to send."
+    };
+  }
+}
+
+export async function sendMakeupCreditEmail(input: {
+  adjustment: CreditAdjustmentRow;
+  booking: BookingRow;
+  session: TrainingSessionRow;
+}): Promise<CustomerOnlyEmailResult> {
+  const customer = makeupCreditCustomerEmail(input);
+  const baseAttempt = {
+    bookingId: input.booking.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Makeup credit was added, but parent email was not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      bookingId: input.booking.id,
+      creditAdjustmentId: input.adjustment.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
+    };
+  }
+
+  console.info("[EST Email] Preparing customer confirmation email", {
+    bookingId: input.booking.id,
+    creditAdjustmentId: input.adjustment.id,
+    type: "makeup_credit"
+  });
+  console.info("[EST Email] Customer recipient:", {
+    bookingId: input.booking.id,
+    to: customer.to
+  });
+
+  try {
+    const transport = await createTransport();
+    const result = await transport.sendMail(customer);
+
+    console.info("[EST Email] Customer email sent successfully", {
+      to: customer.to,
+      bookingId: input.booking.id,
+      creditAdjustmentId: input.adjustment.id,
+      messageId: result.messageId
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "sent",
+      adminStatus: "not_attempted"
+    });
+
+    return {
+      sent: true
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Makeup credit email failed to send.";
+
+    console.error("[EST Email] Customer email failed:", {
+      to: customer.to,
+      bookingId: input.booking.id,
+      creditAdjustmentId: input.adjustment.id,
+      error: message
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
     };
   }
 }
