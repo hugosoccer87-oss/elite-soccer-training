@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
-import { getSessionFocusLabel, sessionFocusExamples } from "@/lib/session-focus";
+import { getSessionFocusLabel, sessionFocusExamples, shootingFinishingTrainingFocusValue } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type {
   AdminBookingRecord,
@@ -16,6 +16,14 @@ import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
 
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
+const primaryButtonClass =
+  "rounded-md bg-electric px-5 py-3 text-xs font-black uppercase text-white shadow-lg shadow-electric/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60";
+const navyButtonClass =
+  "rounded-md bg-navy px-5 py-3 text-xs font-black uppercase text-white transition hover:bg-electric disabled:cursor-not-allowed disabled:opacity-60";
+const secondaryButtonClass =
+  "rounded-md border border-slate-300 bg-white px-4 py-3 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric disabled:cursor-not-allowed disabled:opacity-60";
+const dangerButtonClass =
+  "rounded-md border border-red-200 bg-red-50 px-4 py-3 text-xs font-black uppercase text-red-700 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60";
 
 type AdminDiagnostics = {
   stripeKeyMode: "test" | "live" | "unknown" | "missing";
@@ -82,6 +90,12 @@ type SessionsResponse = {
   error?: string;
 };
 
+type BookingsResponse = {
+  status?: string;
+  bookings?: AdminBookingRecord[];
+  error?: string;
+};
+
 type PassesResponse = {
   status?: string;
   passes?: AdminPassPurchase[];
@@ -102,10 +116,44 @@ type EmailSubscribersResponse = {
 
 type ActiveWaiverRecord = {
   booking: AdminBookingRecord;
-  session: AdminTrainingSession;
+  session?: AdminTrainingSession;
 };
 
-type SessionFilter = "all" | "elite" | "focused" | "general" | "open" | "closed";
+type AdminSection = "dashboard" | "sessions" | "bookings" | "passes" | "direct-payments" | "email-list";
+type SessionFilter =
+  | "all"
+  | "open"
+  | "full"
+  | "closed"
+  | "cancelled"
+  | "technical"
+  | "defending"
+  | "shooting-attacking"
+  | "shooting-finishing";
+type SessionDateRange = "all" | "today" | "this-week" | "upcoming" | "past";
+type BookingFilter = "all" | "upcoming" | "past" | "paid" | "pending";
+type PassFilter = "all" | "active" | "used-up" | "expired" | "four" | "six";
+type DirectPaymentFilter =
+  | "all"
+  | "zelle-pending"
+  | "card-paid"
+  | "pending-card"
+  | "single-session"
+  | "four-pass"
+  | "six-pass";
+
+const adminSections: Array<{ id: AdminSection; label: string; note: string }> = [
+  { id: "dashboard", label: "Dashboard", note: "Today and this week" },
+  { id: "sessions", label: "Sessions", note: "Create and manage openings" },
+  { id: "bookings", label: "Bookings", note: "Players and waivers" },
+  { id: "passes", label: "Passes & Credits", note: "Launch Pass tracking" },
+  { id: "direct-payments", label: "Direct Payments", note: "Pay + waiver records" },
+  { id: "email-list", label: "Email List", note: "Brevo CSV export" }
+];
+
+const focusChoices = Array.from(
+  new Set(["General Training", ...sessionFocusExamples, shootingFinishingTrainingFocusValue])
+);
 
 function escapeHtml(value: string) {
   return value
@@ -117,8 +165,6 @@ function escapeHtml(value: string) {
 }
 
 function formatDateTime(value: string, timeZone = "America/Los_Angeles") {
-  const date = new Date(value);
-
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
     weekday: "short",
@@ -126,18 +172,38 @@ function formatDateTime(value: string, timeZone = "America/Los_Angeles") {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit"
-  }).format(date);
+  }).format(new Date(value));
+}
+
+function formatDateHeading(value: string, timeZone = "America/Los_Angeles") {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    month: "long",
+    day: "numeric"
+  }).format(new Date(value));
+}
+
+function formatTime(value: string, timeZone = "America/Los_Angeles") {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatTimeRange(session: Pick<AdminTrainingSession, "start_datetime" | "end_datetime" | "timezone">) {
+  return `${formatTime(session.start_datetime, session.timezone)}-${formatTime(session.end_datetime, session.timezone)}`;
 }
 
 function formatDateOnly(value: string, timeZone = "America/Los_Angeles") {
-  const date = new Date(value);
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
   })
-    .formatToParts(date)
+    .formatToParts(new Date(value))
     .reduce<Record<string, string>>((current, part) => {
       if (part.type !== "literal") {
         current[part.type] = part.value;
@@ -147,6 +213,25 @@ function formatDateOnly(value: string, timeZone = "America/Los_Angeles") {
     }, {});
 
   return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function formatTimeInput(value: string, timeZone = "America/Los_Angeles") {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  })
+    .formatToParts(new Date(value))
+    .reduce<Record<string, string>>((current, part) => {
+      if (part.type !== "literal") {
+        current[part.type] = part.value;
+      }
+
+      return current;
+    }, {});
+
+  return `${parts.hour ?? "17"}:${parts.minute ?? "00"}`;
 }
 
 function formatWaiverTimestamp(value?: string | null) {
@@ -163,6 +248,10 @@ function formatWaiverTimestamp(value?: string | null) {
 
 function bookingProgramLabel(booking: AdminBookingRecord) {
   return trainingGroups.find((group) => group.id === booking.training_group)?.name ?? booking.training_group;
+}
+
+function trainingGroupLabel(trainingGroup: TrainingGroupId) {
+  return trainingGroups.find((group) => group.id === trainingGroup)?.name ?? trainingGroup;
 }
 
 function passTypeLabel(passType: string) {
@@ -194,9 +283,21 @@ function sessionFocusLabel(session: Pick<AdminTrainingSession, "training_focus">
 }
 
 function sessionFocusBadgeClass(session: Pick<AdminTrainingSession, "training_focus">) {
-  return session.training_focus?.trim()
-    ? "border-electric/30 bg-blue-50 text-electric"
-    : "border-slate-200 bg-white text-slate-700";
+  const focus = sessionFocusLabel(session).toLowerCase();
+
+  if (focus.includes("shooting")) {
+    return "border-blue-200 bg-blue-50 text-electric";
+  }
+
+  if (focus.includes("defending")) {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (focus.includes("technical") || focus.includes("first touch")) {
+    return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  }
+
+  return "border-slate-200 bg-white text-slate-700";
 }
 
 function statusBadgeClass(status: string) {
@@ -266,7 +367,9 @@ function subscriberCsv(subscribers: EmailSubscriberRow[]) {
       subscriber.source,
       subscriber.opted_in_at,
       subscriber.unsubscribed
-    ].map(csvCell).join(",")
+    ]
+      .map(csvCell)
+      .join(",")
   );
 
   return [columns.join(","), ...rows].join("\n");
@@ -295,6 +398,7 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
     `Booking ID: ${booking.id}`,
     `Training Group: ${bookingProgramLabel(booking)}`,
     `Session: ${session ? formatDateTime(session.start_datetime, session.timezone) : "Not recorded"}`,
+    `Session Focus: ${session ? sessionFocusLabel(session) : "Not recorded"}`,
     "",
     "Participant Information",
     `Parent/Guardian Name: ${booking.parent_name}`,
@@ -315,6 +419,7 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
     "Booking Notes",
     `Notes: ${booking.notes || "None"}`,
     `Payment Status: ${booking.status}`,
+    `Payment Type: ${booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}`,
     `Stripe Checkout Session: ${booking.stripe_checkout_session_id || "Not recorded"}`,
     `Stripe Payment Intent: ${booking.stripe_payment_intent_id || "Not recorded"}`,
     `Google Calendar Event ID: ${booking.calendarEvent?.google_calendar_event_id || "Not recorded"}`,
@@ -367,17 +472,124 @@ function printWaiverRecord(booking: AdminBookingRecord, session?: AdminTrainingS
 }
 
 function downloadWaiverRecord(booking: AdminBookingRecord, session?: AdminTrainingSession) {
-  const blob = new Blob([bookingWaiverRecordText(booking, session)], { type: "text/plain;charset=utf-8" });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
   const safeBookingId = booking.id.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
 
-  link.href = url;
-  link.download = `waiver-record-${safeBookingId}.txt`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
+  downloadTextFile(`waiver-record-${safeBookingId}.txt`, bookingWaiverRecordText(booking, session), "text/plain;charset=utf-8");
+}
+
+function isFuture(value: string) {
+  return new Date(value).getTime() >= Date.now();
+}
+
+function isToday(value: string, timeZone = "America/Los_Angeles") {
+  return formatDateOnly(value, timeZone) === formatDateOnly(new Date().toISOString(), timeZone);
+}
+
+function isThisWeek(value: string) {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+  const time = new Date(value).getTime();
+
+  return time >= start.getTime() && time < end.getTime();
+}
+
+function isThisMonth(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+}
+
+function sessionMatchesFilter(session: AdminTrainingSession, filter: SessionFilter) {
+  const focus = sessionFocusLabel(session).toLowerCase();
+
+  if (filter === "all") {
+    return true;
+  }
+
+  if (filter === "open") {
+    return session.status === "open" && session.remainingSpots > 0;
+  }
+
+  if (filter === "full") {
+    return session.status === "open" && session.remainingSpots <= 0;
+  }
+
+  if (filter === "closed") {
+    return session.status === "closed";
+  }
+
+  if (filter === "cancelled") {
+    return session.status === "cancelled";
+  }
+
+  if (filter === "technical") {
+    return focus.includes("technical") || focus.includes("first touch") || focus.includes("passing");
+  }
+
+  if (filter === "defending") {
+    return focus.includes("defending");
+  }
+
+  if (filter === "shooting-attacking") {
+    return focus.includes("shooting / attacking") || focus.includes("attacking");
+  }
+
+  if (filter === "shooting-finishing") {
+    return focus.includes("shooting & finishing") || focus.includes("finishing");
+  }
+
+  return true;
+}
+
+function sessionMatchesDateRange(session: AdminTrainingSession, range: SessionDateRange) {
+  if (range === "all") {
+    return true;
+  }
+
+  if (range === "today") {
+    return isToday(session.start_datetime, session.timezone);
+  }
+
+  if (range === "this-week") {
+    return isThisWeek(session.start_datetime);
+  }
+
+  if (range === "upcoming") {
+    return isFuture(session.start_datetime);
+  }
+
+  if (range === "past") {
+    return !isFuture(session.start_datetime);
+  }
+
+  return true;
+}
+
+function playerNamesForDirectPayment(payment: DirectPaymentRow) {
+  const first = `${payment.player_first_name} ${payment.player_last_name}`.trim();
+  const second = `${payment.second_player_first_name ?? ""} ${payment.second_player_last_name ?? ""}`.trim();
+
+  return [first, payment.player_count === 2 ? second : ""].filter(Boolean).join(" + ");
+}
+
+function directPaymentStatusBadge(status: DirectPaymentStatus) {
+  if (status === "paid") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "zelle_pending") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  if (status === "cancelled") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  return "border-slate-200 bg-slate-100 text-slate-600";
 }
 
 async function readAdminDiagnostics() {
@@ -410,6 +622,22 @@ async function readAdminSessions() {
   }
 
   return result.sessions ?? [];
+}
+
+async function readAdminBookings() {
+  const response = await fetch(`/api/admin/bookings?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as BookingsResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Bookings could not be loaded.");
+  }
+
+  return result.bookings ?? [];
 }
 
 async function readAdminPasses() {
@@ -462,15 +690,20 @@ async function readAdminEmailSubscribers() {
 
 export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
+  const [bookings, setBookings] = useState<AdminBookingRecord[]>([]);
   const [passes, setPasses] = useState<AdminPassPurchase[]>([]);
   const [directPayments, setDirectPayments] = useState<DirectPaymentRow[]>([]);
   const [emailSubscribers, setEmailSubscribers] = useState<EmailSubscriberRow[]>([]);
+  const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>("elite-performance");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
   const [newTrainingFocus, setNewTrainingFocus] = useState("");
   const [newCapacity, setNewCapacity] = useState(String(slotCapacity));
   const [newLocation, setNewLocation] = useState(business.location);
+  const [newStatus, setNewStatus] = useState<"open" | "closed" | "cancelled">("open");
+  const [createAnother, setCreateAnother] = useState(true);
+  const [showCreateSession, setShowCreateSession] = useState(false);
   const [blockDate, setBlockDate] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -479,25 +712,38 @@ export function AdminAvailability() {
   const [diagnostics, setDiagnostics] = useState<AdminDiagnostics | null>(null);
   const [activeWaiverRecord, setActiveWaiverRecord] = useState<ActiveWaiverRecord | null>(null);
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>("all");
+  const [sessionDateRange, setSessionDateRange] = useState<SessionDateRange>("upcoming");
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [expandedSessionId, setExpandedSessionId] = useState("");
   const [actionsSessionId, setActionsSessionId] = useState("");
+  const [bookingFilter, setBookingFilter] = useState<BookingFilter>("upcoming");
+  const [bookingFocusFilter, setBookingFocusFilter] = useState("");
+  const [bookingDateFilter, setBookingDateFilter] = useState("");
+  const [expandedBookingId, setExpandedBookingId] = useState("");
+  const [passFilter, setPassFilter] = useState<PassFilter>("active");
+  const [directPaymentFilter, setDirectPaymentFilter] = useState<DirectPaymentFilter>("all");
+  const [expandedDirectPaymentId, setExpandedDirectPaymentId] = useState("");
 
   async function refreshAdminData(message?: string) {
     try {
       setError("");
-      const [nextSessions, nextPasses, nextDirectPayments, nextEmailSubscribers, nextDiagnostics] = await Promise.all([
-        readAdminSessions(),
-        readAdminPasses(),
-        readAdminDirectPayments(),
-        readAdminEmailSubscribers(),
-        readAdminDiagnostics()
-      ]);
+      const [nextSessions, nextBookings, nextPasses, nextDirectPayments, nextEmailSubscribers, nextDiagnostics] =
+        await Promise.all([
+          readAdminSessions(),
+          readAdminBookings(),
+          readAdminPasses(),
+          readAdminDirectPayments(),
+          readAdminEmailSubscribers(),
+          readAdminDiagnostics()
+        ]);
+
       setSessions(nextSessions);
+      setBookings(nextBookings);
       setPasses(nextPasses);
       setDirectPayments(nextDirectPayments);
       setEmailSubscribers(nextEmailSubscribers);
       setDiagnostics(nextDiagnostics);
+
       if (message) {
         setNotice(message);
       }
@@ -512,22 +758,40 @@ export function AdminAvailability() {
     void refreshAdminData();
   }, []);
 
-  const counts = useMemo(
-    () => ({
-      open: sessions.filter((session) => session.status === "open" && session.remainingSpots > 0).length,
-      full: sessions.filter((session) => session.status === "open" && session.remainingSpots <= 0).length,
-      unavailable: sessions.filter((session) => session.status !== "open").length,
-      bookings: sessions.reduce((total, session) => total + session.paidBookings.length, 0)
-    }),
+  const sessionById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
+  const activeEmailSubscribers = useMemo(
+    () => emailSubscribers.filter((subscriber) => subscriber.opted_in && !subscriber.unsubscribed),
+    [emailSubscribers]
+  );
+  const upcomingBookings = useMemo(
+    () =>
+      bookings.filter((booking) => {
+        const session = sessionById.get(booking.session_id);
+
+        return session ? isFuture(session.start_datetime) && booking.status === "paid" : booking.status === "paid";
+      }),
+    [bookings, sessionById]
+  );
+  const spotsBookedThisWeek = useMemo(
+    () =>
+      sessions
+        .filter((session) => isThisWeek(session.start_datetime))
+        .reduce((total, session) => total + session.paidPlayers, 0),
     [sessions]
+  );
+  const activePasses = useMemo(
+    () => passes.filter((pass) => pass.status === "paid" && pass.remaining_credits > 0 && new Date(pass.expires_at).getTime() >= Date.now()),
+    [passes]
   );
   const passCounts = useMemo(
     () => ({
       paid: passes.filter((pass) => pass.status === "paid").length,
-      remainingCredits: passes.reduce((total, pass) => total + (Number(pass.remaining_credits) || 0), 0),
-      redemptions: passes.reduce((total, pass) => total + pass.redemptions.length, 0)
+      active: activePasses.length,
+      remainingCredits: activePasses.reduce((total, pass) => total + (Number(pass.remaining_credits) || 0), 0),
+      redemptions: passes.reduce((total, pass) => total + pass.redemptions.length, 0),
+      soldThisMonth: passes.filter((pass) => pass.status === "paid" && isThisMonth(pass.created_at)).length
     }),
-    [passes]
+    [activePasses, passes]
   );
   const directPaymentCounts = useMemo(
     () => ({
@@ -537,25 +801,142 @@ export function AdminAvailability() {
     }),
     [directPayments]
   );
-  const activeEmailSubscribers = useMemo(
-    () => emailSubscribers.filter((subscriber) => subscriber.opted_in && !subscriber.unsubscribed),
-    [emailSubscribers]
+  const counts = useMemo(
+    () => ({
+      open: sessions.filter((session) => session.status === "open" && session.remainingSpots > 0).length,
+      full: sessions.filter((session) => session.status === "open" && session.remainingSpots <= 0).length,
+      unavailable: sessions.filter((session) => session.status !== "open").length,
+      upcomingBookings: upcomingBookings.length,
+      spotsBookedThisWeek,
+      pendingZellePayments: directPaymentCounts.zellePending,
+      activePasses: passCounts.active,
+      emailSubscribers: activeEmailSubscribers.length
+    }),
+    [activeEmailSubscribers.length, directPaymentCounts.zellePending, passCounts.active, sessions, spotsBookedThisWeek, upcomingBookings.length]
   );
   const filteredSessions = useMemo(
     () =>
       sessions.filter((session) => {
-        const matchesType =
-          sessionFilter === "all" ||
-          (sessionFilter === "elite" && session.training_group === "elite-performance") ||
-          (sessionFilter === "focused" && Boolean(session.training_focus?.trim())) ||
-          (sessionFilter === "general" && !session.training_focus?.trim()) ||
-          (sessionFilter === "open" && session.status === "open") ||
-          (sessionFilter === "closed" && session.status !== "open");
+        const matchesFilter = sessionMatchesFilter(session, sessionFilter);
+        const matchesRange = sessionMatchesDateRange(session, sessionDateRange);
         const matchesDate = !sessionDateFilter || formatDateOnly(session.start_datetime, session.timezone) === sessionDateFilter;
 
-        return matchesType && matchesDate;
+        return matchesFilter && matchesRange && matchesDate;
       }),
-    [sessionDateFilter, sessionFilter, sessions]
+    [sessionDateFilter, sessionDateRange, sessionFilter, sessions]
+  );
+  const groupedSessions = useMemo(() => {
+    return filteredSessions.reduce<Array<{ key: string; label: string; sessions: AdminTrainingSession[] }>>((groups, session) => {
+      const key = formatDateOnly(session.start_datetime, session.timezone);
+      const existing = groups.find((group) => group.key === key);
+
+      if (existing) {
+        existing.sessions.push(session);
+      } else {
+        groups.push({
+          key,
+          label: formatDateHeading(session.start_datetime, session.timezone),
+          sessions: [session]
+        });
+      }
+
+      return groups;
+    }, []);
+  }, [filteredSessions]);
+  const filteredBookings = useMemo(
+    () =>
+      bookings.filter((booking) => {
+        const session = sessionById.get(booking.session_id);
+        const sessionDate = session?.start_datetime;
+        const focus = session ? sessionFocusLabel(session).toLowerCase() : "";
+        const matchesStatus =
+          bookingFilter === "all" ||
+          (bookingFilter === "upcoming" && (!sessionDate || isFuture(sessionDate))) ||
+          (bookingFilter === "past" && (sessionDate ? !isFuture(sessionDate) : false)) ||
+          (bookingFilter === "paid" && booking.status === "paid") ||
+          (bookingFilter === "pending" && booking.status !== "paid");
+        const matchesFocus = !bookingFocusFilter || focus.includes(bookingFocusFilter.toLowerCase());
+        const matchesDate =
+          !bookingDateFilter || (session ? formatDateOnly(session.start_datetime, session.timezone) === bookingDateFilter : false);
+
+        return matchesStatus && matchesFocus && matchesDate;
+      }),
+    [bookingDateFilter, bookingFilter, bookingFocusFilter, bookings, sessionById]
+  );
+  const filteredPasses = useMemo(
+    () =>
+      passes.filter((pass) => {
+        if (passFilter === "all") {
+          return true;
+        }
+
+        if (passFilter === "active") {
+          return pass.status === "paid" && pass.remaining_credits > 0 && new Date(pass.expires_at).getTime() >= Date.now();
+        }
+
+        if (passFilter === "used-up") {
+          return pass.status === "paid" && pass.remaining_credits <= 0;
+        }
+
+        if (passFilter === "expired") {
+          return pass.status === "expired" || new Date(pass.expires_at).getTime() < Date.now();
+        }
+
+        if (passFilter === "four") {
+          return pass.pass_type === "four_session_launch_pass";
+        }
+
+        if (passFilter === "six") {
+          return pass.pass_type === "six_session_launch_pass";
+        }
+
+        return true;
+      }),
+    [passFilter, passes]
+  );
+  const filteredDirectPayments = useMemo(
+    () =>
+      directPayments.filter((payment) => {
+        if (directPaymentFilter === "all") {
+          return true;
+        }
+
+        if (directPaymentFilter === "zelle-pending") {
+          return payment.status === "zelle_pending";
+        }
+
+        if (directPaymentFilter === "card-paid") {
+          return payment.status === "paid" && payment.payment_method === "card";
+        }
+
+        if (directPaymentFilter === "pending-card") {
+          return payment.status === "pending_card_payment";
+        }
+
+        if (directPaymentFilter === "single-session") {
+          return payment.payment_option === "single_session";
+        }
+
+        if (directPaymentFilter === "four-pass") {
+          return payment.payment_option === "four_session_launch_pass";
+        }
+
+        if (directPaymentFilter === "six-pass") {
+          return payment.payment_option === "six_session_launch_pass";
+        }
+
+        return true;
+      }),
+    [directPaymentFilter, directPayments]
+  );
+  const upcomingSessionsPreview = useMemo(
+    () => sessions.filter((session) => session.status === "open" && isFuture(session.start_datetime)).slice(0, 5),
+    [sessions]
+  );
+  const recentBookingsPreview = useMemo(() => bookings.slice(0, 5), [bookings]);
+  const pendingPaymentsPreview = useMemo(
+    () => directPayments.filter((payment) => payment.status === "zelle_pending" || payment.status === "pending_card_payment").slice(0, 5),
+    [directPayments]
   );
 
   async function addSession() {
@@ -580,13 +961,18 @@ export function AdminAvailability() {
           time: newTime,
           trainingFocus: newTrainingFocus.trim() || null,
           capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
-          location: newLocation
+          location: newLocation,
+          status: newStatus
         })
       });
       const result = (await response.json().catch(() => ({}))) as { error?: string };
 
       if (!response.ok) {
         throw new Error(result.error || "The session could not be added.");
+      }
+
+      if (!createAnother) {
+        setShowCreateSession(false);
       }
 
       await refreshAdminData("Training session added to Supabase availability.");
@@ -627,13 +1013,25 @@ export function AdminAvailability() {
     }
   }
 
-  async function removeSession(id: string) {
+  async function removeSession(session: AdminTrainingSession) {
+    if (session.paidBookings.length > 0) {
+      const confirmedBookedDelete = window.confirm(
+        "This session has bookings. Closing or cancelling is safer. Are you sure you want to delete it?"
+      );
+
+      if (!confirmedBookedDelete) {
+        return;
+      }
+    } else if (!window.confirm("Delete this session? This cannot be undone.")) {
+      return;
+    }
+
     setIsSaving(true);
     setError("");
     setNotice("");
 
     try {
-      const response = await fetch(`/api/admin/sessions/${encodeURIComponent(id)}`, {
+      const response = await fetch(`/api/admin/sessions/${encodeURIComponent(session.id)}`, {
         method: "DELETE"
       });
       const result = (await response.json().catch(() => ({}))) as { error?: string };
@@ -675,6 +1073,20 @@ export function AdminAvailability() {
     }
   }
 
+  function duplicateSession(session: AdminTrainingSession) {
+    setNewGroupId(session.training_group);
+    setNewDate(formatDateOnly(session.start_datetime, session.timezone));
+    setNewTime(formatTimeInput(session.start_datetime, session.timezone));
+    setNewTrainingFocus(session.training_focus || "");
+    setNewCapacity(String(session.capacity || slotCapacity));
+    setNewLocation(session.location || business.location);
+    setNewStatus(session.status);
+    setCreateAnother(true);
+    setShowCreateSession(true);
+    setActiveSection("sessions");
+    setNotice("Session copied into the Create New Session form. Adjust the date/time, then save.");
+  }
+
   function editCapacity(session: AdminTrainingSession) {
     const nextCapacity = window.prompt("Set session capacity. Max is 6 players.", String(session.capacity));
 
@@ -697,10 +1109,7 @@ export function AdminAvailability() {
   }
 
   function editSessionFocus(session: AdminTrainingSession) {
-    const nextFocus = window.prompt(
-      "Set session focus. Leave blank for General Training.",
-      session.training_focus || ""
-    );
+    const nextFocus = window.prompt("Set session focus. Leave blank for General Training.", session.training_focus || "");
 
     if (nextFocus === null) {
       return;
@@ -764,6 +1173,10 @@ export function AdminAvailability() {
   }
 
   async function removeEmailSubscriber(id: string) {
+    if (!window.confirm("Remove this subscriber from the admin list?")) {
+      return;
+    }
+
     setIsSaving(true);
     setError("");
     setNotice("");
@@ -795,33 +1208,50 @@ export function AdminAvailability() {
   }
 
   return (
-    <div className="grid gap-8">
+    <div className="grid gap-6">
       <section className="panel p-5 sm:p-8">
         <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-start">
           <div>
-            <p className="text-sm font-black uppercase text-electric">Admin Availability</p>
-            <h2 className="mt-2 text-3xl font-black text-navy">Manage program booking slots.</h2>
+            <p className="text-sm font-black uppercase text-electric">Admin Dashboard</p>
+            <h2 className="mt-2 text-3xl font-black text-navy">Manage EST CV quickly.</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Add Elite Performance sessions, assign a session focus, then track the six-player capacity and paid
-              bookings from Supabase.
+              Create openings, review bookings, track payments, manage Launch Pass credits, and export your email list.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
-            {[
-              ["Open", counts.open],
-              ["Full", counts.full],
-              ["Unavailable", counts.unavailable],
-              ["Bookings", counts.bookings]
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-slate-200 bg-mist p-4">
-                <p className="text-2xl font-black text-navy">{value}</p>
-                <p className="text-xs font-black uppercase text-slate-500">{label}</p>
-              </div>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={() => void refreshAdminData("Admin data refreshed.")}
+            className={secondaryButtonClass}
+          >
+            Refresh
+          </button>
         </div>
 
-        {isLoading ? <p className="mt-5 rounded-md bg-mist p-3 text-sm font-bold text-slate-600">Loading Supabase sessions...</p> : null}
+        <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+          {adminSections.map((section) => {
+            const isActive = activeSection === section.id;
+
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+                className={`rounded-lg border p-4 text-left transition ${
+                  isActive
+                    ? "border-electric bg-blue-50 shadow-sm"
+                    : "border-slate-200 bg-white hover:border-electric/50"
+                }`}
+              >
+                <span className="block text-sm font-black text-navy">{section.label}</span>
+                <span className="mt-1 block text-[11px] font-bold uppercase text-slate-500">{section.note}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {isLoading ? (
+          <p className="mt-5 rounded-md bg-mist p-3 text-sm font-bold text-slate-600">Loading admin data...</p>
+        ) : null}
         {notice ? <p className="mt-5 rounded-md bg-field/10 p-3 text-sm font-bold text-field">{notice}</p> : null}
         {error ? <p className="mt-5 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
 
@@ -830,830 +1260,1084 @@ export function AdminAvailability() {
             TEST MODE ACTIVE
           </div>
         ) : null}
-
-        {diagnostics ? (
-          <div className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Supabase configured</p>
-              <p className="mt-1 font-black text-navy">{diagnostics.supabase?.configured ? "yes" : "no"}</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">
-                URL: {diagnostics.supabase?.urlConfigured ? "yes" : "no"} / Service role:{" "}
-                {diagnostics.supabase?.serviceRoleKeyConfigured ? "yes" : "no"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Stripe mode</p>
-              <p className="mt-1 font-black text-navy">{diagnostics.stripe?.stripeMode ?? diagnostics.stripeKeyMode}</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">
-                Secret: {diagnostics.stripe?.secretKeyConfigured ? "yes" : "no"} / Publishable:{" "}
-                {diagnostics.stripe?.publishableKeyConfigured ? "yes" : "no"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Google Calendar configured</p>
-              <p className="mt-1 font-black text-navy">{diagnostics.googleCalendar?.googleCalendarConfigured ? "yes" : "no"}</p>
-              <p className="mt-1 break-words text-xs font-bold text-slate-500">
-                Calendar: {diagnostics.googleCalendar?.googleCalendarId || "primary"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Google client email</p>
-              <p className="mt-1 break-words font-black text-navy">
-                {diagnostics.googleCalendar?.googleServiceAccountEmail || "not configured"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Last calendar event</p>
-              <p className="mt-1 font-black text-navy">
-                {diagnostics.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"}
-              </p>
-              {diagnostics.googleCalendar?.lastCalendarEventCreationResult?.message ? (
-                <p className="mt-1 text-xs font-bold text-slate-500">
-                  {diagnostics.googleCalendar.lastCalendarEventCreationResult.message}
-                </p>
-              ) : null}
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Webhook secret</p>
-              <p className="mt-1 font-black text-navy">
-                {diagnostics.stripe?.webhookSecretConfigured ?? diagnostics.webhookSecretExists ? "yes" : "no"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Last payment verification</p>
-              <p className="mt-1 font-black text-navy">
-                {diagnostics.lastPaymentVerificationResult
-                  ? diagnostics.lastPaymentVerificationResult.verified
-                    ? "verified"
-                    : "not verified"
-                  : "none yet"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">SMTP configured</p>
-              <p className="mt-1 font-black text-navy">{diagnostics.smtpConfigured ? "yes" : "no"}</p>
-              <p className="mt-1 text-xs font-bold text-slate-500">
-                EMAIL_FROM: {diagnostics.emailFromConfigured ? "yes" : "no"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Admin email recipient</p>
-              <p className="mt-1 break-words font-black text-navy">{diagnostics.adminNotificationRecipient}</p>
-            </div>
-            <div>
-              <p className="text-xs font-black uppercase text-slate-500">Last email attempt</p>
-              <p className="mt-1 font-black text-navy">
-                {diagnostics.lastEmailAttempt
-                  ? `Customer ${diagnostics.lastEmailAttempt.customerStatus} / Admin ${diagnostics.lastEmailAttempt.adminStatus}`
-                  : "none yet"}
-              </p>
-            </div>
-          </div>
-        ) : null}
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-2">
-        <div className="panel p-5 sm:p-6">
-          <h3 className="text-xl font-black text-navy">Add Available Session</h3>
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-              Program
-              <select className={inputClass} value={newGroupId} onChange={(event) => setNewGroupId(event.target.value as TrainingGroupId)}>
-                {trainingGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.name} ({group.ages})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-              Session Focus
-              <input
-                className={inputClass}
-                list="session-focus-options"
-                value={newTrainingFocus}
-                onChange={(event) => setNewTrainingFocus(event.target.value)}
-                placeholder="General Training"
-              />
-              <datalist id="session-focus-options">
-                {sessionFocusExamples.map((focus) => (
-                  <option key={focus} value={focus} />
-                ))}
-              </datalist>
-              <span className="text-xs font-semibold text-slate-500">
-                Leave blank for General Training, or choose a focused session like Shooting / Attacking Session.
-              </span>
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Date
-              <input className={inputClass} type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} />
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Start Time
-              <input className={inputClass} type="time" value={newTime} onChange={(event) => setNewTime(event.target.value)} />
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              End Time
-              <input className={inputClass} type="time" value={endTimeFromStartInput(newTime)} readOnly />
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy">
-              Capacity
-              <input
-                className={inputClass}
-                type="number"
-                min="1"
-                max="6"
-                value={newCapacity}
-                onChange={(event) => setNewCapacity(event.target.value)}
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-              Location
-              <input className={inputClass} value={newLocation} onChange={(event) => setNewLocation(event.target.value)} />
-            </label>
+      {activeSection === "dashboard" ? (
+        <section className="grid gap-6">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            {[
+              ["Open Sessions", counts.open],
+              ["Upcoming Bookings", counts.upcomingBookings],
+              ["Spots This Week", counts.spotsBookedThisWeek],
+              ["Pending Zelle", counts.pendingZellePayments],
+              ["Active Passes", counts.activePasses],
+              ["Email Subscribers", counts.emailSubscribers]
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-3xl font-black text-navy">{value}</p>
+                <p className="mt-1 text-xs font-black uppercase text-slate-500">{label}</p>
+              </div>
+            ))}
           </div>
-          <button
-            type="button"
-            disabled={isSaving}
-            onClick={addSession}
-            className="mt-5 rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Add Session
-          </button>
-        </div>
 
-        <div className="panel p-5 sm:p-6">
-          <h3 className="text-xl font-black text-navy">Close Unavailable Day</h3>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            This closes existing sessions on that date. Parents only see open Supabase sessions with remaining spots.
-          </p>
-          <label className="mt-5 grid gap-2 text-sm font-bold text-navy">
-            Date
-            <input className={inputClass} type="date" value={blockDate} onChange={(event) => setBlockDate(event.target.value)} />
-          </label>
-          <button
-            type="button"
-            disabled={isSaving}
-            onClick={closeSessionsOnDate}
-            className="mt-5 rounded-md bg-navy px-6 py-3 text-sm font-black uppercase text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Close Day
-          </button>
-        </div>
-      </section>
-
-      <section className="panel overflow-hidden">
-        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
-          <div>
-            <p className="text-xs font-black uppercase text-electric">Launch Passes / Credits</p>
-            <h3 className="mt-2 text-xl font-black text-navy">Paid Launch Pass purchases</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Track remaining credits, expiration, and bookings paid by Launch Pass credit.
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{passCounts.paid}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Paid Passes</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{passCounts.remainingCredits}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Credits Left</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{passCounts.redemptions}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Used</p>
-            </div>
-          </div>
-        </div>
-        {passes.length > 0 ? (
-          <div className="grid divide-y divide-slate-200">
-            {passes.map((pass) => {
-              const selectedSessions = (pass.selected_session_ids ?? [])
-                .map((sessionId) => sessions.find((session) => session.id === sessionId))
-                .filter((session): session is AdminTrainingSession => Boolean(session));
-
-              return (
-              <article key={pass.id} className="grid gap-4 p-5">
-                <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
-                  <div>
-                    <p className="text-xs font-black uppercase text-electric">{passTypeLabel(pass.pass_type)}</p>
-                    <h4 className="mt-1 text-lg font-black text-navy">{pass.player_name}</h4>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Parent: {pass.parent_name} - {pass.parent_email} - {pass.parent_phone}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Training group: {trainingGroups.find((group) => group.id === pass.training_group)?.name ?? pass.training_group}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
-                    <p className="font-black text-navy">
-                      {pass.remaining_credits}/{pass.total_credits} credits remaining
-                    </p>
-                    <p className="mt-1 text-slate-600">Status: {pass.status}</p>
-                    <p className="mt-1 text-slate-600">
-                      Selected at purchase: {(pass.selected_session_ids ?? []).length || 0}
-                    </p>
-                    <p className="mt-1 text-slate-600">
-                      Expires: {new Date(pass.expires_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
-                    </p>
-                    <p className="mt-1 text-slate-600">Paid: ${(pass.amount_paid / 100).toFixed(2)}</p>
-                  </div>
-                </div>
-                {(pass.selected_session_ids ?? []).length > 0 ? (
-                  <div className="rounded-lg border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-black uppercase text-electric">Sessions Selected At Purchase</p>
-                    <div className="mt-3 grid gap-2 text-sm text-slate-600">
-                      {selectedSessions.length > 0 ? (
-                        selectedSessions.map((session) => (
-                          <p key={session.id}>
-                            {formatDateTime(session.start_datetime, session.timezone)} -{" "}
-                            {trainingGroups.find((group) => group.id === session.training_group)?.name ?? session.training_group}
-                          </p>
-                        ))
-                      ) : (
-                        <p>{(pass.selected_session_ids ?? []).join(", ")}</p>
-                      )}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <div className="panel p-5">
+              <p className="text-xs font-black uppercase text-electric">Today / This Week</p>
+              <h3 className="mt-2 text-xl font-black text-navy">Upcoming sessions</h3>
+              <div className="mt-4 grid gap-3">
+                {upcomingSessionsPreview.length > 0 ? (
+                  upcomingSessionsPreview.map((session) => (
+                    <div key={session.id} className="rounded-lg border border-slate-200 bg-mist p-4">
+                      <p className="font-black text-navy">{formatDateTime(session.start_datetime, session.timezone)}</p>
+                      <p className="mt-1 text-sm text-slate-600">{sessionFocusLabel(session)}</p>
+                      <p className="mt-1 text-xs font-bold uppercase text-slate-500">{session.remainingSpots} spots remaining</p>
                     </div>
-                  </div>
-                ) : null}
-                {pass.redemptions.length > 0 ? (
-                  <div className="rounded-lg border border-slate-200 bg-white p-4">
-                    <p className="text-xs font-black uppercase text-electric">Redemption History</p>
-                    <div className="mt-3 grid gap-2 text-sm text-slate-600">
-                      {pass.redemptions.map((redemption) => (
-                        <p key={redemption.id}>
-                          {new Date(redemption.created_at).toLocaleString("en-US", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                            timeZone: "America/Los_Angeles"
-                          })}{" "}
-                          - {redemption.credits_used} credit used
-                          {redemption.booking ? ` for ${redemption.booking.player_name}` : ""}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
+                  ))
                 ) : (
                   <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
-                    No credits used yet.
+                    No upcoming open sessions.
                   </p>
                 )}
-              </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="p-5 sm:p-6">
-            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
-              No Launch Pass purchases yet.
-            </p>
-          </div>
-        )}
-      </section>
-
-      <section className="panel overflow-hidden">
-        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
-          <div>
-            <p className="text-xs font-black uppercase text-electric">Email List</p>
-            <h3 className="mt-2 text-xl font-black text-navy">Marketing opt-ins for Brevo</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Export only parents who checked the email list box. Transactional booking emails are separate.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-center sm:min-w-64">
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{activeEmailSubscribers.length}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Active</p>
+              </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{emailSubscribers.length}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Total</p>
+
+            <div className="panel p-5">
+              <p className="text-xs font-black uppercase text-electric">Recent</p>
+              <h3 className="mt-2 text-xl font-black text-navy">Recent bookings</h3>
+              <div className="mt-4 grid gap-3">
+                {recentBookingsPreview.length > 0 ? (
+                  recentBookingsPreview.map((booking) => {
+                    const session = sessionById.get(booking.session_id);
+
+                    return (
+                      <div key={booking.id} className="rounded-lg border border-slate-200 bg-mist p-4">
+                        <p className="font-black text-navy">{booking.player_name}</p>
+                        <p className="mt-1 text-sm text-slate-600">{booking.parent_name}</p>
+                        <p className="mt-1 text-xs font-bold uppercase text-slate-500">
+                          {booking.status} {session ? `- ${formatDateTime(session.start_datetime, session.timezone)}` : ""}
+                        </p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                    No bookings yet.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="panel p-5">
+              <p className="text-xs font-black uppercase text-electric">Payment Follow-Up</p>
+              <h3 className="mt-2 text-xl font-black text-navy">Pending payments</h3>
+              <div className="mt-4 grid gap-3">
+                {pendingPaymentsPreview.length > 0 ? (
+                  pendingPaymentsPreview.map((payment) => (
+                    <div key={payment.id} className="rounded-lg border border-slate-200 bg-mist p-4">
+                      <p className="font-black text-navy">{playerNamesForDirectPayment(payment)}</p>
+                      <p className="mt-1 text-sm text-slate-600">{directPaymentOptionLabel(payment.payment_option)}</p>
+                      <p className="mt-1 text-xs font-bold uppercase text-amber-700">
+                        {paymentStatusLabel(payment.status)} - {formatMoney(payment.amount_due)}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                    No pending direct payments.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="grid gap-4 p-5 sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-semibold leading-6 text-slate-600">
-              CSV export includes active subscribers only: opted in and not unsubscribed.
-            </p>
-            <button
-              type="button"
-              onClick={exportEmailSubscribersCsv}
-              disabled={activeEmailSubscribers.length === 0}
-              className="rounded-md bg-electric px-5 py-3 text-xs font-black uppercase text-white shadow-lg shadow-electric/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Export CSV
-            </button>
+          {diagnostics ? (
+            <div className="panel p-5 sm:p-6">
+              <p className="text-xs font-black uppercase text-electric">System Status</p>
+              <h3 className="mt-2 text-xl font-black text-navy">Diagnostics</h3>
+              <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  ["Supabase", diagnostics.supabase?.configured ? "yes" : "no"],
+                  ["Stripe mode", diagnostics.stripe?.stripeMode ?? diagnostics.stripeKeyMode],
+                  ["Webhook secret", diagnostics.stripe?.webhookSecretConfigured ?? diagnostics.webhookSecretExists ? "yes" : "no"],
+                  ["SMTP configured", diagnostics.smtpConfigured ? "yes" : "no"],
+                  ["Email from", diagnostics.emailFromConfigured ? "yes" : "no"],
+                  ["Admin email", diagnostics.adminNotificationRecipient],
+                  ["Google Calendar", diagnostics.googleCalendar?.googleCalendarConfigured ? "yes" : "no"],
+                  ["Calendar", diagnostics.googleCalendar?.googleCalendarId || "primary"],
+                  ["Google client email", diagnostics.googleCalendar?.googleServiceAccountEmail || "not configured"],
+                  [
+                    "Last calendar event",
+                    diagnostics.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"
+                  ],
+                  [
+                    "Last email attempt",
+                    diagnostics.lastEmailAttempt
+                      ? `Customer ${diagnostics.lastEmailAttempt.customerStatus} / Admin ${diagnostics.lastEmailAttempt.adminStatus}`
+                      : "none yet"
+                  ],
+                  [
+                    "Last payment check",
+                    diagnostics.lastPaymentVerificationResult
+                      ? diagnostics.lastPaymentVerificationResult.verified
+                        ? "verified"
+                        : "not verified"
+                      : "none yet"
+                  ]
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border border-slate-200 bg-mist p-4">
+                    <p className="text-xs font-black uppercase text-slate-500">{label}</p>
+                    <p className="mt-1 break-words font-black text-navy">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-5 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                Owner booking notifications are sent to <span className="font-black text-navy">{bookingNotificationEmail}</span>.
+              </p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeSection === "sessions" ? (
+        <section className="grid gap-6">
+          <div className="panel p-5 sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase text-electric">Sessions</p>
+                <h3 className="mt-2 text-2xl font-black text-navy">Create and manage openings.</h3>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                  Elite Performance is the default group. Add a session focus so parents know what the training day covers.
+                </p>
+              </div>
+              <button type="button" onClick={() => setShowCreateSession((value) => !value)} className={primaryButtonClass}>
+                {showCreateSession ? "Close Form" : "Create New Session"}
+              </button>
+            </div>
+
+            {showCreateSession ? (
+              <div className="mt-6 rounded-xl border border-slate-200 bg-mist p-4 sm:p-5">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                    Training Group
+                    <select className={inputClass} value={newGroupId} onChange={(event) => setNewGroupId(event.target.value as TrainingGroupId)}>
+                      {trainingGroups.map((group) => (
+                        <option key={group.id} value={group.id}>
+                          {group.name} ({group.ages})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                    Session Focus
+                    <select className={inputClass} value={newTrainingFocus} onChange={(event) => setNewTrainingFocus(event.target.value)}>
+                      {focusChoices.map((focus) => (
+                        <option key={focus} value={focus === "General Training" ? "" : focus}>
+                          {focus}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy">
+                    Date
+                    <input className={inputClass} type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy">
+                    Start Time
+                    <input className={inputClass} type="time" value={newTime} onChange={(event) => setNewTime(event.target.value)} />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy">
+                    End Time
+                    <input className={inputClass} type="time" value={endTimeFromStartInput(newTime)} readOnly />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy">
+                    Capacity
+                    <input
+                      className={inputClass}
+                      type="number"
+                      min="1"
+                      max="6"
+                      value={newCapacity}
+                      onChange={(event) => setNewCapacity(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy">
+                    Status
+                    <select className={inputClass} value={newStatus} onChange={(event) => setNewStatus(event.target.value as "open" | "closed" | "cancelled")}>
+                      <option value="open">Open</option>
+                      <option value="closed">Closed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                    Location
+                    <input className={inputClass} value={newLocation} onChange={(event) => setNewLocation(event.target.value)} />
+                  </label>
+                </div>
+                <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <label className="flex items-center gap-2 text-sm font-bold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={createAnother}
+                      onChange={(event) => setCreateAnother(event.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                    Create another after saving
+                  </label>
+                  <button type="button" disabled={isSaving} onClick={addSession} className={primaryButtonClass}>
+                    Save Session
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
-          {emailSubscribers.length > 0 ? (
-            <div className="grid gap-3">
-              {emailSubscribers.map((subscriber) => {
-                const isActive = subscriber.opted_in && !subscriber.unsubscribed;
+          <div className="panel p-5 sm:p-6">
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div>
+                <h3 className="text-xl font-black text-navy">Close Unavailable Day</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  This closes existing sessions on the selected date. Parents only see open sessions with remaining spots.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[minmax(14rem,1fr)_auto]">
+                <input className={inputClass} type="date" value={blockDate} onChange={(event) => setBlockDate(event.target.value)} />
+                <button type="button" disabled={isSaving} onClick={closeSessionsOnDate} className={navyButtonClass}>
+                  Close Day
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <section className="panel overflow-hidden">
+            <div className="border-b border-slate-200 p-5 sm:p-6">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Session List</p>
+                  <h3 className="mt-2 text-xl font-black text-navy">Grouped by date</h3>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                    <p className="text-xl font-black text-navy">{counts.open}</p>
+                    <p className="text-[10px] font-black uppercase text-slate-500">Open</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                    <p className="text-xl font-black text-navy">{counts.full}</p>
+                    <p className="text-[10px] font-black uppercase text-slate-500">Full</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                    <p className="text-xl font-black text-navy">{counts.unavailable}</p>
+                    <p className="text-[10px] font-black uppercase text-slate-500">Unavailable</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ["all", "All"],
+                    ["open", "Open"],
+                    ["full", "Full"],
+                    ["closed", "Closed"],
+                    ["cancelled", "Cancelled"],
+                    ["shooting-attacking", "Shooting / Attacking"],
+                    ["defending", "Defending"],
+                    ["technical", "Technical Work"],
+                    ["shooting-finishing", "Shooting & Finishing"]
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setSessionFilter(value as SessionFilter)}
+                      className={`rounded-md border px-4 py-2 text-xs font-black uppercase transition ${
+                        sessionFilter === value
+                          ? "border-navy bg-navy text-white"
+                          : "border-slate-300 bg-white text-navy hover:border-electric hover:text-electric"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="grid gap-3 md:grid-cols-[minmax(12rem,15rem)_minmax(12rem,15rem)_auto] md:items-end">
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Date Range
+                    <select className={inputClass} value={sessionDateRange} onChange={(event) => setSessionDateRange(event.target.value as SessionDateRange)}>
+                      <option value="upcoming">Upcoming</option>
+                      <option value="today">Today</option>
+                      <option value="this-week">This Week</option>
+                      <option value="all">All Dates</option>
+                      <option value="past">Past</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                    Exact Date
+                    <input className={inputClass} type="date" value={sessionDateFilter} onChange={(event) => setSessionDateFilter(event.target.value)} />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSessionFilter("all");
+                      setSessionDateRange("upcoming");
+                      setSessionDateFilter("");
+                    }}
+                    className={secondaryButtonClass}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {groupedSessions.length > 0 ? (
+              <div className="grid gap-5 bg-mist p-4 sm:p-6">
+                {groupedSessions.map((group) => (
+                  <div key={group.key} className="grid gap-3">
+                    <h4 className="text-sm font-black uppercase tracking-wide text-slate-500">{group.label}</h4>
+                    <div className="grid gap-4">
+                      {group.sessions.map((session) => {
+                        const trainingGroup = trainingGroups.find((item) => item.id === session.training_group);
+                        const isFull = session.remainingSpots <= 0;
+                        const detailsOpen = expandedSessionId === session.id;
+                        const actionsOpen = actionsSessionId === session.id;
+                        const paidBookingNames = session.paidBookings.map((booking) => booking.player_name).join(", ");
+
+                        return (
+                          <article key={session.id} className="grid gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
+                              <div className="grid gap-4">
+                                <div className="flex flex-wrap gap-2">
+                                  <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${sessionFocusBadgeClass(session)}`}>
+                                    {sessionFocusLabel(session)}
+                                  </span>
+                                  <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(session.status)}`}>
+                                    {session.status}
+                                  </span>
+                                  {isFull ? (
+                                    <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-black uppercase text-amber-700">
+                                      Full
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <div>
+                                  <p className="text-xs font-black uppercase text-electric">
+                                    {trainingGroup?.name ?? session.title} {trainingGroup ? `(${trainingGroup.ages})` : ""}
+                                  </p>
+                                  <h4 className="mt-1 text-2xl font-black text-navy">{formatTimeRange(session)}</h4>
+                                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
+                                    {session.location || business.location}
+                                  </p>
+                                </div>
+
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                                    <p className="text-xl font-black text-navy">{session.capacity}</p>
+                                    <p className="text-[10px] font-black uppercase text-slate-500">Capacity</p>
+                                  </div>
+                                  <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                                    <p className="text-xl font-black text-navy">{session.paidPlayers}</p>
+                                    <p className="text-[10px] font-black uppercase text-slate-500">Booked</p>
+                                  </div>
+                                  <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                                    <p className="text-xl font-black text-navy">{session.remainingSpots}</p>
+                                    <p className="text-[10px] font-black uppercase text-slate-500">Remaining</p>
+                                  </div>
+                                </div>
+
+                                <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-600">
+                                  <span className="font-black text-navy">Paid bookings:</span>{" "}
+                                  {session.paidBookings.length > 0 ? paidBookingNames : "None yet"}
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-2 sm:flex-row xl:flex-col">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedSessionId(detailsOpen ? "" : session.id)}
+                                  className={navyButtonClass}
+                                >
+                                  {detailsOpen ? "Hide Bookings" : "View Bookings"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setActionsSessionId(actionsOpen ? "" : session.id)}
+                                  className={secondaryButtonClass}
+                                >
+                                  {actionsOpen ? "Close Actions" : "Manage"}
+                                </button>
+                              </div>
+                            </div>
+
+                            {actionsOpen ? (
+                              <div className="grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-4">
+                                <div>
+                                  <p className="text-xs font-black uppercase text-slate-500">Primary</p>
+                                  <div className="mt-3 grid gap-2">
+                                    <button type="button" onClick={() => setExpandedSessionId(detailsOpen ? "" : session.id)} className={secondaryButtonClass}>
+                                      View Details
+                                    </button>
+                                    <button type="button" onClick={() => editSessionFocus(session)} className={secondaryButtonClass}>
+                                      Edit Focus
+                                    </button>
+                                    <button type="button" onClick={() => duplicateSession(session)} className={secondaryButtonClass}>
+                                      Duplicate
+                                    </button>
+                                  </div>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-black uppercase text-slate-500">Status</p>
+                                  <div className="mt-3 grid gap-2">
+                                    <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "open" })} className={secondaryButtonClass}>
+                                      Open
+                                    </button>
+                                    <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "closed" })} className={secondaryButtonClass}>
+                                      Close
+                                    </button>
+                                    <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "cancelled" })} className={secondaryButtonClass}>
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-black uppercase text-slate-500">Session Focus</p>
+                                  <div className="mt-3 grid gap-2">
+                                    <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: null })} className={secondaryButtonClass}>
+                                      Set General
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isSaving}
+                                      onClick={() => void updateSession(session.id, { training_focus: "Shooting & Finishing" })}
+                                      className={secondaryButtonClass}
+                                    >
+                                      Set Shooting & Finishing
+                                    </button>
+                                    <button type="button" disabled={isSaving} onClick={() => editCapacity(session)} className={secondaryButtonClass}>
+                                      Update Capacity
+                                    </button>
+                                    <button type="button" disabled={isSaving} onClick={() => editLocation(session)} className={secondaryButtonClass}>
+                                      Update Location
+                                    </button>
+                                  </div>
+                                </div>
+                                <div>
+                                  <p className="text-xs font-black uppercase text-red-700">Danger</p>
+                                  <button type="button" disabled={isSaving} onClick={() => void removeSession(session)} className={`mt-3 w-full ${dangerButtonClass}`}>
+                                    Delete Session
+                                  </button>
+                                  {session.paidBookings.length > 0 ? (
+                                    <p className="mt-3 text-xs font-bold leading-5 text-red-700">
+                                      This session has bookings. Closing or cancelling is usually safer.
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {detailsOpen ? (
+                              session.paidBookings.length > 0 ? (
+                                <div className="rounded-lg border border-slate-200 bg-mist p-4">
+                                  <p className="text-xs font-black uppercase text-electric">Paid Bookings</p>
+                                  <div className="mt-3 grid gap-4">
+                                    {session.paidBookings.map((booking) => (
+                                      <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                                        <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                                          <div>
+                                            <h5 className="font-black text-navy">{booking.player_name}</h5>
+                                            <p className="mt-1 text-sm text-slate-600">
+                                              {booking.player_count} player(s) - Payment: {booking.status}
+                                            </p>
+                                            <p className="mt-1 text-sm text-slate-600">
+                                              Payment type:{" "}
+                                              {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}
+                                            </p>
+                                            <p className="mt-1 text-sm text-slate-600">Amount paid: {formatMoney(booking.amount_paid)}</p>
+                                          </div>
+                                          <div className="grid gap-1 text-sm text-slate-600">
+                                            <p><span className="font-black text-navy">Parent:</span> {booking.parent_name}</p>
+                                            <p><span className="font-black text-navy">Phone:</span> {booking.parent_phone}</p>
+                                            <p><span className="font-black text-navy">Email:</span> {booking.parent_email}</p>
+                                            <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
+                                            <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
+                                            <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4">
+                                          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+                                            <div>
+                                              <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
+                                              <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                                                <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiver?.waiver_signed ? "Yes" : "Not recorded"}</p>
+                                                <p><span className="font-black text-navy">Typed Signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
+                                                <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
+                                                <p><span className="font-black text-navy">Media Consent:</span> {booking.waiver?.media_consent || "Not recorded"}</p>
+                                              </div>
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                              <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
+                                                View Waiver Record
+                                              </button>
+                                              <button type="button" onClick={() => printWaiverRecord(booking, session)} className={secondaryButtonClass}>
+                                                Print Waiver
+                                              </button>
+                                              <button type="button" onClick={() => downloadWaiverRecord(booking, session)} className={secondaryButtonClass}>
+                                                Download Waiver
+                                              </button>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </article>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                                  No paid bookings for this session yet.
+                                </p>
+                              )
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-5 sm:p-6">
+                <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                  No sessions match the current filters.
+                </p>
+              </div>
+            )}
+          </section>
+        </section>
+      ) : null}
+
+      {activeSection === "bookings" ? (
+        <section className="panel overflow-hidden">
+          <div className="border-b border-slate-200 p-5 sm:p-6">
+            <p className="text-xs font-black uppercase text-electric">Bookings</p>
+            <h3 className="mt-2 text-2xl font-black text-navy">Player registrations</h3>
+            <div className="mt-5 grid gap-3 md:grid-cols-[minmax(12rem,15rem)_minmax(12rem,1fr)_minmax(12rem,15rem)_auto] md:items-end">
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Status
+                <select className={inputClass} value={bookingFilter} onChange={(event) => setBookingFilter(event.target.value as BookingFilter)}>
+                  <option value="upcoming">Upcoming</option>
+                  <option value="all">All</option>
+                  <option value="past">Past</option>
+                  <option value="paid">Paid</option>
+                  <option value="pending">Pending</option>
+                </select>
+              </label>
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Session Focus
+                <input
+                  className={inputClass}
+                  value={bookingFocusFilter}
+                  onChange={(event) => setBookingFocusFilter(event.target.value)}
+                  placeholder="Shooting, Defending..."
+                />
+              </label>
+              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                Date
+                <input className={inputClass} type="date" value={bookingDateFilter} onChange={(event) => setBookingDateFilter(event.target.value)} />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setBookingFilter("upcoming");
+                  setBookingFocusFilter("");
+                  setBookingDateFilter("");
+                }}
+                className={secondaryButtonClass}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {filteredBookings.length > 0 ? (
+            <div className="grid gap-4 bg-mist p-4 sm:p-6">
+              {filteredBookings.map((booking) => {
+                const session = sessionById.get(booking.session_id);
+                const isExpanded = expandedBookingId === booking.id;
 
                 return (
-                  <article key={subscriber.id} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-[1fr_auto] lg:items-start">
-                    <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Parent Name</span>
-                        <span className="font-black text-navy">{subscriber.parent_name || "Not provided"}</span>
-                      </p>
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Email</span>
-                        <span className="break-words font-black text-navy">{subscriber.email}</span>
-                      </p>
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Phone</span>
-                        <span className="font-semibold">{subscriber.phone || "Not provided"}</span>
-                      </p>
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Player</span>
-                        <span className="font-semibold">
-                          {subscriber.player_name || "Not provided"}
-                          {subscriber.player_age ? `, ${subscriber.player_age}` : ""}
+                  <article key={booking.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Player</p>
+                          <h4 className="mt-1 text-xl font-black text-navy">{booking.player_name}</h4>
+                          <p className="mt-1 text-sm text-slate-600">Age {booking.player_age}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Parent</p>
+                          <p className="mt-1 font-black text-navy">{booking.parent_name}</p>
+                          <p className="mt-1 break-words text-sm text-slate-600">{booking.parent_email}</p>
+                          <p className="mt-1 text-sm text-slate-600">{booking.parent_phone}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Session</p>
+                          <p className="mt-1 font-black text-navy">
+                            {session ? formatDateTime(session.start_datetime, session.timezone) : "Session not loaded"}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">{session ? sessionFocusLabel(session) : "Not recorded"}</p>
+                          <p className="mt-1 text-sm text-slate-600">{bookingProgramLabel(booking)}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <span className={`rounded-full border px-3 py-1 text-center text-[11px] font-black uppercase ${statusBadgeClass(booking.status)}`}>
+                          {booking.status}
                         </span>
-                      </p>
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Source</span>
-                        <span className="font-semibold">{subscriber.source || "Not recorded"}</span>
-                      </p>
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Opt-in Date</span>
-                        <span className="font-semibold">{formatWaiverTimestamp(subscriber.opted_in_at)}</span>
-                      </p>
-                      <p>
-                        <span className="block text-[10px] font-black uppercase text-slate-500">Status</span>
-                        <span className={`font-black ${isActive ? "text-field" : "text-red-700"}`}>
-                          {isActive ? "Active" : "Unsubscribed"}
+                        <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-center text-[11px] font-black uppercase text-slate-600">
+                          {booking.waiver?.waiver_signed ? "Waiver signed" : "Waiver missing"}
                         </span>
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2 lg:justify-end">
-                      {subscriber.unsubscribed ? (
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => void updateEmailSubscriber(subscriber.id, false)}
-                          className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Reactivate
+                        <button type="button" onClick={() => setExpandedBookingId(isExpanded ? "" : booking.id)} className={secondaryButtonClass}>
+                          {isExpanded ? "Hide Details" : "View Details"}
                         </button>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => void updateEmailSubscriber(subscriber.id, true)}
-                          className="rounded-md border border-amber-200 px-4 py-2 text-xs font-black uppercase text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Unsubscribe
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => void removeEmailSubscriber(subscriber.id)}
-                        className="rounded-md border border-red-200 bg-red-50 px-4 py-2 text-xs font-black uppercase text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Remove
-                      </button>
+                      </div>
                     </div>
+
+                    {isExpanded ? (
+                      <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-2">
+                        <div className="grid gap-2 text-sm text-slate-600">
+                          <p><span className="font-black text-navy">Booking source:</span> {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}</p>
+                          <p><span className="font-black text-navy">Created:</span> {formatWaiverTimestamp(booking.created_at)}</p>
+                          <p><span className="font-black text-navy">Amount:</span> {formatMoney(booking.amount_paid)}</p>
+                          <p><span className="font-black text-navy">Player count:</span> {booking.player_count}</p>
+                          <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
+                          <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
+                          <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
+                        </div>
+                        <div className="grid gap-2 text-sm text-slate-600">
+                          <p><span className="font-black text-navy">Media consent:</span> {booking.waiver?.media_consent || "Not recorded"}</p>
+                          <p><span className="font-black text-navy">Waiver signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
+                          <p><span className="font-black text-navy">Signed:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
+                          <p><span className="font-black text-navy">Payment intent:</span> {booking.stripe_payment_intent_id || "Not recorded"}</p>
+                          <p><span className="font-black text-navy">Calendar event:</span> {booking.calendarEvent?.google_calendar_event_id || "Not recorded"}</p>
+                          <p>
+                            <span className="font-black text-navy">Email logs:</span>{" "}
+                            {booking.emailLogs.length > 0
+                              ? booking.emailLogs.map((log) => `${log.email_type}: ${log.status}`).join(" / ")
+                              : "No email logs yet"}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
+                              View Waiver
+                            </button>
+                            <button type="button" onClick={() => printWaiverRecord(booking, session)} className={secondaryButtonClass}>
+                              Print Waiver
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}
             </div>
           ) : (
-            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
-              No email opt-ins yet.
-            </p>
+            <div className="p-5 sm:p-6">
+              <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                No bookings match the current filters.
+              </p>
+            </div>
           )}
-        </div>
-      </section>
+        </section>
+      ) : null}
 
-      <section className="panel overflow-hidden">
-        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
-          <div>
-            <p className="text-xs font-black uppercase text-electric">Direct Pay + Waiver</p>
-            <h3 className="mt-2 text-xl font-black text-navy">Direct payment records</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Review after-session payments and manually confirm Zelle payments. These records do not change session
-              capacity.
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{directPaymentCounts.pending}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Pending</p>
+      {activeSection === "passes" ? (
+        <section className="panel overflow-hidden">
+          <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+            <div>
+              <p className="text-xs font-black uppercase text-electric">Passes & Credits</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Launch Pass tracking</h3>
+              <p className="mt-2 text-sm text-slate-600">Review pass purchases, remaining credits, and redemptions.</p>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{directPaymentCounts.zellePending}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Zelle</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{passCounts.active}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Active</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{passCounts.remainingCredits}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Credits Left</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{passCounts.soldThisMonth}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">This Month</p>
+              </div>
             </div>
-            <div className="rounded-lg border border-slate-200 bg-mist p-3">
-              <p className="text-xl font-black text-navy">{directPaymentCounts.paid}</p>
-              <p className="text-[10px] font-black uppercase text-slate-500">Paid</p>
-            </div>
           </div>
-        </div>
-        {directPayments.length > 0 ? (
-          <div className="grid divide-y divide-slate-200">
-            {directPayments.map((payment) => {
-              const playerName = `${payment.player_first_name} ${payment.player_last_name}`.trim();
-              const sessionCount =
-                payment.payment_option === "single_session" ? Math.max(1, Number(payment.session_count) || 1) : 1;
-              const zelleMemo =
-                payment.payment_option === "single_session"
-                  ? `${playerName} - Single Session - ${sessionCount} ${sessionCount === 1 ? "Session" : "Sessions"}`
-                  : `${playerName} - ${directPaymentOptionLabel(payment.payment_option)}`;
 
-              return (
-                <article key={payment.id} className="grid gap-4 p-5">
-                  <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
-                    <div>
-                      <p className="text-xs font-black uppercase text-electric">
-                        {directPaymentOptionLabel(payment.payment_option)} - {directPaymentMethodLabel(payment.payment_method)}
-                      </p>
-                      <h4 className="mt-1 text-lg font-black text-navy">{playerName}</h4>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Parent: {payment.parent_name} - {payment.parent_email} - {payment.parent_phone}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-600">Player age: {payment.player_age}</p>
-                      <p className="mt-1 text-xs font-black uppercase text-slate-500">
-                        Submitted: {formatWaiverTimestamp(payment.created_at)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
-                      <p className="font-black text-navy">Status: {paymentStatusLabel(payment.status)}</p>
-                      <p className="mt-1 text-slate-600">Amount due: {formatMoney(payment.amount_due)}</p>
-                      <p className="mt-1 text-slate-600">Amount paid: {formatMoney(payment.amount_paid)}</p>
-                      {payment.payment_method === "zelle" ? (
-                        <p className="mt-1 text-slate-600">Zelle memo: {zelleMemo}</p>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-2">
-                    <div className="grid gap-1 text-sm text-slate-600">
-                      <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
-                      <p><span className="font-black text-navy">Waiver Signed:</span> {payment.waiver_signed ? "Yes" : "No"}</p>
-                      <p><span className="font-black text-navy">Typed Signature:</span> {payment.typed_signature}</p>
-                      <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(payment.signed_at)}</p>
-                      <p><span className="font-black text-navy">Media Consent:</span> {payment.media_consent}</p>
-                      <p><span className="font-black text-navy">IP Address:</span> {payment.ip_address || "Not collected"}</p>
-                    </div>
-                    <div className="grid gap-1 text-sm text-slate-600">
-                      <p className="text-xs font-black uppercase text-electric">Emergency / Payment</p>
-                      <p><span className="font-black text-navy">Emergency:</span> {payment.emergency_name} - {payment.emergency_phone}</p>
-                      <p><span className="font-black text-navy">Medical:</span> {payment.medical_notes || "None"}</p>
-                      <p><span className="font-black text-navy">Stripe Checkout:</span> {payment.stripe_checkout_session_id || "Not recorded"}</p>
-                      <p><span className="font-black text-navy">Stripe Payment Intent:</span> {payment.stripe_payment_intent_id || "Not recorded"}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {payment.status !== "paid" ? (
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => void updateDirectPayment(payment.id, "paid")}
-                        className="rounded-md bg-navy px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-electric disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Mark Paid
-                      </button>
-                    ) : null}
-                    {payment.status !== "zelle_pending" && payment.payment_method === "zelle" ? (
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => void updateDirectPayment(payment.id, "zelle_pending")}
-                        className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Mark Zelle Pending
-                      </button>
-                    ) : null}
-                    {payment.status !== "cancelled" ? (
-                      <button
-                        type="button"
-                        disabled={isSaving}
-                        onClick={() => void updateDirectPayment(payment.id, "cancelled")}
-                        className="rounded-md border border-red-200 px-4 py-2 text-xs font-black uppercase text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Cancel Record
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="p-5 sm:p-6">
-            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
-              No direct Pay + Waiver records yet.
-            </p>
-          </div>
-        )}
-      </section>
-
-      <section className="panel overflow-hidden">
-        <div className="grid gap-5 border-b border-slate-200 p-5 sm:p-6">
-          <div>
-            <h3 className="text-xl font-black text-navy">Supabase Sessions</h3>
-            <p className="mt-2 text-sm text-slate-600">
-              These are the only sessions that can appear on the public booking page.
-            </p>
-          </div>
-          <div className="grid gap-3 xl:grid-cols-[1fr_auto] xl:items-end">
+          <div className="border-b border-slate-200 p-5 sm:p-6">
             <div className="flex flex-wrap gap-2">
               {[
-                ["all", "All Sessions"],
-                ["elite", "Elite Performance"],
-                ["focused", "Has Focus"],
-                ["general", "General Training"],
-                ["open", "Open"],
-                ["closed", "Closed/Cancelled"]
-              ].map(([value, label]) => {
-                const isActive = sessionFilter === value;
+                ["active", "Active Passes"],
+                ["all", "All"],
+                ["used-up", "Used Up"],
+                ["expired", "Expired"],
+                ["four", "4-Session Pass"],
+                ["six", "6-Session Pass"]
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setPassFilter(value as PassFilter)}
+                  className={`rounded-md border px-4 py-2 text-xs font-black uppercase transition ${
+                    passFilter === value
+                      ? "border-navy bg-navy text-white"
+                      : "border-slate-300 bg-white text-navy hover:border-electric hover:text-electric"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredPasses.length > 0 ? (
+            <div className="grid divide-y divide-slate-200">
+              {filteredPasses.map((pass) => {
+                const selectedSessions = (pass.selected_session_ids ?? [])
+                  .map((sessionId) => sessionById.get(sessionId))
+                  .filter((session): session is AdminTrainingSession => Boolean(session));
 
                 return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setSessionFilter(value as SessionFilter)}
-                    className={`rounded-md border px-4 py-2 text-xs font-black uppercase transition ${
-                      isActive
-                        ? "border-navy bg-navy text-white"
-                        : "border-slate-300 bg-white text-navy hover:border-electric hover:text-electric"
-                    }`}
-                  >
-                    {label}
-                  </button>
+                  <article key={pass.id} className="grid gap-4 p-5">
+                    <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                      <div>
+                        <p className="text-xs font-black uppercase text-electric">{passTypeLabel(pass.pass_type)}</p>
+                        <h4 className="mt-1 text-lg font-black text-navy">{pass.player_name}</h4>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Parent: {pass.parent_name} - {pass.parent_email} - {pass.parent_phone}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600">Training group: {trainingGroupLabel(pass.training_group)}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+                        <p className="font-black text-navy">
+                          {pass.remaining_credits}/{pass.total_credits} credits remaining
+                        </p>
+                        <p className="mt-1 text-slate-600">Status: {pass.status}</p>
+                        <p className="mt-1 text-slate-600">
+                          Expires: {new Date(pass.expires_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
+                        </p>
+                        <p className="mt-1 text-slate-600">Paid: {formatMoney(pass.amount_paid)}</p>
+                      </div>
+                    </div>
+                    {(pass.selected_session_ids ?? []).length > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-black uppercase text-electric">Sessions Selected At Purchase</p>
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                          {selectedSessions.length > 0 ? (
+                            selectedSessions.map((session) => (
+                              <p key={session.id}>
+                                {formatDateTime(session.start_datetime, session.timezone)} - {sessionFocusLabel(session)}
+                              </p>
+                            ))
+                          ) : (
+                            <p>{(pass.selected_session_ids ?? []).join(", ")}</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                    {pass.redemptions.length > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4">
+                        <p className="text-xs font-black uppercase text-electric">Redemption History</p>
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                          {pass.redemptions.map((redemption) => {
+                            const session = sessionById.get(redemption.session_id);
+
+                            return (
+                              <p key={redemption.id}>
+                                {formatWaiverTimestamp(redemption.created_at)} - {redemption.credits_used} credit used
+                                {redemption.booking ? ` for ${redemption.booking.player_name}` : ""}
+                                {session ? ` (${formatDateTime(session.start_datetime, session.timezone)})` : ""}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                        No credits used yet.
+                      </p>
+                    )}
+                  </article>
                 );
               })}
             </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(14rem,1fr)_auto_auto] sm:items-end">
-              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                Filter by date
-                <input
-                  className={inputClass}
-                  type="date"
-                  value={sessionDateFilter}
-                  onChange={(event) => setSessionDateFilter(event.target.value)}
-                />
-              </label>
-              {sessionDateFilter ? (
-                <button
-                  type="button"
-                  onClick={() => setSessionDateFilter("")}
-                  className="rounded-md border border-slate-300 px-4 py-3 text-xs font-black uppercase text-navy"
-                >
-                  Clear Date
-                </button>
-              ) : null}
-              <button type="button" onClick={() => void refreshAdminData("Sessions refreshed.")} className="rounded-md border border-slate-300 px-4 py-3 text-xs font-black uppercase text-navy">
-                Refresh
-              </button>
+          ) : (
+            <div className="p-5 sm:p-6">
+              <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                No Launch Passes match this filter.
+              </p>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeSection === "direct-payments" ? (
+        <section className="panel overflow-hidden">
+          <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+            <div>
+              <p className="text-xs font-black uppercase text-electric">Direct Payments</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Pay + waiver submissions</h3>
+              <p className="mt-2 text-sm text-slate-600">Review card and Zelle submissions from the direct payment page.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{directPaymentCounts.pending}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Pending</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{directPaymentCounts.zellePending}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Zelle</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{directPaymentCounts.paid}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Paid</p>
+              </div>
             </div>
           </div>
-        </div>
-        {sessions.length > 0 ? (
-          <div className="grid gap-4 bg-mist p-4 sm:p-6">
-            {filteredSessions.map((session) => {
-              const group = trainingGroups.find((item) => item.id === session.training_group);
-              const isFull = session.remainingSpots <= 0;
-              const detailsOpen = expandedSessionId === session.id;
-              const actionsOpen = actionsSessionId === session.id;
-              const paidBookingNames = session.paidBookings.map((booking) => booking.player_name).join(", ");
 
-              return (
-                <article key={session.id} className="grid gap-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
-                    <div className="grid gap-4">
-                      <div className="flex flex-wrap gap-2">
-                        <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${sessionFocusBadgeClass(session)}`}>
-                          {sessionFocusLabel(session)}
-                        </span>
-                        <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(session.status)}`}>
-                          {session.status}
-                        </span>
-                        {isFull ? (
-                          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-black uppercase text-amber-700">
-                            Full
+          <div className="border-b border-slate-200 p-5 sm:p-6">
+            <div className="flex flex-wrap gap-2">
+              {[
+                ["all", "All"],
+                ["zelle-pending", "Zelle Pending"],
+                ["card-paid", "Card Paid"],
+                ["pending-card", "Pending Card"],
+                ["single-session", "Single Session"],
+                ["four-pass", "4-Session Pass"],
+                ["six-pass", "6-Session Pass"]
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setDirectPaymentFilter(value as DirectPaymentFilter)}
+                  className={`rounded-md border px-4 py-2 text-xs font-black uppercase transition ${
+                    directPaymentFilter === value
+                      ? "border-navy bg-navy text-white"
+                      : "border-slate-300 bg-white text-navy hover:border-electric hover:text-electric"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredDirectPayments.length > 0 ? (
+            <div className="grid gap-4 bg-mist p-4 sm:p-6">
+              {filteredDirectPayments.map((payment) => {
+                const isExpanded = expandedDirectPaymentId === payment.id;
+
+                return (
+                  <article key={payment.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                      <div className="grid gap-4 md:grid-cols-4">
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Player(s)</p>
+                          <h4 className="mt-1 text-lg font-black text-navy">{playerNamesForDirectPayment(payment)}</h4>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {payment.player_count} player(s)
+                            {payment.payment_option === "single_session" ? ` - ${payment.session_count || 1} session(s)` : ""}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Parent</p>
+                          <p className="mt-1 font-black text-navy">{payment.parent_name}</p>
+                          <p className="mt-1 break-words text-sm text-slate-600">{payment.parent_email}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Payment</p>
+                          <p className="mt-1 font-black text-navy">{directPaymentOptionLabel(payment.payment_option)}</p>
+                          <p className="mt-1 text-sm text-slate-600">{directPaymentMethodLabel(payment.payment_method)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-black uppercase text-slate-500">Total</p>
+                          <p className="mt-1 text-lg font-black text-navy">{formatMoney(payment.amount_due)}</p>
+                          <span className={`mt-2 inline-flex rounded-full border px-3 py-1 text-[11px] font-black uppercase ${directPaymentStatusBadge(payment.status)}`}>
+                            {paymentStatusLabel(payment.status)}
                           </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {payment.status === "zelle_pending" ? (
+                          <button type="button" disabled={isSaving} onClick={() => void updateDirectPayment(payment.id, "paid")} className={primaryButtonClass}>
+                            Mark Zelle Paid
+                          </button>
                         ) : null}
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-black uppercase text-electric">
-                          {group?.name ?? session.title} {group ? `(${group.ages})` : ""}
-                        </p>
-                        <h4 className="mt-1 text-2xl font-black text-navy">
-                          {formatDateTime(session.start_datetime, session.timezone)}
-                        </h4>
-                        <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">
-                          {session.location || business.location}
-                        </p>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-lg border border-slate-200 bg-mist p-3">
-                          <p className="text-xl font-black text-navy">{session.capacity}</p>
-                          <p className="text-[10px] font-black uppercase text-slate-500">Capacity</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-200 bg-mist p-3">
-                          <p className="text-xl font-black text-navy">{session.paidPlayers}</p>
-                          <p className="text-[10px] font-black uppercase text-slate-500">Booked</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-200 bg-mist p-3">
-                          <p className="text-xl font-black text-navy">{session.remainingSpots}</p>
-                          <p className="text-[10px] font-black uppercase text-slate-500">Remaining</p>
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-600">
-                        <span className="font-black text-navy">Paid bookings:</span>{" "}
-                        {session.paidBookings.length > 0 ? paidBookingNames : "None yet"}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row xl:flex-col">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedSessionId(detailsOpen ? "" : session.id)}
-                        className="rounded-md bg-navy px-4 py-3 text-xs font-black uppercase text-white transition hover:bg-electric"
-                      >
-                        {detailsOpen ? "Hide Details" : "View Details"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActionsSessionId(actionsOpen ? "" : session.id)}
-                        className="rounded-md border border-slate-300 px-4 py-3 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
-                      >
-                        {actionsOpen ? "Close Actions" : "Edit Session"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {actionsOpen ? (
-                    <div className="grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-4">
-                      <div>
-                        <p className="text-xs font-black uppercase text-slate-500">Status</p>
-                        <div className="mt-3 grid gap-2">
-                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "open" })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
-                            Open
-                          </button>
-                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "closed" })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
-                            Close
-                          </button>
-                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { status: "cancelled" })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-xs font-black uppercase text-slate-500">Session Focus</p>
-                        <div className="mt-3 grid gap-2">
-                          <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: null })} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
-                            Set General
-                          </button>
-                          <button type="button" disabled={isSaving} onClick={() => editSessionFocus(session)} className="rounded-md border border-electric/30 bg-white px-3 py-2 text-xs font-black text-electric disabled:cursor-not-allowed disabled:opacity-60">
-                            Update Focus
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-xs font-black uppercase text-slate-500">Edit</p>
-                        <div className="mt-3 grid gap-2">
-                          <button type="button" disabled={isSaving} onClick={() => editCapacity(session)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
-                            Update Capacity
-                          </button>
-                          <button type="button" disabled={isSaving} onClick={() => editLocation(session)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-black text-navy disabled:cursor-not-allowed disabled:opacity-60">
-                            Update Location
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-xs font-black uppercase text-red-700">Danger</p>
-                        <button type="button" disabled={isSaving} onClick={() => void removeSession(session.id)} className="mt-3 w-full rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-black text-red-700 disabled:cursor-not-allowed disabled:opacity-60">
-                          Delete Session
+                        <button type="button" onClick={() => setExpandedDirectPaymentId(isExpanded ? "" : payment.id)} className={secondaryButtonClass}>
+                          {isExpanded ? "Hide Details" : "View Details"}
                         </button>
                       </div>
                     </div>
-                  ) : null}
 
-                  {detailsOpen && session.paidBookings.length > 0 ? (
-                    <div className="rounded-lg border border-slate-200 bg-mist p-4">
-                      <p className="text-xs font-black uppercase text-electric">Paid Bookings</p>
-                      <div className="mt-3 grid gap-4">
-                        {session.paidBookings.map((booking) => (
-                          <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                            <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                              <div>
-                                <h5 className="font-black text-navy">{booking.player_name}</h5>
-                                <p className="mt-1 text-sm text-slate-600">
-                                  {booking.player_count} player(s) - Payment: {booking.status}
-                                </p>
-                                <p className="mt-1 text-sm text-slate-600">
-                                  Payment type:{" "}
-                                  {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}
-                                </p>
-                                {booking.payment_type === "launch_pass_credit" ? (
-                                  <p className="mt-1 text-sm text-slate-600">
-                                    Pass credits remaining: {booking.passPurchase?.remaining_credits ?? "Not loaded"}
-                                  </p>
-                                ) : null}
-                                <p className="mt-1 text-sm text-slate-600">Amount paid: ${(booking.amount_paid / 100).toFixed(2)}</p>
-                              </div>
-                              <div className="grid gap-1 text-sm text-slate-600">
-                                <p><span className="font-black text-navy">Parent:</span> {booking.parent_name}</p>
-                                <p><span className="font-black text-navy">Phone:</span> {booking.parent_phone}</p>
-                                <p><span className="font-black text-navy">Email:</span> {booking.parent_email}</p>
-                                <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
-                                <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
-                                <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
-                                <p><span className="font-black text-navy">Calendar Event ID:</span> {booking.calendarEvent?.google_calendar_event_id || "Not recorded"}</p>
-                                <p>
-                                  <span className="font-black text-navy">Email Logs:</span>{" "}
-                                  {booking.emailLogs.length > 0
-                                    ? booking.emailLogs.map((log) => `${log.email_type}: ${log.status}`).join(" / ")
-                                    : "No email logs yet"}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4">
-                              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
-                                <div>
-                                  <p className="text-xs font-black uppercase text-electric">Waiver Record</p>
-                                  <div className="mt-3 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
-                                    <p><span className="font-black text-navy">Waiver Signed:</span> {booking.waiver?.waiver_signed ? "Yes" : "Not recorded"}</p>
-                                    <p><span className="font-black text-navy">Typed Signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
-                                    <p><span className="font-black text-navy">Signed Timestamp:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
-                                    <p><span className="font-black text-navy">IP Address:</span> {booking.waiver?.ip_address || "Not collected"}</p>
-                                    <p><span className="font-black text-navy">Media Consent:</span> {booking.waiver?.media_consent || "Not recorded"}</p>
-                                    <p className="sm:col-span-2"><span className="font-black text-navy">Medical:</span> {booking.waiver?.emergency_medical_notes || booking.medical_notes || "None"}</p>
-                                  </div>
-                                </div>
-                                <div className="flex flex-col gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveWaiverRecord({ booking, session })}
-                                    className="rounded-md bg-navy px-4 py-2 text-xs font-black uppercase text-white transition hover:bg-electric"
-                                  >
-                                    View Waiver Record
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => printWaiverRecord(booking, session)}
-                                    className="rounded-md border border-navy px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
-                                  >
-                                    Print Waiver
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => downloadWaiverRecord(booking, session)}
-                                    className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy transition hover:border-electric hover:text-electric"
-                                  >
-                                    Download Waiver Record
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </article>
-                        ))}
+                    {isExpanded ? (
+                      <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-2">
+                        <div className="grid gap-2 text-sm text-slate-600">
+                          <p><span className="font-black text-navy">Parent phone:</span> {payment.parent_phone}</p>
+                          <p><span className="font-black text-navy">Player 1 age:</span> {payment.player_age}</p>
+                          {payment.player_count === 2 ? (
+                            <p><span className="font-black text-navy">Player 2 age:</span> {payment.second_player_age || "Not recorded"}</p>
+                          ) : null}
+                          <p><span className="font-black text-navy">Emergency:</span> {payment.emergency_name} - {payment.emergency_phone}</p>
+                          <p><span className="font-black text-navy">Medical:</span> {payment.medical_notes}</p>
+                          <p><span className="font-black text-navy">Submitted:</span> {formatWaiverTimestamp(payment.created_at)}</p>
+                        </div>
+                        <div className="grid gap-2 text-sm text-slate-600">
+                          <p><span className="font-black text-navy">Waiver status:</span> {payment.waiver_signed ? "Signed" : "Missing"}</p>
+                          <p><span className="font-black text-navy">Typed signature:</span> {payment.typed_signature || "Not recorded"}</p>
+                          <p><span className="font-black text-navy">Signed at:</span> {formatWaiverTimestamp(payment.signed_at)}</p>
+                          <p><span className="font-black text-navy">Media consent:</span> {payment.media_consent}</p>
+                          <p><span className="font-black text-navy">Stripe session:</span> {payment.stripe_checkout_session_id || "Not recorded"}</p>
+                          <p><span className="font-black text-navy">Payment intent:</span> {payment.stripe_payment_intent_id || "Not recorded"}</p>
+                          {payment.status !== "cancelled" ? (
+                            <button type="button" disabled={isSaving} onClick={() => void updateDirectPayment(payment.id, "cancelled")} className={`${dangerButtonClass} mt-2 w-fit`}>
+                              Cancel Record
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ) : detailsOpen ? (
-                    <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
-                      No paid bookings for this session yet.
-                    </p>
-                  ) : null}
-                </article>
-              );
-            })}
-            {filteredSessions.length === 0 ? (
-              <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm font-bold text-slate-600">
-                No sessions match the current filters.
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-5 sm:p-6">
+              <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                No direct payments match this filter.
               </p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="p-5 sm:p-6">
-            <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
-              No Supabase sessions yet. Add the first available session above.
-            </p>
-          </div>
-        )}
-      </section>
+            </div>
+          )}
+        </section>
+      ) : null}
 
-      <section className="panel overflow-hidden">
-        <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
-          <div>
-            <h3 className="text-xl font-black text-navy">Email Notifications</h3>
-            <p className="mt-2 text-sm text-slate-600">Owner notifications are sent to {bookingNotificationEmail}.</p>
+      {activeSection === "email-list" ? (
+        <section className="panel overflow-hidden">
+          <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
+            <div>
+              <p className="text-xs font-black uppercase text-electric">Email List</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Marketing opt-ins for Brevo</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Export only parents who checked the email list box. Transactional booking emails are separate.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center sm:min-w-64">
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{activeEmailSubscribers.length}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Active</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-mist p-3">
+                <p className="text-xl font-black text-navy">{emailSubscribers.length}</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Total</p>
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
+
+          <div className="grid gap-4 p-5 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm font-semibold leading-6 text-slate-600">
+                CSV export includes active subscribers only: opted in and not unsubscribed.
+              </p>
+              <button
+                type="button"
+                onClick={exportEmailSubscribersCsv}
+                disabled={activeEmailSubscribers.length === 0}
+                className={primaryButtonClass}
+              >
+                Export CSV
+              </button>
+            </div>
+
+            {emailSubscribers.length > 0 ? (
+              <div className="grid gap-3">
+                {emailSubscribers.map((subscriber) => {
+                  const isActive = subscriber.opted_in && !subscriber.unsubscribed;
+
+                  return (
+                    <article key={subscriber.id} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                      <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Parent Name</span>
+                          <span className="font-black text-navy">{subscriber.parent_name || "Not provided"}</span>
+                        </p>
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Email</span>
+                          <span className="break-words font-black text-navy">{subscriber.email}</span>
+                        </p>
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Phone</span>
+                          <span className="font-semibold">{subscriber.phone || "Not provided"}</span>
+                        </p>
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Player</span>
+                          <span className="font-semibold">
+                            {subscriber.player_name || "Not provided"}
+                            {subscriber.player_age ? `, ${subscriber.player_age}` : ""}
+                          </span>
+                        </p>
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Source</span>
+                          <span className="font-semibold">{subscriber.source || "Not recorded"}</span>
+                        </p>
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Opt-in Date</span>
+                          <span className="font-semibold">{formatWaiverTimestamp(subscriber.opted_in_at)}</span>
+                        </p>
+                        <p>
+                          <span className="block text-[10px] font-black uppercase text-slate-500">Status</span>
+                          <span className={`font-black ${isActive ? "text-field" : "text-red-700"}`}>
+                            {isActive ? "Active" : "Unsubscribed"}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 lg:justify-end">
+                        {subscriber.unsubscribed ? (
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => void updateEmailSubscriber(subscriber.id, false)}
+                            className={secondaryButtonClass}
+                          >
+                            Reactivate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => void updateEmailSubscriber(subscriber.id, true)}
+                            className="rounded-md border border-amber-200 px-4 py-2 text-xs font-black uppercase text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Unsubscribe
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => void removeEmailSubscriber(subscriber.id)}
+                          className={dangerButtonClass}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                No email subscribers yet.
+              </p>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       {activeWaiverRecord ? (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-navy/70 px-4 py-8">
@@ -1669,15 +2353,18 @@ export function AdminAvailability() {
                 <button
                   type="button"
                   onClick={() => printWaiverRecord(activeWaiverRecord.booking, activeWaiverRecord.session)}
-                  className="rounded-md bg-navy px-4 py-2 text-xs font-black uppercase text-white"
+                  className={navyButtonClass}
                 >
                   Print Waiver
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveWaiverRecord(null)}
-                  className="rounded-md border border-slate-300 px-4 py-2 text-xs font-black uppercase text-navy"
+                  onClick={() => downloadWaiverRecord(activeWaiverRecord.booking, activeWaiverRecord.session)}
+                  className={secondaryButtonClass}
                 >
+                  Download
+                </button>
+                <button type="button" onClick={() => setActiveWaiverRecord(null)} className={secondaryButtonClass}>
                   Close
                 </button>
               </div>

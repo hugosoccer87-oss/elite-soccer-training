@@ -47,6 +47,7 @@ export async function POST(request: Request) {
     trainingFocus?: string | null;
     capacity?: number;
     location?: string;
+    status?: "open" | "closed" | "cancelled";
   } | null;
 
   if (!payload?.trainingGroup || !isTrainingGroupId(payload.trainingGroup) || !payload.date || !payload.time) {
@@ -60,7 +61,8 @@ export async function POST(request: Request) {
       time: payload.time,
       trainingFocus: normalizeTrainingFocusForStorage(payload.trainingFocus) ?? undefined,
       capacity: payload.capacity,
-      location: payload.location
+      location: payload.location,
+      status: payload.status && ["open", "closed", "cancelled"].includes(payload.status) ? payload.status : "open"
     });
 
     return NextResponse.json({ status: "Created", session: session[0] });
