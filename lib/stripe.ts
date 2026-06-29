@@ -3,7 +3,6 @@ import { type BookingRecord, type TrainingGroupId } from "@/lib/booking-data";
 import {
   getDirectPaymentOption,
   getLaunchPassOption,
-  launchPassExpirationDate,
   type LaunchPassType,
   sessionCurrency,
   sessionLineItemName,
@@ -174,8 +173,7 @@ export function passPurchaseToStripeMetadata(pass: PassPurchaseRow) {
     player_name: pass.player_name,
     player_age: pass.player_age,
     training_group: pass.training_group,
-    total_credits: pass.total_credits,
-    expires_at: pass.expires_at
+    total_credits: pass.total_credits
   };
 }
 
@@ -262,7 +260,7 @@ export async function createStripeLaunchPassCheckoutSession(pass: PassPurchaseRo
     customer_email: pass.parent_email,
     "line_items[0][price_data][currency]": sessionCurrency,
     "line_items[0][price_data][product_data][name]": option.stripeLineItemName,
-    "line_items[0][price_data][product_data][description]": `${option.credits} training credits. Expires June 30, 2026.`,
+    "line_items[0][price_data][product_data][description]": `${option.credits} training credits for EST CV small group training.`,
     "line_items[0][price_data][unit_amount]": String(option.amountCents),
     "line_items[0][quantity]": "1",
     "payment_intent_data[metadata][purchase_type]": "launch_pass",
@@ -270,8 +268,7 @@ export async function createStripeLaunchPassCheckoutSession(pass: PassPurchaseRo
     "payment_intent_data[metadata][pass_type]": pass.pass_type,
     "payment_intent_data[metadata][parent_email]": pass.parent_email,
     "payment_intent_data[metadata][player_name]": pass.player_name,
-    "payment_intent_data[metadata][total_credits]": String(option.credits),
-    "payment_intent_data[metadata][expires_at]": pass.expires_at || launchPassExpirationDate
+    "payment_intent_data[metadata][total_credits]": String(option.credits)
   });
 
   appendMetadata(params, passPurchaseToStripeMetadata(pass));

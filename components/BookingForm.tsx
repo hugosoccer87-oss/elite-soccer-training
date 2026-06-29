@@ -1124,7 +1124,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Choose a single session, purchase a June Launch Pass, or book with existing Launch Pass credits.
+                Choose a single session, purchase a Launch Pass, or book with existing Launch Pass credits.
               </p>
             </div>
 
@@ -1178,7 +1178,7 @@ export function BookingForm() {
                   <p className="text-xs font-black uppercase text-electric">{getLaunchPassOption(bookingOption as LaunchPassType).price}</p>
                   <h4 className="mt-2 text-2xl font-black text-navy">{getLaunchPassOption(bookingOption as LaunchPassType).title}</h4>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    {getLaunchPassOption(bookingOption as LaunchPassType).description} Launch Pass credits expire June 30, 2026 and are tied to the parent email and player name entered here.
+                    {getLaunchPassOption(bookingOption as LaunchPassType).description} Credits are tied to the parent email and player name entered here.
                   </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">

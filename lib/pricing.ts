@@ -26,7 +26,7 @@ export const launchPassOptions: Record<
     price: "$200",
     amountCents: 20000,
     credits: 4,
-    description: "Best for players who want consistent training through the end of June.",
+    description: "4 training credits for EST CV small group training.",
     stripeLineItemName: "Elite Soccer Training CV - 4-Session Launch Pass"
   },
   six_session_launch_pass: {
@@ -35,7 +35,7 @@ export const launchPassOptions: Record<
     price: "$285",
     amountCents: 28500,
     credits: 6,
-    description: "Best for committed players training multiple times per week.",
+    description: "6 training credits for EST CV small group training.",
     stripeLineItemName: "Elite Soccer Training CV - 6-Session Launch Pass"
   }
 };

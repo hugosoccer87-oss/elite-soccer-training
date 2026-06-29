@@ -450,7 +450,6 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
     ["Credits", `${pass.total_credits} session credits`],
     ["Remaining Credits", String(pass.remaining_credits)],
     ["Sessions Selected at Purchase", selectedSessionCount > 0 ? String(selectedSessionCount) : "None"],
-    ["Expiration", "June 30, 2026"],
     ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)]
   ];
   const text = [
@@ -509,7 +508,6 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
     ["Credits", `${pass.total_credits} total / ${pass.remaining_credits} remaining`],
     ["Sessions Selected at Purchase", selectedSessionCount > 0 ? `${selectedSessionCount} selected` : "None"],
     ["Selected Session IDs", selectedSessionCount > 0 ? (pass.selected_session_ids ?? []).join(", ") : "None"],
-    ["Expiration", "June 30, 2026"],
     ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)],
     ["Stripe Checkout Session", pass.stripe_checkout_session_id || "Not recorded"],
     ["Stripe Payment Intent", pass.stripe_payment_intent_id || "Not recorded"]

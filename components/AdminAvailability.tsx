@@ -157,7 +157,7 @@ type SessionFilter =
   | "shooting-finishing";
 type SessionDateRange = "all" | "today" | "this-week" | "upcoming" | "past";
 type BookingFilter = "all" | "upcoming" | "past" | "paid" | "pending";
-type PassFilter = "all" | "active" | "used-up" | "expired" | "four" | "six";
+type PassFilter = "all" | "active" | "used-up" | "four" | "six";
 type CalendarView = "month" | "week" | "day";
 type DirectPaymentFilter =
   | "all"
@@ -1054,7 +1054,7 @@ export function AdminAvailability() {
     [sessions]
   );
   const activePasses = useMemo(
-    () => passes.filter((pass) => pass.status === "paid" && pass.remaining_credits > 0 && new Date(pass.expires_at).getTime() >= Date.now()),
+    () => passes.filter((pass) => pass.status === "paid" && pass.remaining_credits > 0),
     [passes]
   );
   const paidPasses = useMemo(() => passes.filter((pass) => pass.status === "paid"), [passes]);
@@ -1260,15 +1260,11 @@ export function AdminAvailability() {
         }
 
         if (passFilter === "active") {
-          return pass.status === "paid" && pass.remaining_credits > 0 && new Date(pass.expires_at).getTime() >= Date.now();
+          return pass.status === "paid" && pass.remaining_credits > 0;
         }
 
         if (passFilter === "used-up") {
           return pass.status === "paid" && pass.remaining_credits <= 0;
-        }
-
-        if (passFilter === "expired") {
-          return pass.status === "expired" || new Date(pass.expires_at).getTime() < Date.now();
         }
 
         if (passFilter === "four") {
@@ -3272,7 +3268,6 @@ export function AdminAvailability() {
                 ["active", "Active Passes"],
                 ["all", "All"],
                 ["used-up", "Used Up"],
-                ["expired", "Expired"],
                 ["four", "4-Session Pass"],
                 ["six", "6-Session Pass"]
               ].map(([value, label]) => (
@@ -3391,9 +3386,7 @@ export function AdminAvailability() {
                           {pass.remaining_credits}/{pass.total_credits} credits remaining
                         </p>
                         <p className="mt-1 text-slate-600">Status: {pass.status}</p>
-                        <p className="mt-1 text-slate-600">
-                          Expires: {new Date(pass.expires_at).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
-                        </p>
+                        <p className="mt-1 text-slate-600">Expiration: Never expires</p>
                         <p className="mt-1 text-slate-600">Paid: {formatMoney(pass.amount_paid)}</p>
                         <button type="button" onClick={() => editPassContact(pass)} className={`${secondaryButtonClass} mt-3 w-full`}>
                           Edit Contact Info

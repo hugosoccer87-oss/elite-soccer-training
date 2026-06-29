@@ -27,8 +27,8 @@ export default function BookingPage() {
             <div className="mt-5 grid gap-3">
               {[
                 ["Single Session", "$55", "Book one available training session online."],
-                ["4-Session Launch Pass", "$200", "Best for players training consistently through the end of June."],
-                ["6-Session Launch Pass", "$285", "Best for committed players training multiple times per week."]
+                ["4-Session Launch Pass", "$200", "4 training credits for EST CV small group training."],
+                ["6-Session Launch Pass", "$285", "6 training credits for EST CV small group training."]
               ].map(([title, price, description]) => (
                 <div key={title} className="rounded-lg border border-slate-200 bg-white p-4">
                   <p className="font-black text-navy">

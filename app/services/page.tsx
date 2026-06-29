@@ -28,7 +28,7 @@ export default function ServicesPage() {
             <p className="mt-2 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-black uppercase text-electric">June Launch Pricing</p>
+            <p className="text-sm font-black uppercase text-electric">Training Pricing</p>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               {pricingOptions.map((option) => (
                 <article key={option.title} className="rounded-lg border border-slate-200 bg-mist p-4">
