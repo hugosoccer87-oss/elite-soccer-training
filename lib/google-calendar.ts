@@ -11,6 +11,7 @@ import {
 } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 import { business } from "@/lib/site-data";
+import { createSign } from "node:crypto";
 
 const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleTokenEndpoint = "https://oauth2.googleapis.com/token";
@@ -95,6 +96,33 @@ function getGoogleServiceAccountEmail() {
   ).trim();
 }
 
+function getGooglePrivateKey() {
+  return (
+    process.env.GOOGLE_PRIVATE_KEY ||
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
+    process.env.GOOGLE_CLIENT_PRIVATE_KEY ||
+    ""
+  )
+    .replace(/\\n/g, "\n")
+    .trim();
+}
+
+function getGoogleAuthMode() {
+  const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  const privateKey = getGooglePrivateKey();
+
+  if (serviceAccountEmail && privateKey) {
+    return "service_account";
+  }
+
+  if (clientId && clientSecret && refreshToken) {
+    return "oauth_refresh_token";
+  }
+
+  return "not_configured";
+}
+
 function setLastCalendarEventCreationResult(result: Omit<LastCalendarEventCreationResult, "checkedAt">) {
   calendarDiagnosticsStore.lastCalendarEventCreationResult = {
     checkedAt: new Date().toISOString(),
@@ -113,14 +141,17 @@ export function recordCalendarEventCreationFailure(bookingId: string, message: s
 
 export function getGoogleCalendarDiagnostics() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+  const privateKey = getGooglePrivateKey();
 
   return {
     googleCalendarConfigured: isGoogleCalendarConfigured(),
     googleCalendarId: getCalendarId(),
     googleServiceAccountEmail: getGoogleServiceAccountEmail(),
+    googleAuthMode: getGoogleAuthMode(),
     hasGoogleClientId: Boolean(clientId),
     hasGoogleClientSecret: Boolean(clientSecret),
     hasGoogleRefreshToken: Boolean(refreshToken),
+    hasGooglePrivateKey: Boolean(privateKey),
     lastCalendarEventCreationResult: calendarDiagnosticsStore.lastCalendarEventCreationResult
   };
 }
@@ -145,9 +176,11 @@ function getCalendarEnvDiagnostics() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
 
   return {
+    googleAuthMode: getGoogleAuthMode(),
     hasGoogleClientId: Boolean(clientId),
     hasGoogleClientSecret: Boolean(clientSecret),
     hasGoogleRefreshToken: Boolean(refreshToken),
+    hasGooglePrivateKey: Boolean(getGooglePrivateKey()),
     calendarId: getCalendarId(),
     googleServiceAccountEmail: getGoogleServiceAccountEmail(),
     calendarTimeZone
@@ -155,8 +188,7 @@ function getCalendarEnvDiagnostics() {
 }
 
 function isGoogleCalendarConfigured() {
-  const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
-  return Boolean(clientId && clientSecret && refreshToken);
+  return getGoogleAuthMode() !== "not_configured";
 }
 
 async function googleErrorMessage(response: Response, context: string) {
@@ -238,12 +270,19 @@ export async function exchangeGoogleCodeForTokens(code: string, request: Request
 
 async function getGoogleAccessToken() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+  const authMode = getGoogleAuthMode();
+
+  if (authMode === "service_account") {
+    logCalendarInfo("Requesting Google service account access token", getCalendarEnvDiagnostics());
+    return getServiceAccountAccessToken();
+  }
 
   if (!clientId || !clientSecret || !refreshToken) {
     logCalendarError("Google Calendar environment variables are missing", getCalendarEnvDiagnostics());
     return {
       accessToken: null,
-      error: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+      error:
+        "Google Calendar is not configured. Add either GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY, or GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
     };
   }
 
@@ -291,6 +330,95 @@ function calendarHeaders(accessToken: string, extraHeaders?: Record<string, stri
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
     ...extraHeaders
+  };
+}
+
+function base64UrlJson(value: Record<string, unknown>) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function createServiceAccountAssertion() {
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  const privateKey = getGooglePrivateKey();
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlJson({
+    alg: "RS256",
+    typ: "JWT"
+  });
+  const claim = base64UrlJson({
+    iss: serviceAccountEmail,
+    scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy",
+    aud: googleTokenEndpoint,
+    iat: now,
+    exp: now + 3600
+  });
+  const unsigned = `${header}.${claim}`;
+  const signature = createSign("RSA-SHA256").update(unsigned).sign(privateKey).toString("base64url");
+
+  return `${unsigned}.${signature}`;
+}
+
+async function getServiceAccountAccessToken() {
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  const privateKey = getGooglePrivateKey();
+
+  if (!serviceAccountEmail || !privateKey) {
+    return {
+      accessToken: null,
+      error: "Google Calendar service account is not configured. Add GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY in Vercel."
+    };
+  }
+
+  let assertion = "";
+
+  try {
+    assertion = createServiceAccountAssertion();
+  } catch (error) {
+    logCalendarError("Google service account JWT could not be signed", {
+      googleServiceAccountEmail: serviceAccountEmail,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      accessToken: null,
+      error: "Google service account private key could not be used. Check GOOGLE_PRIVATE_KEY formatting."
+    };
+  }
+
+  const response = await fetch(googleTokenEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    })
+  });
+
+  if (!response.ok) {
+    const message = await googleErrorMessage(response, "Google service account token request failed");
+    return {
+      accessToken: null,
+      error: message
+    };
+  }
+
+  const token = (await response.json()) as { access_token?: string };
+
+  if (!token.access_token) {
+    logCalendarError("Google service account token response did not include an access token", {
+      googleServiceAccountEmail: serviceAccountEmail
+    });
+    return {
+      accessToken: null,
+      error: "Google service account did not return an access token."
+    };
+  }
+
+  return {
+    accessToken: token.access_token,
+    error: null
   };
 }
 

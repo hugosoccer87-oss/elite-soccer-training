@@ -49,9 +49,11 @@ type AdminDiagnostics = {
     googleCalendarConfigured: boolean;
     googleCalendarId: string;
     googleServiceAccountEmail: string;
+    googleAuthMode?: string;
     hasGoogleClientId: boolean;
     hasGoogleClientSecret: boolean;
     hasGoogleRefreshToken: boolean;
+    hasGooglePrivateKey?: boolean;
     lastCalendarEventCreationResult: {
       checkedAt: string;
       bookingId?: string;
@@ -142,7 +144,7 @@ type ContactFormState = {
   secondPlayerAge: string;
 };
 
-type AdminSection = "dashboard" | "sessions" | "bookings" | "passes" | "direct-payments" | "email-list";
+type AdminSection = "dashboard" | "calendar" | "sessions" | "bookings" | "passes" | "direct-payments" | "email-list";
 type SessionFilter =
   | "all"
   | "open"
@@ -189,10 +191,11 @@ type BulkPreviewSession = {
 };
 
 const adminSections: Array<{ id: AdminSection; label: string; note: string }> = [
-  { id: "dashboard", label: "Dashboard", note: "Today and this week" },
+  { id: "dashboard", label: "Overview", note: "Today and this week" },
+  { id: "calendar", label: "Calendar", note: "Booked sessions by date" },
   { id: "sessions", label: "Sessions", note: "Create and manage openings" },
   { id: "bookings", label: "Bookings", note: "Players and waivers" },
-  { id: "passes", label: "Passes & Credits", note: "Launch Pass tracking" },
+  { id: "passes", label: "Launch Passes / Credits", note: "Pass tracking" },
   { id: "direct-payments", label: "Direct Payments", note: "Pay + waiver records" },
   { id: "email-list", label: "Email List", note: "Brevo CSV export" }
 ];
@@ -419,6 +422,48 @@ function statusBadgeClass(status: string) {
   }
 
   return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
+function adminCalendarStatus(session: AdminTrainingSession) {
+  if (session.status === "cancelled") {
+    return "cancelled";
+  }
+
+  if (session.status === "closed") {
+    return "closed";
+  }
+
+  if (session.remainingSpots <= 0) {
+    return "full";
+  }
+
+  return "open";
+}
+
+function adminCalendarStatusBadgeClass(session: AdminTrainingSession) {
+  const status = adminCalendarStatus(session);
+
+  if (status === "open") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "full") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  if (status === "cancelled") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
+function paymentTypeLabel(booking: AdminBookingRecord) {
+  if (booking.payment_type === "launch_pass_credit") {
+    return "Launch Pass credit";
+  }
+
+  return "Card / Single Session";
 }
 
 function endTimeFromStartInput(value: string) {
@@ -832,6 +877,7 @@ export function AdminAvailability() {
   const [sessionDateRange, setSessionDateRange] = useState<SessionDateRange>("upcoming");
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [expandedSessionId, setExpandedSessionId] = useState("");
+  const [activeCalendarSessionId, setActiveCalendarSessionId] = useState("");
   const [actionsSessionId, setActionsSessionId] = useState("");
   const [creditingBookingId, setCreditingBookingId] = useState("");
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>("upcoming");
@@ -985,6 +1031,32 @@ export function AdminAvailability() {
       return groups;
     }, []);
   }, [filteredSessions]);
+  const calendarGroups = useMemo(() => {
+    const sortedSessions = [...sessions].sort(
+      (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
+    );
+
+    return sortedSessions.reduce<Array<{ key: string; label: string; sessions: AdminTrainingSession[] }>>((groups, session) => {
+      const key = formatDateOnly(session.start_datetime, session.timezone);
+      const existing = groups.find((group) => group.key === key);
+
+      if (existing) {
+        existing.sessions.push(session);
+      } else {
+        groups.push({
+          key,
+          label: formatDateHeading(session.start_datetime, session.timezone),
+          sessions: [session]
+        });
+      }
+
+      return groups;
+    }, []);
+  }, [sessions]);
+  const selectedCalendarSession = useMemo(
+    () => sessions.find((session) => session.id === activeCalendarSessionId) ?? null,
+    [activeCalendarSessionId, sessions]
+  );
   const bulkPreviewSessions = useMemo<BulkPreviewSession[]>(() => {
     if (!bulkStartDate || !bulkEndDate || bulkPatterns.length === 0) {
       return [];
@@ -1745,7 +1817,7 @@ export function AdminAvailability() {
           </button>
         </div>
 
-        <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           {adminSections.map((section) => {
             const isActive = activeSection === section.id;
 
@@ -1882,7 +1954,9 @@ export function AdminAvailability() {
                   ["Admin email", diagnostics.adminNotificationRecipient],
                   ["Google Calendar", diagnostics.googleCalendar?.googleCalendarConfigured ? "yes" : "no"],
                   ["Calendar", diagnostics.googleCalendar?.googleCalendarId || "primary"],
+                  ["Google auth", diagnostics.googleCalendar?.googleAuthMode || "not configured"],
                   ["Google client email", diagnostics.googleCalendar?.googleServiceAccountEmail || "not configured"],
+                  ["Google private key", diagnostics.googleCalendar?.hasGooglePrivateKey ? "yes" : "no"],
                   [
                     "Last calendar event",
                     diagnostics.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"
@@ -1913,6 +1987,172 @@ export function AdminAvailability() {
               </p>
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {activeSection === "calendar" ? (
+        <section className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
+          <div className="panel overflow-hidden">
+            <div className="border-b border-slate-200 p-5 sm:p-6">
+              <p className="text-xs font-black uppercase text-electric">Admin Calendar</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Booked sessions by date</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                This calendar uses Supabase sessions and paid bookings as the source of truth. Google Calendar sync is shown only as a status.
+              </p>
+              <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-700">
+                <span className="font-black text-navy">Google Calendar:</span>{" "}
+                {diagnostics?.googleCalendar?.googleCalendarConfigured ? "Configured" : "Not configured"} ·{" "}
+                <span className="font-black text-navy">Calendar:</span>{" "}
+                {diagnostics?.googleCalendar?.googleCalendarId || "primary"} ·{" "}
+                <span className="font-black text-navy">Auth:</span>{" "}
+                {diagnostics?.googleCalendar?.googleAuthMode || "not configured"} ·{" "}
+                <span className="font-black text-navy">Last sync:</span>{" "}
+                {diagnostics?.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"}
+                {diagnostics?.googleCalendar?.lastCalendarEventCreationResult?.message ? (
+                  <span className="mt-1 block text-xs font-semibold text-slate-500">
+                    {diagnostics.googleCalendar.lastCalendarEventCreationResult.message}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            {calendarGroups.length > 0 ? (
+              <div className="grid gap-5 bg-mist p-4 sm:p-6">
+                {calendarGroups.map((group) => (
+                  <div key={group.key} className="grid gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h4 className="text-sm font-black uppercase tracking-wide text-slate-500">{group.label}</h4>
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black uppercase text-slate-500">
+                        {group.sessions.length} session{group.sessions.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="grid gap-3">
+                      {group.sessions.map((session) => {
+                        const selected = activeCalendarSessionId === session.id;
+                        const status = adminCalendarStatus(session);
+
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            onClick={() => setActiveCalendarSessionId(selected ? "" : session.id)}
+                            className={`rounded-xl border bg-white p-4 text-left shadow-sm transition ${
+                              selected ? "border-electric ring-2 ring-electric/20" : "border-slate-200 hover:border-electric/50"
+                            }`}
+                          >
+                            <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-start">
+                              <div>
+                                <p className="text-lg font-black text-navy">{formatTimeRange(session)}</p>
+                                <p className="mt-1 text-xs font-black uppercase text-slate-500">
+                                  Elite Performance · Ages 13-18
+                                </p>
+                              </div>
+                              <div>
+                                <p className="font-black text-navy">{sessionFocusLabel(session)}</p>
+                                <p className="mt-1 text-sm leading-6 text-slate-600">
+                                  {session.location || business.location}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2 sm:justify-end">
+                                <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${adminCalendarStatusBadgeClass(session)}`}>
+                                  {status}
+                                </span>
+                                <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-navy">
+                                  {session.paidPlayers}/{session.capacity} booked
+                                </span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-5 sm:p-6">
+                <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                  No sessions have been created yet.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <aside className="panel p-5 sm:p-6 lg:sticky lg:top-6 lg:self-start">
+            {selectedCalendarSession ? (
+              <div className="grid gap-5">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Session Details</p>
+                  <h3 className="mt-2 text-2xl font-black text-navy">{sessionFocusLabel(selectedCalendarSession)}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {formatDateTime(selectedCalendarSession.start_datetime, selectedCalendarSession.timezone)} ·{" "}
+                    {formatTime(selectedCalendarSession.end_datetime, selectedCalendarSession.timezone)}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${adminCalendarStatusBadgeClass(selectedCalendarSession)}`}>
+                      {adminCalendarStatus(selectedCalendarSession)}
+                    </span>
+                    <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-navy">
+                      {selectedCalendarSession.paidPlayers}/{selectedCalendarSession.capacity} booked
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-600">
+                  <p><span className="font-black text-navy">Training group:</span> Elite Performance ages 13-18</p>
+                  <p><span className="font-black text-navy">Location:</span> {selectedCalendarSession.location || business.location}</p>
+                  <p><span className="font-black text-navy">Remaining spots:</span> {selectedCalendarSession.remainingSpots}</p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Booked Players</p>
+                  <div className="mt-3 grid gap-3">
+                    {selectedCalendarSession.paidBookings.length > 0 ? (
+                      selectedCalendarSession.paidBookings.map((booking) => (
+                        <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h4 className="font-black text-navy">{booking.player_name}</h4>
+                              <p className="mt-1 text-sm text-slate-600">{booking.parent_name}</p>
+                            </div>
+                            <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-slate-600">
+                              {paymentTypeLabel(booking)}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid gap-1 text-sm leading-6 text-slate-600">
+                            <p><span className="font-black text-navy">Parent email:</span> {booking.parent_email}</p>
+                            <p><span className="font-black text-navy">Parent phone:</span> {booking.parent_phone}</p>
+                            <p>
+                              <span className="font-black text-navy">Launch Pass:</span>{" "}
+                              {booking.payment_type === "launch_pass_credit"
+                                ? `Credit used${booking.passPurchase ? ` · ${booking.passPurchase.remaining_credits}/${booking.passPurchase.total_credits} remaining` : ""}`
+                                : "Not used"}
+                            </p>
+                            <p>
+                              <span className="font-black text-navy">Google sync:</span>{" "}
+                              {booking.calendarEvent?.google_calendar_event_id ? "Synced" : "Not synced / not recorded"}
+                            </p>
+                          </div>
+                          <button type="button" onClick={() => editBookingContact(booking)} className={`${secondaryButtonClass} mt-3`}>
+                            Edit Contact Info
+                          </button>
+                        </article>
+                      ))
+                    ) : (
+                      <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                        No paid bookings for this session yet.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-slate-200 bg-mist p-5 text-sm leading-6 text-slate-600">
+                <p className="font-black text-navy">Select a session</p>
+                <p className="mt-2">Click any session on the calendar to see booked players and contact details.</p>
+              </div>
+            )}
+          </aside>
         </section>
       ) : null}
 
