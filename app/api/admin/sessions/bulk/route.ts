@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { verifyAdminSession } from "@/lib/admin-api";
 import { type TrainingGroupId, trainingGroups, slotCapacity } from "@/lib/booking-data";
-import { createTrainingSession, listTrainingSessions } from "@/lib/supabase-db";
+import { createTrainingSession, listTrainingSessions, type TrainingSessionRow } from "@/lib/supabase-db";
+import { syncTrainingSessionCalendarEvent } from "@/lib/google-calendar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
     const existingSessions = await listTrainingSessions();
     const existingKeys = new Set(existingSessions.map(existingSessionKey));
     const requestedKeys = new Set<string>();
-    const created = [];
+    const created: TrainingSessionRow[] = [];
     const skipped: Array<BulkSessionInput & { reason: string }> = [];
 
     for (const session of requestedSessions) {
@@ -151,13 +152,35 @@ export async function POST(request: Request) {
         existingKeys.add(key);
       }
     }
+    const calendarSyncResults = await Promise.allSettled(
+      created.map(async (session) => {
+        const result = await syncTrainingSessionCalendarEvent(session);
+
+        return {
+          sessionId: session.id,
+          status: result.status,
+          eventId: result.eventId,
+          message: result.message
+        };
+      })
+    );
+    const calendarSync = calendarSyncResults.map((result, index) =>
+      result.status === "fulfilled"
+        ? result.value
+        : {
+            sessionId: created[index]?.id,
+            status: "Failed",
+            message: result.reason instanceof Error ? result.reason.message : "Google Calendar session sync failed."
+          }
+    );
 
     return NextResponse.json({
       status: "Created",
       createdCount: created.length,
       skippedCount: skipped.length,
       created,
-      skipped
+      skipped,
+      calendarSync
     });
   } catch (error) {
     return NextResponse.json(

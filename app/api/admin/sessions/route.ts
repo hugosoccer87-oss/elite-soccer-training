@@ -6,6 +6,7 @@ import {
 } from "@/lib/supabase-db";
 import { type TrainingGroupId, trainingGroups } from "@/lib/booking-data";
 import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
+import { syncTrainingSessionCalendarEvent } from "@/lib/google-calendar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,8 +67,36 @@ export async function POST(request: Request) {
       location: payload.location,
       status: payload.status && ["open", "closed", "cancelled"].includes(payload.status) ? payload.status : "open"
     });
+    const createdSession = session[0];
+    let calendarSync:
+      | {
+          status: string;
+          eventId?: string;
+          message?: string;
+        }
+      | undefined;
 
-    return NextResponse.json({ status: "Created", session: session[0] });
+    if (createdSession) {
+      try {
+        const result = await syncTrainingSessionCalendarEvent(createdSession);
+        calendarSync = {
+          status: result.status,
+          eventId: result.eventId,
+          message: result.message
+        };
+      } catch (calendarError) {
+        calendarSync = {
+          status: "Failed",
+          message: calendarError instanceof Error ? calendarError.message : "Google Calendar session sync failed."
+        };
+        console.error("[EST Calendar] Calendar event creation failed", {
+          sessionId: createdSession.id,
+          reason: calendarSync.message
+        });
+      }
+    }
+
+    return NextResponse.json({ status: "Created", session: createdSession, calendarSync });
   } catch (error) {
     return NextResponse.json(
       { status: "Failed", error: error instanceof Error ? error.message : "Training session could not be created." },

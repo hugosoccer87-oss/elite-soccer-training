@@ -158,6 +158,7 @@ type SessionFilter =
 type SessionDateRange = "all" | "today" | "this-week" | "upcoming" | "past";
 type BookingFilter = "all" | "upcoming" | "past" | "paid" | "pending";
 type PassFilter = "all" | "active" | "used-up" | "expired" | "four" | "six";
+type CalendarView = "month" | "week" | "day";
 type DirectPaymentFilter =
   | "all"
   | "zelle-pending"
@@ -220,6 +221,8 @@ const manualCreditReasons = [
   "Goodwill credit",
   "Other"
 ];
+const calendarHourStart = 5;
+const calendarHourEnd = 21;
 const defaultBulkPatterns: BulkSessionPattern[] = [
   { id: "monday-6", dayOfWeek: 1, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
   { id: "monday-7", dayOfWeek: 1, startTime: "07:00", endTime: "08:00", trainingFocus: "Wingers / Wing Backs" },
@@ -320,6 +323,75 @@ function dateFromDateInput(value: string) {
 
 function dateInputFromDate(date: Date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function todayDateInput() {
+  return formatDateOnly(new Date().toISOString(), "America/Los_Angeles");
+}
+
+function addDaysToDateInput(value: string, days: number) {
+  const date = dateFromDateInput(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return dateInputFromDate(date);
+}
+
+function startOfWeekDateInput(value: string) {
+  const date = dateFromDateInput(value);
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  date.setUTCDate(date.getUTCDate() + mondayOffset);
+  return dateInputFromDate(date);
+}
+
+function startOfMonthDateInput(value: string) {
+  const date = dateFromDateInput(value);
+  return dateInputFromDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)));
+}
+
+function endOfMonthDateInput(value: string) {
+  const date = dateFromDateInput(value);
+  return dateInputFromDate(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)));
+}
+
+function calendarMonthGridDays(value: string) {
+  const monthStart = startOfMonthDateInput(value);
+  const monthEnd = endOfMonthDateInput(value);
+  const gridStart = startOfWeekDateInput(monthStart);
+  const endDate = dateFromDateInput(monthEnd);
+  const endDay = endDate.getUTCDay();
+  const sundayOffset = endDay === 0 ? 0 : 7 - endDay;
+  endDate.setUTCDate(endDate.getUTCDate() + sundayOffset);
+  const gridEnd = dateInputFromDate(endDate);
+  const days: string[] = [];
+
+  for (let current = gridStart; current <= gridEnd; current = addDaysToDateInput(current, 1)) {
+    days.push(current);
+  }
+
+  return days;
+}
+
+function calendarDateHeading(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC"
+  }).format(dateFromDateInput(value));
+}
+
+function calendarMonthHeading(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(dateFromDateInput(value));
+}
+
+function minutesFromDateTime(value: string, timeZone = "America/Los_Angeles") {
+  const time = formatTimeInput(value, timeZone);
+  const [hour, minute] = time.split(":").map(Number);
+  return (Number(hour) || 0) * 60 + (Number(minute) || 0);
 }
 
 function dayLabelFromDateInput(value: string) {
@@ -456,6 +528,24 @@ function adminCalendarStatusBadgeClass(session: AdminTrainingSession) {
   }
 
   return "border-slate-200 bg-slate-100 text-slate-600";
+}
+
+function adminCalendarBlockClass(session: AdminTrainingSession) {
+  const status = adminCalendarStatus(session);
+
+  if (status === "open") {
+    return "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100";
+  }
+
+  if (status === "full") {
+    return "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100";
+  }
+
+  if (status === "cancelled") {
+    return "border-red-300 bg-red-50 text-red-900 hover:bg-red-100";
+  }
+
+  return "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200";
 }
 
 function paymentTypeLabel(booking: AdminBookingRecord) {
@@ -878,6 +968,8 @@ export function AdminAvailability() {
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [expandedSessionId, setExpandedSessionId] = useState("");
   const [activeCalendarSessionId, setActiveCalendarSessionId] = useState("");
+  const [calendarView, setCalendarView] = useState<CalendarView>("week");
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(todayDateInput());
   const [actionsSessionId, setActionsSessionId] = useState("");
   const [creditingBookingId, setCreditingBookingId] = useState("");
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>("upcoming");
@@ -1031,28 +1123,59 @@ export function AdminAvailability() {
       return groups;
     }, []);
   }, [filteredSessions]);
-  const calendarGroups = useMemo(() => {
-    const sortedSessions = [...sessions].sort(
-      (a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
-    );
+  const calendarVisibleDays = useMemo(() => {
+    if (calendarView === "month") {
+      return calendarMonthGridDays(calendarAnchorDate);
+    }
 
-    return sortedSessions.reduce<Array<{ key: string; label: string; sessions: AdminTrainingSession[] }>>((groups, session) => {
-      const key = formatDateOnly(session.start_datetime, session.timezone);
-      const existing = groups.find((group) => group.key === key);
+    if (calendarView === "day") {
+      return [calendarAnchorDate];
+    }
 
-      if (existing) {
-        existing.sessions.push(session);
-      } else {
-        groups.push({
-          key,
-          label: formatDateHeading(session.start_datetime, session.timezone),
-          sessions: [session]
-        });
+    const weekStart = startOfWeekDateInput(calendarAnchorDate);
+    return Array.from({ length: 7 }, (_, index) => addDaysToDateInput(weekStart, index));
+  }, [calendarAnchorDate, calendarView]);
+  const calendarVisibleDaySet = useMemo(() => new Set(calendarVisibleDays), [calendarVisibleDays]);
+  const calendarSessionsByDay = useMemo(() => {
+    const groups = new Map<string, AdminTrainingSession[]>();
+
+    for (const day of calendarVisibleDays) {
+      groups.set(day, []);
+    }
+
+    for (const session of sessions) {
+      const day = formatDateOnly(session.start_datetime, session.timezone);
+
+      if (calendarVisibleDaySet.has(day)) {
+        const daySessions = groups.get(day) ?? [];
+        daySessions.push(session);
+        groups.set(day, daySessions);
       }
+    }
 
-      return groups;
-    }, []);
-  }, [sessions]);
+    for (const daySessions of groups.values()) {
+      daySessions.sort((a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime());
+    }
+
+    return groups;
+  }, [calendarVisibleDaySet, calendarVisibleDays, sessions]);
+  const calendarHours = useMemo(
+    () => Array.from({ length: calendarHourEnd - calendarHourStart + 1 }, (_, index) => calendarHourStart + index),
+    []
+  );
+  const calendarRangeLabel = useMemo(() => {
+    if (calendarView === "month") {
+      return calendarMonthHeading(calendarAnchorDate);
+    }
+
+    if (calendarView === "day") {
+      return calendarDateHeading(calendarAnchorDate);
+    }
+
+    const first = calendarVisibleDays[0];
+    const last = calendarVisibleDays[calendarVisibleDays.length - 1];
+    return `${calendarDateHeading(first)} - ${calendarDateHeading(last)}`;
+  }, [calendarAnchorDate, calendarView, calendarVisibleDays]);
   const selectedCalendarSession = useMemo(
     () => sessions.find((session) => session.id === activeCalendarSessionId) ?? null,
     [activeCalendarSessionId, sessions]
@@ -1797,6 +1920,19 @@ export function AdminAvailability() {
     );
   }
 
+  function moveCalendar(direction: "previous" | "next") {
+    const multiplier = direction === "next" ? 1 : -1;
+
+    if (calendarView === "month") {
+      const date = dateFromDateInput(calendarAnchorDate);
+      date.setUTCMonth(date.getUTCMonth() + multiplier);
+      setCalendarAnchorDate(dateInputFromDate(date));
+      return;
+    }
+
+    setCalendarAnchorDate(addDaysToDateInput(calendarAnchorDate, calendarView === "week" ? 7 * multiplier : multiplier));
+  }
+
   return (
     <div className="grid gap-6">
       <section className="panel p-5 sm:p-8">
@@ -1994,11 +2130,45 @@ export function AdminAvailability() {
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
           <div className="panel overflow-hidden">
             <div className="border-b border-slate-200 p-5 sm:p-6">
-              <p className="text-xs font-black uppercase text-electric">Admin Calendar</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Booked sessions by date</h3>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                This calendar uses Supabase sessions and paid bookings as the source of truth. Google Calendar sync is shown only as a status.
-              </p>
+              <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Admin Calendar</p>
+                  <h3 className="mt-2 text-2xl font-black text-navy">Training calendar</h3>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                    Supabase sessions and paid bookings are the source of truth. Google Calendar sync is shown only as a status.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(["month", "week", "day"] as CalendarView[]).map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      onClick={() => setCalendarView(view)}
+                      className={`rounded-md border px-4 py-2 text-xs font-black uppercase transition ${
+                        calendarView === view
+                          ? "border-navy bg-navy text-white"
+                          : "border-slate-300 bg-white text-navy hover:border-electric hover:text-electric"
+                      }`}
+                    >
+                      {view}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => moveCalendar("previous")} className={secondaryButtonClass}>
+                    Previous
+                  </button>
+                  <button type="button" onClick={() => setCalendarAnchorDate(todayDateInput())} className={secondaryButtonClass}>
+                    Today
+                  </button>
+                  <button type="button" onClick={() => moveCalendar("next")} className={secondaryButtonClass}>
+                    Next
+                  </button>
+                </div>
+                <h4 className="text-xl font-black text-navy">{calendarRangeLabel}</h4>
+              </div>
               <div className="mt-4 rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-700">
                 <span className="font-black text-navy">Google Calendar:</span>{" "}
                 {diagnostics?.googleCalendar?.googleCalendarConfigured ? "Configured" : "Not configured"} ·{" "}
@@ -2016,58 +2186,111 @@ export function AdminAvailability() {
               </div>
             </div>
 
-            {calendarGroups.length > 0 ? (
-              <div className="grid gap-5 bg-mist p-4 sm:p-6">
-                {calendarGroups.map((group) => (
-                  <div key={group.key} className="grid gap-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-sm font-black uppercase tracking-wide text-slate-500">{group.label}</h4>
-                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black uppercase text-slate-500">
-                        {group.sessions.length} session{group.sessions.length === 1 ? "" : "s"}
-                      </span>
+            {sessions.length > 0 ? (
+              <div className="bg-mist p-4 sm:p-6">
+                {calendarView === "month" ? (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <div className="grid min-w-[760px] grid-cols-7 border-b border-slate-200 bg-slate-50">
+                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
+                        <div key={day} className="border-r border-slate-200 p-3 text-xs font-black uppercase text-slate-500 last:border-r-0">
+                          {day}
+                        </div>
+                      ))}
                     </div>
-                    <div className="grid gap-3">
-                      {group.sessions.map((session) => {
-                        const selected = activeCalendarSessionId === session.id;
-                        const status = adminCalendarStatus(session);
+                    <div className="grid min-w-[760px] grid-cols-7">
+                      {calendarVisibleDays.map((day) => {
+                        const daySessions = calendarSessionsByDay.get(day) ?? [];
+                        const isCurrentMonth = day.slice(0, 7) === calendarAnchorDate.slice(0, 7);
 
                         return (
-                          <button
-                            key={session.id}
-                            type="button"
-                            onClick={() => setActiveCalendarSessionId(selected ? "" : session.id)}
-                            className={`rounded-xl border bg-white p-4 text-left shadow-sm transition ${
-                              selected ? "border-electric ring-2 ring-electric/20" : "border-slate-200 hover:border-electric/50"
-                            }`}
-                          >
-                            <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-start">
-                              <div>
-                                <p className="text-lg font-black text-navy">{formatTimeRange(session)}</p>
-                                <p className="mt-1 text-xs font-black uppercase text-slate-500">
-                                  Elite Performance · Ages 13-18
-                                </p>
-                              </div>
-                              <div>
-                                <p className="font-black text-navy">{sessionFocusLabel(session)}</p>
-                                <p className="mt-1 text-sm leading-6 text-slate-600">
-                                  {session.location || business.location}
-                                </p>
-                              </div>
-                              <div className="flex flex-wrap gap-2 sm:justify-end">
-                                <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${adminCalendarStatusBadgeClass(session)}`}>
-                                  {status}
-                                </span>
-                                <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-navy">
-                                  {session.paidPlayers}/{session.capacity} booked
-                                </span>
-                              </div>
+                          <div key={day} className={`min-h-40 border-r border-t border-slate-200 p-2 last:border-r-0 ${isCurrentMonth ? "bg-white" : "bg-slate-50"}`}>
+                            <p className={`text-xs font-black uppercase ${isCurrentMonth ? "text-navy" : "text-slate-400"}`}>
+                              {calendarDateHeading(day)}
+                            </p>
+                            <div className="mt-2 grid gap-1">
+                              {daySessions.map((session) => (
+                                <button
+                                  key={session.id}
+                                  type="button"
+                                  onClick={() => setActiveCalendarSessionId(session.id)}
+                                  className={`rounded-md border px-2 py-2 text-left text-[11px] font-black leading-4 transition ${adminCalendarBlockClass(session)} ${
+                                    activeCalendarSessionId === session.id ? "ring-2 ring-electric/30" : ""
+                                  }`}
+                                >
+                                  <span className="block">{formatTime(session.start_datetime, session.timezone)}</span>
+                                  <span className="block truncate">{sessionFocusLabel(session)}</span>
+                                  <span className="block">{session.paidPlayers}/{session.capacity}</span>
+                                </button>
+                              ))}
                             </div>
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
                   </div>
-                ))}
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <div
+                      className="grid min-w-[860px] border-b border-slate-200 bg-slate-50"
+                      style={{ gridTemplateColumns: `4.5rem repeat(${calendarVisibleDays.length}, minmax(9rem, 1fr))` }}
+                    >
+                      <div className="border-r border-slate-200 p-3 text-xs font-black uppercase text-slate-400">Time</div>
+                      {calendarVisibleDays.map((day) => (
+                        <div key={day} className="border-r border-slate-200 p-3 text-sm font-black text-navy last:border-r-0">
+                          {calendarDateHeading(day)}
+                        </div>
+                      ))}
+                    </div>
+                    <div
+                      className="grid min-w-[860px]"
+                      style={{
+                        gridTemplateColumns: `4.5rem repeat(${calendarVisibleDays.length}, minmax(9rem, 1fr))`,
+                        height: `${(calendarHourEnd - calendarHourStart) * 72}px`
+                      }}
+                    >
+                      <div className="relative border-r border-slate-200 bg-slate-50">
+                        {calendarHours.slice(0, -1).map((hour) => (
+                          <div key={hour} className="h-[72px] border-b border-slate-200 px-2 pt-1 text-[11px] font-bold text-slate-500">
+                            {new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2026, 0, 1, hour)))}
+                          </div>
+                        ))}
+                      </div>
+                      {calendarVisibleDays.map((day) => {
+                        const daySessions = calendarSessionsByDay.get(day) ?? [];
+
+                        return (
+                          <div key={day} className="relative border-r border-slate-200 last:border-r-0">
+                            {calendarHours.slice(0, -1).map((hour) => (
+                              <div key={hour} className="h-[72px] border-b border-slate-100" />
+                            ))}
+                            {daySessions.map((session) => {
+                              const startMinutes = minutesFromDateTime(session.start_datetime, session.timezone);
+                              const endMinutes = minutesFromDateTime(session.end_datetime, session.timezone);
+                              const top = Math.max(0, ((startMinutes - calendarHourStart * 60) / 60) * 72);
+                              const height = Math.max(42, ((Math.max(endMinutes, startMinutes + 30) - startMinutes) / 60) * 72 - 4);
+
+                              return (
+                                <button
+                                  key={session.id}
+                                  type="button"
+                                  onClick={() => setActiveCalendarSessionId(session.id)}
+                                  className={`absolute left-1 right-1 overflow-hidden rounded-lg border px-2 py-2 text-left text-xs font-black leading-4 shadow-sm transition ${adminCalendarBlockClass(session)} ${
+                                    activeCalendarSessionId === session.id ? "ring-2 ring-electric/40" : ""
+                                  }`}
+                                  style={{ top, height }}
+                                >
+                                  <span className="block">{formatTimeRange(session)}</span>
+                                  <span className="block truncate">{sessionFocusLabel(session)}</span>
+                                  <span className="block">{session.paidPlayers}/{session.capacity} booked</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="p-5 sm:p-6">
@@ -2102,6 +2325,11 @@ export function AdminAvailability() {
                   <p><span className="font-black text-navy">Training group:</span> Elite Performance ages 13-18</p>
                   <p><span className="font-black text-navy">Location:</span> {selectedCalendarSession.location || business.location}</p>
                   <p><span className="font-black text-navy">Remaining spots:</span> {selectedCalendarSession.remainingSpots}</p>
+                  <p>
+                    <span className="font-black text-navy">Google Calendar sync:</span>{" "}
+                    {diagnostics?.googleCalendar?.googleCalendarConfigured ? "Configured" : "Not configured"} · Last status:{" "}
+                    {diagnostics?.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"}
+                  </p>
                 </div>
 
                 <div>

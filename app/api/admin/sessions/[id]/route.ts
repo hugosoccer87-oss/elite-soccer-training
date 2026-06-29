@@ -9,6 +9,7 @@ import {
 } from "@/lib/supabase-db";
 import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 import { sendMakeupCreditEmail } from "@/lib/transactional-email";
+import { syncTrainingSessionCalendarEvent } from "@/lib/google-calendar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +70,33 @@ export async function PATCH(request: Request, context: RouteContext) {
   try {
     const session = await updateTrainingSession(id, updates);
     const updatedSession = session[0];
+    let calendarSync:
+      | {
+          status: string;
+          eventId?: string;
+          message?: string;
+        }
+      | undefined;
+
+    if (updatedSession) {
+      try {
+        const result = await syncTrainingSessionCalendarEvent(updatedSession);
+        calendarSync = {
+          status: result.status,
+          eventId: result.eventId,
+          message: result.message
+        };
+      } catch (calendarError) {
+        calendarSync = {
+          status: "Failed",
+          message: calendarError instanceof Error ? calendarError.message : "Google Calendar session sync failed."
+        };
+        console.error("[EST Calendar] Calendar event creation failed", {
+          sessionId: updatedSession.id,
+          reason: calendarSync.message
+        });
+      }
+    }
 
     if (updates.status === "cancelled") {
       const paidBookings = await listPaidBookingsForSession(id);
@@ -138,11 +166,12 @@ export async function PATCH(request: Request, context: RouteContext) {
           launchPassBookings: launchPassBookings.length,
           cardPaidBookings: cardPaidBookings.length
         },
+        calendarSync,
         message: `${creditMessage}${cardNotice}`
       });
     }
 
-    return NextResponse.json({ status: "Updated", session: updatedSession });
+    return NextResponse.json({ status: "Updated", session: updatedSession, calendarSync });
   } catch (error) {
     return NextResponse.json(
       { status: "Failed", error: error instanceof Error ? error.message : "Training session could not be updated." },
