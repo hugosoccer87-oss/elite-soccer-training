@@ -130,6 +130,36 @@ export type AdminPassPurchase = PassPurchaseRow & {
   adjustments: CreditAdjustmentRow[];
 };
 
+export type ScheduleApprovalPaymentMethod = "cash" | "zelle" | "venmo" | "stripe_manual" | "other";
+
+export type ScheduleApprovalRow = {
+  id: string;
+  token: string;
+  pass_purchase_id: string;
+  parent_name: string;
+  parent_email: string;
+  parent_phone: string;
+  player_name: string;
+  player_age: string;
+  training_group: TrainingGroupId;
+  plan_type: LaunchPassType;
+  amount_paid: number;
+  payment_method: ScheduleApprovalPaymentMethod;
+  internal_note?: string | null;
+  proposed_session_ids: string[];
+  status: "pending" | "confirmed" | "cancelled";
+  booking_ids: string[];
+  confirmed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleApprovalDetails = {
+  approval: ScheduleApprovalRow;
+  pass: PassPurchaseRow | null;
+  sessions: TrainingSessionRow[];
+};
+
 export type WaiverRow = {
   id: string;
   booking_id: string;
@@ -727,6 +757,121 @@ export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
   }));
 }
 
+export async function createManualScheduleApprovalLink(input: {
+  token: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  playerName: string;
+  playerAge: string;
+  trainingGroup: TrainingGroupId;
+  amountPaid: number;
+  paymentMethod: ScheduleApprovalPaymentMethod;
+  internalNote?: string;
+  proposedSessionIds: string[];
+}) {
+  const option = getLaunchPassOption("six_session_launch_pass");
+  const insertedPasses = await supabaseRequest<PassPurchaseRow[]>("pass_purchases", {
+    method: "POST",
+    body: JSON.stringify({
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: input.trainingGroup,
+      pass_type: "six_session_launch_pass",
+      total_credits: option.credits,
+      remaining_credits: option.credits,
+      amount_paid: input.amountPaid,
+      status: "paid",
+      selected_session_ids: input.proposedSessionIds,
+      booking_details: {
+        source: "manual_schedule_approval",
+        paymentMethod: input.paymentMethod,
+        internalNote: input.internalNote ?? ""
+      },
+      expires_at: launchPassExpirationDate
+    })
+  });
+  const pass = insertedPasses[0];
+
+  if (!pass) {
+    throw new Error("Manual Launch Pass could not be created.");
+  }
+
+  const insertedApprovals = await supabaseRequest<ScheduleApprovalRow[]>("schedule_approval_links", {
+    method: "POST",
+    body: JSON.stringify({
+      token: input.token,
+      pass_purchase_id: pass.id,
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: input.trainingGroup,
+      plan_type: "six_session_launch_pass",
+      amount_paid: input.amountPaid,
+      payment_method: input.paymentMethod,
+      internal_note: input.internalNote?.trim() || null,
+      proposed_session_ids: input.proposedSessionIds,
+      status: "pending"
+    })
+  });
+  const approval = insertedApprovals[0];
+
+  if (!approval) {
+    throw new Error("Schedule approval link could not be created.");
+  }
+
+  return {
+    pass,
+    approval
+  };
+}
+
+export async function getScheduleApprovalByToken(token: string): Promise<ScheduleApprovalDetails | null> {
+  const approvals = await supabaseRequest<ScheduleApprovalRow[]>(
+    `schedule_approval_links?select=*&token=eq.${encodeFilter(token)}&limit=1`
+  ).catch(() => []);
+  const approval = approvals[0];
+
+  if (!approval) {
+    return null;
+  }
+
+  const [pass, sessions] = await Promise.all([
+    getPassPurchaseById(approval.pass_purchase_id),
+    approval.proposed_session_ids.length > 0
+      ? supabaseRequest<TrainingSessionRow[]>(
+          `training_sessions?select=*&id=in.(${approval.proposed_session_ids.map(encodeFilter).join(",")})`
+        ).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+
+  return {
+    approval,
+    pass,
+    sessions: approval.proposed_session_ids
+      .map((sessionId) => sessionMap.get(sessionId))
+      .filter((session): session is TrainingSessionRow => Boolean(session))
+  };
+}
+
+export async function confirmScheduleApprovalLink(token: string) {
+  return supabaseRequest<Array<{ booking_id: string; session_id: string; credit_redemption_id: string; remaining_credits: number }>>(
+    "rpc/confirm_schedule_approval_link",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_token: token
+      })
+    }
+  );
+}
+
 export async function listAdminDirectPayments() {
   return supabaseRequest<DirectPaymentRow[]>("direct_payments?select=*&order=created_at.desc").catch(() => []);
 }
@@ -1313,6 +1458,29 @@ export async function getPassPurchaseById(passPurchaseId: string) {
   return rows[0] ?? null;
 }
 
+export async function getBookingRecordForConfirmation(bookingId: string, remainingCreditsAfter?: number) {
+  const bookings = await supabaseRequest<BookingRow[]>(
+    `bookings?select=*&id=eq.${encodeFilter(bookingId)}&limit=1`
+  ).catch(() => []);
+  const booking = bookings[0];
+
+  if (!booking) {
+    throw new Error("Confirmed booking could not be loaded.");
+  }
+
+  const [session, waivers] = await Promise.all([
+    getSessionOrThrow(booking.session_id),
+    supabaseRequest<WaiverRow[]>(`waivers?select=*&booking_id=eq.${encodeFilter(booking.id)}&limit=1`).catch(() => [])
+  ]);
+
+  return toBookingRecordFromRows({
+    booking,
+    session,
+    waiver: waivers[0] ?? null,
+    remainingCreditsAfter
+  });
+}
+
 export async function findActiveLaunchPasses(input: {
   parentEmail: string;
   playerName: string;
@@ -1331,8 +1499,7 @@ export async function findActiveLaunchPasses(input: {
       `player_name=ilike.${encodeFilter(playerName)}`,
       "status=eq.paid",
       "remaining_credits=gt.0",
-      `expires_at=gte.${encodeFilter(new Date().toISOString())}`,
-      "order=expires_at.asc"
+      "order=created_at.desc"
     ].join("&")
   ).catch(() => []);
 

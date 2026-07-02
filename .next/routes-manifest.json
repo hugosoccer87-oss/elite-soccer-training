@@ -50,6 +50,22 @@
         "nxtPeventId": "nxtPeventId"
       },
       "namedRegex": "^/api/google\\-calendar/availability/(?<nxtPeventId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/schedule-approvals/[token]/confirm",
+      "regex": "^/api/schedule\\-approvals/([^/]+?)/confirm(?:/)?$",
+      "routeKeys": {
+        "nxtPtoken": "nxtPtoken"
+      },
+      "namedRegex": "^/api/schedule\\-approvals/(?<nxtPtoken>[^/]+?)/confirm(?:/)?$"
+    },
+    {
+      "page": "/schedule-confirmation/[token]",
+      "regex": "^/schedule\\-confirmation/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPtoken": "nxtPtoken"
+      },
+      "namedRegex": "^/schedule\\-confirmation/(?<nxtPtoken>[^/]+?)(?:/)?$"
     }
   ],
   "staticRoutes": [

@@ -10,7 +10,8 @@ import type {
   AdminTrainingSession,
   DirectPaymentRow,
   DirectPaymentStatus,
-  EmailSubscriberRow
+  EmailSubscriberRow,
+  ScheduleApprovalPaymentMethod
 } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
 
@@ -220,6 +221,13 @@ const manualCreditReasons = [
   "Admin correction",
   "Goodwill credit",
   "Other"
+];
+const scheduleApprovalPaymentMethods: Array<{ value: ScheduleApprovalPaymentMethod; label: string }> = [
+  { value: "cash", label: "Cash" },
+  { value: "zelle", label: "Zelle" },
+  { value: "venmo", label: "Venmo" },
+  { value: "stripe_manual", label: "Stripe manual" },
+  { value: "other", label: "Other" }
 ];
 const calendarHourStart = 5;
 const calendarHourEnd = 21;
@@ -982,6 +990,17 @@ export function AdminAvailability() {
   const [manualCreditReason, setManualCreditReason] = useState("Makeup credit");
   const [manualCreditNote, setManualCreditNote] = useState("");
   const [manualCreditSendEmail, setManualCreditSendEmail] = useState(true);
+  const [scheduleApprovalPlayerName, setScheduleApprovalPlayerName] = useState("");
+  const [scheduleApprovalPlayerAge, setScheduleApprovalPlayerAge] = useState("");
+  const [scheduleApprovalParentName, setScheduleApprovalParentName] = useState("");
+  const [scheduleApprovalParentEmail, setScheduleApprovalParentEmail] = useState("");
+  const [scheduleApprovalParentPhone, setScheduleApprovalParentPhone] = useState("");
+  const [scheduleApprovalGroup, setScheduleApprovalGroup] = useState<TrainingGroupId>("elite-performance");
+  const [scheduleApprovalAmountPaid, setScheduleApprovalAmountPaid] = useState("285");
+  const [scheduleApprovalPaymentMethod, setScheduleApprovalPaymentMethod] = useState<ScheduleApprovalPaymentMethod>("zelle");
+  const [scheduleApprovalNote, setScheduleApprovalNote] = useState("");
+  const [scheduleApprovalSessionIds, setScheduleApprovalSessionIds] = useState<string[]>([]);
+  const [scheduleApprovalUrl, setScheduleApprovalUrl] = useState("");
   const [directPaymentFilter, setDirectPaymentFilter] = useState<DirectPaymentFilter>("all");
   const [expandedDirectPaymentId, setExpandedDirectPaymentId] = useState("");
   const [activeContactEdit, setActiveContactEdit] = useState<ContactEditState | null>(null);
@@ -1323,6 +1342,19 @@ export function AdminAvailability() {
     () => directPayments.filter((payment) => payment.status === "zelle_pending" || payment.status === "pending_card_payment").slice(0, 5),
     [directPayments]
   );
+  const scheduleApprovalSessions = useMemo(
+    () =>
+      sessions
+        .filter(
+          (session) =>
+            session.training_group === scheduleApprovalGroup &&
+            session.status === "open" &&
+            session.remainingSpots > 0 &&
+            isFuture(session.start_datetime)
+        )
+        .slice(0, 30),
+    [scheduleApprovalGroup, sessions]
+  );
 
   async function addSession() {
     if (!newDate || !newTime) {
@@ -1583,6 +1615,98 @@ export function AdminAvailability() {
       await refreshAdminData(result.message || "Manual credit added.");
     } catch (creditError) {
       setError(creditError instanceof Error ? creditError.message : "Manual credit could not be added.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function toggleScheduleApprovalSession(sessionId: string) {
+    setScheduleApprovalUrl("");
+    setScheduleApprovalSessionIds((current) => {
+      if (current.includes(sessionId)) {
+        return current.filter((id) => id !== sessionId);
+      }
+
+      if (current.length >= 6) {
+        setError("Choose exactly 6 sessions. Remove one before adding another.");
+        return current;
+      }
+
+      setError("");
+      return [...current, sessionId];
+    });
+  }
+
+  async function createScheduleApprovalLink() {
+    if (
+      !scheduleApprovalPlayerName.trim() ||
+      !scheduleApprovalPlayerAge.trim() ||
+      !scheduleApprovalParentName.trim() ||
+      !scheduleApprovalParentEmail.trim() ||
+      !scheduleApprovalParentPhone.trim()
+    ) {
+      setError("Complete the player and parent details before creating the schedule link.");
+      return;
+    }
+
+    if (scheduleApprovalSessionIds.length !== 6) {
+      setError("Choose exactly 6 proposed sessions for this schedule approval link.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    setScheduleApprovalUrl("");
+
+    try {
+      const response = await fetch("/api/admin/schedule-approvals", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          playerName: scheduleApprovalPlayerName,
+          playerAge: scheduleApprovalPlayerAge,
+          parentName: scheduleApprovalParentName,
+          parentEmail: scheduleApprovalParentEmail,
+          parentPhone: scheduleApprovalParentPhone,
+          trainingGroup: scheduleApprovalGroup,
+          amountPaid: Number(scheduleApprovalAmountPaid) || 0,
+          paymentMethod: scheduleApprovalPaymentMethod,
+          internalNote: scheduleApprovalNote,
+          proposedSessionIds: scheduleApprovalSessionIds
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        confirmationUrl?: string;
+        emailSent?: boolean;
+        emailMessage?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Schedule approval link could not be created.");
+      }
+
+      setScheduleApprovalUrl(result.confirmationUrl || "");
+      setScheduleApprovalPlayerName("");
+      setScheduleApprovalPlayerAge("");
+      setScheduleApprovalParentName("");
+      setScheduleApprovalParentEmail("");
+      setScheduleApprovalParentPhone("");
+      setScheduleApprovalAmountPaid("285");
+      setScheduleApprovalPaymentMethod("zelle");
+      setScheduleApprovalNote("");
+      setScheduleApprovalSessionIds([]);
+      await refreshAdminData(
+        result.emailSent
+          ? "Private schedule confirmation link created and emailed to the parent."
+          : `Private schedule confirmation link created. Copy and send the link manually.${result.emailMessage ? ` ${result.emailMessage}` : ""}`
+      );
+      setScheduleApprovalUrl(result.confirmationUrl || "");
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "Schedule approval link could not be created.");
     } finally {
       setIsSaving(false);
     }
@@ -3287,7 +3411,144 @@ export function AdminAvailability() {
             </div>
           </div>
 
-          <div className="border-b border-slate-200 bg-mist p-5 sm:p-6">
+          <div className="grid gap-5 border-b border-slate-200 bg-mist p-5 sm:p-6">
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Private Schedule Confirmation</p>
+                  <h4 className="mt-1 text-xl font-black text-navy">Schedule Approval Link</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Create a manual 6-Session Launch Pass for a player who already paid, propose 6 sessions, and send the parent a private confirmation link.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm font-black text-navy">
+                  {scheduleApprovalSessionIds.length}/6 sessions selected
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-4">
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Player Name
+                  <input className={inputClass} value={scheduleApprovalPlayerName} onChange={(event) => setScheduleApprovalPlayerName(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Player Age
+                  <input className={inputClass} value={scheduleApprovalPlayerAge} onChange={(event) => setScheduleApprovalPlayerAge(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Parent Name
+                  <input className={inputClass} value={scheduleApprovalParentName} onChange={(event) => setScheduleApprovalParentName(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Parent Email
+                  <input className={inputClass} type="email" value={scheduleApprovalParentEmail} onChange={(event) => setScheduleApprovalParentEmail(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Parent Phone
+                  <input className={inputClass} value={scheduleApprovalParentPhone} onChange={(event) => setScheduleApprovalParentPhone(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Training Group
+                  <select
+                    className={inputClass}
+                    value={scheduleApprovalGroup}
+                    onChange={(event) => {
+                      setScheduleApprovalGroup(event.target.value as TrainingGroupId);
+                      setScheduleApprovalSessionIds([]);
+                    }}
+                  >
+                    {trainingGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name} ({group.ages})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Plan Type
+                  <input className={inputClass} value="6-Session Launch Pass" readOnly />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Amount Paid
+                  <input className={inputClass} type="number" min={0} value={scheduleApprovalAmountPaid} onChange={(event) => setScheduleApprovalAmountPaid(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Payment Method
+                  <select className={inputClass} value={scheduleApprovalPaymentMethod} onChange={(event) => setScheduleApprovalPaymentMethod(event.target.value as ScheduleApprovalPaymentMethod)}>
+                    {scheduleApprovalPaymentMethods.map((method) => (
+                      <option key={method.value} value={method.value}>
+                        {method.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-3">
+                  Internal Note
+                  <input
+                    className={inputClass}
+                    value={scheduleApprovalNote}
+                    onChange={(event) => setScheduleApprovalNote(event.target.value)}
+                    placeholder="Optional note, visible only in admin records"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-5">
+                <p className="text-xs font-black uppercase text-slate-500">Propose 6 Sessions</p>
+                <div className="mt-3 grid max-h-[28rem] gap-3 overflow-y-auto rounded-lg border border-slate-200 bg-mist p-3">
+                  {scheduleApprovalSessions.length > 0 ? (
+                    scheduleApprovalSessions.map((session) => {
+                      const selected = scheduleApprovalSessionIds.includes(session.id);
+
+                      return (
+                        <button
+                          key={session.id}
+                          type="button"
+                          onClick={() => toggleScheduleApprovalSession(session.id)}
+                          className={`rounded-lg border p-4 text-left transition ${
+                            selected
+                              ? "border-electric bg-blue-50 shadow-sm shadow-electric/10"
+                              : "border-slate-200 bg-white hover:border-electric/60"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-sm font-black text-navy">{formatDateTime(session.start_datetime, session.timezone)}</p>
+                              <p className="mt-1 text-sm font-bold text-slate-600">{sessionFocusLabel(session)}</p>
+                              <p className="mt-1 text-xs font-bold text-slate-500">{session.location || business.location}</p>
+                            </div>
+                            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black uppercase text-navy">
+                              {session.remainingSpots} spots left
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-bold text-slate-600">
+                      No open future sessions are available for this training group.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {scheduleApprovalUrl ? (
+                <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="text-sm font-black text-emerald-900">Private link created</p>
+                  <input className={`${inputClass} mt-3`} readOnly value={scheduleApprovalUrl} />
+                </div>
+              ) : null}
+
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-semibold leading-6 text-slate-600">
+                  Parent will not pay again. The sessions book only after they confirm the private link.
+                </p>
+                <button type="button" disabled={isSaving || scheduleApprovalSessionIds.length !== 6} onClick={() => void createScheduleApprovalLink()} className={primaryButtonClass}>
+                  Create & Send Link
+                </button>
+              </div>
+            </div>
+
             <div className="rounded-xl border border-slate-200 bg-white p-5">
               <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
                 <div>

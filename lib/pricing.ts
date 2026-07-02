@@ -6,7 +6,7 @@ export const sessionLineItemName = "Elite Soccer Training CV - Single Session";
 export type LaunchPassType = "four_session_launch_pass" | "six_session_launch_pass";
 export type DirectPaymentOption = "single_session" | LaunchPassType;
 
-export const launchPassExpirationDate = "2026-06-30T23:59:59-07:00";
+export const launchPassExpirationDate = "2099-12-31T23:59:59Z";
 
 export const launchPassOptions: Record<
   LaunchPassType,

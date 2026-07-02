@@ -12,7 +12,14 @@ import {
   getSessionTotalCents,
   sessionPriceLabel
 } from "@/lib/pricing";
-import type { BookingRow, CreditAdjustmentRow, DirectPaymentRow, PassPurchaseRow, TrainingSessionRow } from "@/lib/supabase-db";
+import type {
+  BookingRow,
+  CreditAdjustmentRow,
+  DirectPaymentRow,
+  PassPurchaseRow,
+  ScheduleApprovalRow,
+  TrainingSessionRow
+} from "@/lib/supabase-db";
 import { buildSignedWaiverPdf, signedWaiverPdfFileName } from "@/lib/waiver-pdf";
 
 type NodemailerModule = {
@@ -528,6 +535,75 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
         </table>
       `
     })
+  };
+}
+
+function scheduleApprovalLinkEmail(input: {
+  approval: ScheduleApprovalRow;
+  sessions: TrainingSessionRow[];
+  confirmationUrl: string;
+}): EmailMessage {
+  const rows: Array<[string, string]> = [
+    ["Player", input.approval.player_name],
+    ["Training Group", input.approval.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
+    ["Plan", "6-Session Launch Pass"],
+    ["Sessions Proposed", String(input.sessions.length)]
+  ];
+  const sessionLines = input.sessions.map(
+    (session, index) =>
+      `${index + 1}. ${formatSessionDate(session.start_datetime, session.timezone)} at ${formatSessionTime(session.start_datetime, session.timezone)} - ${session.location || business.location}`
+  );
+  const text = [
+    "Elite Soccer Training CV Schedule Confirmation",
+    "",
+    `Hi ${input.approval.parent_name},`,
+    "",
+    `Coach Hugo has prepared a proposed 6-session training schedule for ${input.approval.player_name}.`,
+    "Please review and confirm the schedule using the private link below.",
+    "",
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    "Proposed sessions:",
+    ...sessionLines,
+    "",
+    `Confirm schedule: ${input.confirmationUrl}`,
+    "",
+    `Questions? Email ${business.email} or call ${business.phone}.`
+  ].join("\n");
+  const html = brandedEmailShell({
+    title: "Confirm Your EST CV Schedule",
+    intro: "Coach Hugo has prepared a private schedule for your player.",
+    body: `
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(input.approval.parent_name)}, please review the proposed 6-session schedule for <strong style="color:#06152b">${escapeHtml(input.approval.player_name)}</strong>.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
+        ${detailsRows(rows)}
+      </table>
+      <div style="margin:18px 0;border:1px solid #dbe4ef;border-radius:10px;overflow:hidden">
+        ${input.sessions
+          .map(
+            (session, index) => `
+              <div style="padding:14px 16px;border-bottom:${index === input.sessions.length - 1 ? "0" : "1px solid #dbe4ef"};color:#334155;line-height:1.55">
+                <strong style="color:#06152b">${index + 1}. ${escapeHtml(formatSessionDate(session.start_datetime, session.timezone))}</strong><br />
+                ${escapeHtml(formatSessionTime(session.start_datetime, session.timezone))}<br />
+                ${escapeHtml(session.location || business.location)}
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+      <p style="margin:22px 0 0">
+        <a href="${escapeHtml(input.confirmationUrl)}" style="display:inline-block;background:#1783ff;color:#ffffff;text-decoration:none;font-weight:900;padding:14px 18px;border-radius:8px">Confirm schedule</a>
+      </p>
+    `
+  });
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: input.approval.parent_email,
+    replyTo: business.email,
+    subject: "EST CV Schedule Confirmation Link",
+    text,
+    html
   };
 }
 
@@ -1210,6 +1286,90 @@ export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): 
       customerSent: false,
       adminSent: false,
       message: error instanceof Error ? error.message : "Launch Pass email failed to send."
+    };
+  }
+}
+
+export async function sendScheduleApprovalLinkEmail(input: {
+  approval: ScheduleApprovalRow;
+  sessions: TrainingSessionRow[];
+  confirmationUrl: string;
+}): Promise<CustomerOnlyEmailResult> {
+  const customer = scheduleApprovalLinkEmail(input);
+  const baseAttempt = {
+    bookingId: input.approval.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Schedule approval link was created, but email was not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      scheduleApprovalId: input.approval.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
+    };
+  }
+
+  console.info("[EST Email] Preparing customer confirmation email", {
+    scheduleApprovalId: input.approval.id,
+    type: "schedule_approval_link"
+  });
+  console.info("[EST Email] Customer recipient:", {
+    scheduleApprovalId: input.approval.id,
+    to: customer.to
+  });
+
+  try {
+    const transport = await createTransport();
+    const result = await transport.sendMail(customer);
+
+    console.info("[EST Email] Customer email sent successfully", {
+      scheduleApprovalId: input.approval.id,
+      to: customer.to,
+      messageId: result.messageId
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "sent",
+      adminStatus: "not_attempted"
+    });
+
+    return {
+      sent: true
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Schedule approval email failed to send.";
+
+    console.error("[EST Email] Customer email failed:", {
+      scheduleApprovalId: input.approval.id,
+      to: customer.to,
+      error: message
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
     };
   }
 }
