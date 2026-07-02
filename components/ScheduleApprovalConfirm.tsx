@@ -33,7 +33,7 @@ export function ScheduleApprovalConfirm({ token, disabled }: ScheduleApprovalCon
 
       setStatus("confirmed");
       setMessage(
-        `Schedule confirmed. ${result.bookingCount ?? 0} session${result.bookingCount === 1 ? "" : "s"} booked with Launch Pass credits.`
+        `Schedule confirmed. ${result.bookingCount ?? 0} session${result.bookingCount === 1 ? "" : "s"} booked with Training credits.`
       );
     } catch (error) {
       setStatus("failed");

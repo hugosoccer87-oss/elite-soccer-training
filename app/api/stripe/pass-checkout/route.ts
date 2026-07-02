@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     !payload.passType ||
     !isLaunchPassType(payload.passType)
   ) {
-    return NextResponse.json({ error: "Complete all Launch Pass purchase fields before payment." }, { status: 400 });
+    return NextResponse.json({ error: "Complete all Training Package purchase fields before payment." }, { status: 400 });
   }
 
   try {
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
 
     if (selectedSessionIds.length > option.credits) {
       return NextResponse.json(
-        { error: `Choose no more than ${option.credits} sessions for this Launch Pass.` },
+        { error: `Choose no more than ${option.credits} sessions for this Training Package.` },
         { status: 400 }
       );
     }
@@ -101,7 +101,7 @@ export async function POST(request: Request) {
 
       if (invalidSession) {
         return NextResponse.json(
-          { error: "One or more selected sessions are no longer available for this Launch Pass." },
+          { error: "One or more selected sessions are no longer available for this Training Package." },
           { status: 400 }
         );
       }
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
         !payload.bookingDetails.mediaConsent
       ) {
         return NextResponse.json(
-          { error: "Complete the emergency details and signed waiver before choosing sessions with a Launch Pass." },
+          { error: "Complete the emergency details and signed waiver before choosing sessions with a Training Package." },
           { status: 400 }
         );
       }
@@ -184,13 +184,13 @@ export async function POST(request: Request) {
       passPurchaseId: pass.id
     });
   } catch (error) {
-    console.error("[EST Stripe] Failed to create Launch Pass Checkout session", {
+    console.error("[EST Stripe] Failed to create Training Package Checkout session", {
       error: error instanceof Error ? error.message : String(error)
     });
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Launch Pass checkout could not be started."
+        error: error instanceof Error ? error.message : "Training Package checkout could not be started."
       },
       { status: 500 }
     );

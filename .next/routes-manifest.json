@@ -44,6 +44,14 @@
       "namedRegex": "^/api/admin/email\\-subscribers/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/admin/private-session-requests/[id]",
+      "regex": "^/api/admin/private\\-session\\-requests/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/admin/private\\-session\\-requests/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/admin/sessions/[id]",
       "regex": "^/api/admin/sessions/([^/]+?)(?:/)?$",
       "routeKeys": {

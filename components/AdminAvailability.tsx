@@ -11,6 +11,8 @@ import type {
   DirectPaymentRow,
   DirectPaymentStatus,
   EmailSubscriberRow,
+  PrivateSessionRequestRow,
+  PrivateSessionRequestStatus,
   ScheduleApprovalPaymentMethod
 } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
@@ -117,6 +119,12 @@ type EmailSubscribersResponse = {
   error?: string;
 };
 
+type PrivateSessionRequestsResponse = {
+  status?: string;
+  requests?: PrivateSessionRequestRow[];
+  error?: string;
+};
+
 type ActiveWaiverRecord = {
   booking: AdminBookingRecord;
   session?: AdminTrainingSession;
@@ -145,7 +153,15 @@ type ContactFormState = {
   secondPlayerAge: string;
 };
 
-type AdminSection = "dashboard" | "calendar" | "sessions" | "bookings" | "passes" | "direct-payments" | "email-list";
+type AdminSection =
+  | "dashboard"
+  | "calendar"
+  | "sessions"
+  | "bookings"
+  | "passes"
+  | "private-requests"
+  | "direct-payments"
+  | "email-list";
 type SessionFilter =
   | "all"
   | "open"
@@ -197,7 +213,8 @@ const adminSections: Array<{ id: AdminSection; label: string; note: string }> = 
   { id: "calendar", label: "Calendar", note: "Booked sessions by date" },
   { id: "sessions", label: "Sessions", note: "Create and manage openings" },
   { id: "bookings", label: "Bookings", note: "Players and waivers" },
-  { id: "passes", label: "Launch Passes / Credits", note: "Pass tracking" },
+  { id: "passes", label: "Training Packages / Credits", note: "Credit tracking" },
+  { id: "private-requests", label: "Private Requests", note: "1-on-1 inquiries" },
   { id: "direct-payments", label: "Direct Payments", note: "Pay + waiver records" },
   { id: "email-list", label: "Email List", note: "Brevo CSV export" }
 ];
@@ -448,11 +465,11 @@ function trainingGroupLabel(trainingGroup: TrainingGroupId) {
 
 function passTypeLabel(passType: string) {
   if (passType === "four_session_launch_pass") {
-    return "4-Session Launch Pass";
+    return "4-Session Training Package";
   }
 
   if (passType === "six_session_launch_pass") {
-    return "6-Session Launch Pass";
+    return "6-Session Training Package";
   }
 
   return passType;
@@ -558,7 +575,7 @@ function adminCalendarBlockClass(session: AdminTrainingSession) {
 
 function paymentTypeLabel(booking: AdminBookingRecord) {
   if (booking.payment_type === "launch_pass_credit") {
-    return "Launch Pass credit";
+    return "Training credit";
   }
 
   return "Card / Single Session";
@@ -693,7 +710,7 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
     "Booking Notes",
     `Notes: ${booking.notes || "None"}`,
     `Payment Status: ${booking.status}`,
-    `Payment Type: ${booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}`,
+    `Payment Type: ${booking.payment_type === "launch_pass_credit" ? "Training credit" : "Single Session"}`,
     `Stripe Checkout Session: ${booking.stripe_checkout_session_id || "Not recorded"}`,
     `Stripe Payment Intent: ${booking.stripe_payment_intent_id || "Not recorded"}`,
     `Google Calendar Event ID: ${booking.calendarEvent?.google_calendar_event_id || "Not recorded"}`,
@@ -924,7 +941,7 @@ async function readAdminPasses() {
   const result = (await response.json().catch(() => ({}))) as PassesResponse;
 
   if (!response.ok) {
-    throw new Error(result.error || "Launch Passes could not be loaded.");
+    throw new Error(result.error || "Training Packages could not be loaded.");
   }
 
   return result.passes ?? [];
@@ -962,12 +979,29 @@ async function readAdminEmailSubscribers() {
   return result.subscribers ?? [];
 }
 
+async function readAdminPrivateSessionRequests() {
+  const response = await fetch(`/api/admin/private-session-requests?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as PrivateSessionRequestsResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Private session requests could not be loaded.");
+  }
+
+  return result.requests ?? [];
+}
+
 export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
   const [bookings, setBookings] = useState<AdminBookingRecord[]>([]);
   const [passes, setPasses] = useState<AdminPassPurchase[]>([]);
   const [directPayments, setDirectPayments] = useState<DirectPaymentRow[]>([]);
   const [emailSubscribers, setEmailSubscribers] = useState<EmailSubscriberRow[]>([]);
+  const [privateSessionRequests, setPrivateSessionRequests] = useState<PrivateSessionRequestRow[]>([]);
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>("elite-performance");
   const [newDate, setNewDate] = useState("");
@@ -1024,6 +1058,12 @@ export function AdminAvailability() {
   const [scheduleApprovalNote, setScheduleApprovalNote] = useState("");
   const [scheduleApprovalSessionIds, setScheduleApprovalSessionIds] = useState<string[]>([]);
   const [scheduleApprovalUrl, setScheduleApprovalUrl] = useState("");
+  const [scheduleApprovalPassId, setScheduleApprovalPassId] = useState("");
+  const [scheduleApprovalOverrideCount, setScheduleApprovalOverrideCount] = useState(false);
+  const [scheduleApprovalOverrideSessionCount, setScheduleApprovalOverrideSessionCount] = useState("6");
+  const [privateRequestScheduleInputs, setPrivateRequestScheduleInputs] = useState<
+    Record<string, { date: string; startTime: string; endTime: string; location: string }>
+  >({});
   const [directPaymentFilter, setDirectPaymentFilter] = useState<DirectPaymentFilter>("all");
   const [expandedDirectPaymentId, setExpandedDirectPaymentId] = useState("");
   const [activeContactEdit, setActiveContactEdit] = useState<ContactEditState | null>(null);
@@ -1043,13 +1083,22 @@ export function AdminAvailability() {
   async function refreshAdminData(message?: string) {
     try {
       setError("");
-      const [nextSessions, nextBookings, nextPasses, nextDirectPayments, nextEmailSubscribers, nextDiagnostics] =
+      const [
+        nextSessions,
+        nextBookings,
+        nextPasses,
+        nextDirectPayments,
+        nextEmailSubscribers,
+        nextPrivateSessionRequests,
+        nextDiagnostics
+      ] =
         await Promise.all([
           readAdminSessions(),
           readAdminBookings(),
           readAdminPasses(),
           readAdminDirectPayments(),
           readAdminEmailSubscribers(),
+          readAdminPrivateSessionRequests(),
           readAdminDiagnostics()
         ]);
 
@@ -1058,6 +1107,7 @@ export function AdminAvailability() {
       setPasses(nextPasses);
       setDirectPayments(nextDirectPayments);
       setEmailSubscribers(nextEmailSubscribers);
+      setPrivateSessionRequests(nextPrivateSessionRequests);
       setDiagnostics(nextDiagnostics);
 
       if (message) {
@@ -1099,6 +1149,25 @@ export function AdminAvailability() {
     () => passes.filter((pass) => pass.status === "paid" && pass.remaining_credits > 0),
     [passes]
   );
+  const scheduledPrivateRequests = useMemo(
+    () =>
+      privateSessionRequests
+        .filter((request) => request.scheduled_start)
+        .sort((a, b) => String(a.scheduled_start).localeCompare(String(b.scheduled_start)))
+        .slice(0, 10),
+    [privateSessionRequests]
+  );
+  const selectedScheduleApprovalPass = useMemo(
+    () => activePasses.find((pass) => pass.id === scheduleApprovalPassId) ?? null,
+    [activePasses, scheduleApprovalPassId]
+  );
+  const scheduleApprovalRequiredSessionCount = useMemo(() => {
+    if (scheduleApprovalOverrideCount) {
+      return Math.max(1, Math.floor(Number(scheduleApprovalOverrideSessionCount) || 1));
+    }
+
+    return selectedScheduleApprovalPass?.remaining_credits ?? 6;
+  }, [scheduleApprovalOverrideCount, scheduleApprovalOverrideSessionCount, selectedScheduleApprovalPass]);
   const paidPasses = useMemo(() => passes.filter((pass) => pass.status === "paid"), [passes]);
   const selectedManualCreditPass = useMemo(
     () => paidPasses.find((pass) => pass.id === manualCreditPassId) ?? null,
@@ -1132,9 +1201,18 @@ export function AdminAvailability() {
       spotsBookedThisWeek,
       pendingZellePayments: directPaymentCounts.zellePending,
       activePasses: passCounts.active,
+      privateRequests: privateSessionRequests.filter((request) => request.status === "new").length,
       emailSubscribers: activeEmailSubscribers.length
     }),
-    [activeEmailSubscribers.length, directPaymentCounts.zellePending, passCounts.active, sessions, spotsBookedThisWeek, upcomingBookings.length]
+    [
+      activeEmailSubscribers.length,
+      directPaymentCounts.zellePending,
+      passCounts.active,
+      privateSessionRequests,
+      sessions,
+      spotsBookedThisWeek,
+      upcomingBookings.length
+    ]
   );
   const filteredSessions = useMemo(
     () =>
@@ -1565,7 +1643,7 @@ export function AdminAvailability() {
   }
 
   async function issueMakeupCredit(booking: AdminBookingRecord) {
-    if (!window.confirm(`Add 1 Launch Pass credit back for ${booking.player_name} and notify the parent?`)) {
+    if (!window.confirm(`Add 1 Training credit back for ${booking.player_name} and notify the parent?`)) {
       return;
     }
 
@@ -1717,13 +1795,13 @@ export function AdminAvailability() {
 
   async function addManualCredit() {
     if (!selectedManualCreditPass) {
-      setError("Choose a Launch Pass before adding manual credit.");
+      setError("Choose a Training Package before adding manual credit.");
       return;
     }
 
     const nextRemaining = selectedManualCreditPass.remaining_credits + manualCreditAmountNumber;
     const confirmed = window.confirm(
-      `Add ${manualCreditAmountNumber} credit${manualCreditAmountNumber === 1 ? "" : "s"} to ${selectedManualCreditPass.player_name}'s Launch Pass?\n\nCurrent credits: ${selectedManualCreditPass.remaining_credits}\nNew credits: ${nextRemaining}`
+      `Add ${manualCreditAmountNumber} credit${manualCreditAmountNumber === 1 ? "" : "s"} to ${selectedManualCreditPass.player_name}'s Training Package?\n\nCurrent credits: ${selectedManualCreditPass.remaining_credits}\nNew credits: ${nextRemaining}`
     );
 
     if (!confirmed) {
@@ -1773,14 +1851,47 @@ export function AdminAvailability() {
         return current.filter((id) => id !== sessionId);
       }
 
-      if (current.length >= 6) {
-        setError("Choose exactly 6 sessions. Remove one before adding another.");
+      if (current.length >= scheduleApprovalRequiredSessionCount) {
+        setError(`Choose ${scheduleApprovalRequiredSessionCount} sessions. Remove one before adding another.`);
         return current;
       }
 
       setError("");
       return [...current, sessionId];
     });
+  }
+
+  function selectScheduleApprovalPass(passId: string) {
+    setScheduleApprovalPassId(passId);
+    setScheduleApprovalSessionIds([]);
+    setScheduleApprovalUrl("");
+
+    if (!passId) {
+      setScheduleApprovalPlayerName("");
+      setScheduleApprovalPlayerAge("");
+      setScheduleApprovalParentName("");
+      setScheduleApprovalParentEmail("");
+      setScheduleApprovalParentPhone("");
+      setScheduleApprovalGroup("elite-performance");
+      setScheduleApprovalAmountPaid("285");
+      setScheduleApprovalPaymentMethod("zelle");
+      return;
+    }
+
+    const pass = activePasses.find((item) => item.id === passId);
+
+    if (!pass) {
+      return;
+    }
+
+    setScheduleApprovalPlayerName(pass.player_name);
+    setScheduleApprovalPlayerAge(pass.player_age);
+    setScheduleApprovalParentName(pass.parent_name);
+    setScheduleApprovalParentEmail(pass.parent_email);
+    setScheduleApprovalParentPhone(pass.parent_phone);
+    setScheduleApprovalGroup(pass.training_group);
+    setScheduleApprovalAmountPaid(String((Number(pass.amount_paid) || 0) / 100));
+    setScheduleApprovalPaymentMethod("other");
   }
 
   async function createScheduleApprovalLink() {
@@ -1795,8 +1906,8 @@ export function AdminAvailability() {
       return;
     }
 
-    if (scheduleApprovalSessionIds.length !== 6) {
-      setError("Choose exactly 6 proposed sessions for this schedule approval link.");
+    if (scheduleApprovalSessionIds.length !== scheduleApprovalRequiredSessionCount) {
+      setError(`Choose exactly ${scheduleApprovalRequiredSessionCount} proposed sessions for this schedule approval link.`);
       return;
     }
 
@@ -1821,7 +1932,9 @@ export function AdminAvailability() {
           amountPaid: Number(scheduleApprovalAmountPaid) || 0,
           paymentMethod: scheduleApprovalPaymentMethod,
           internalNote: scheduleApprovalNote,
-          proposedSessionIds: scheduleApprovalSessionIds
+          proposedSessionIds: scheduleApprovalSessionIds,
+          passPurchaseId: scheduleApprovalPassId || undefined,
+          overrideSessionCount: scheduleApprovalOverrideCount ? scheduleApprovalRequiredSessionCount : undefined
         })
       });
       const result = (await response.json().catch(() => ({}))) as {
@@ -1845,6 +1958,9 @@ export function AdminAvailability() {
       setScheduleApprovalPaymentMethod("zelle");
       setScheduleApprovalNote("");
       setScheduleApprovalSessionIds([]);
+      setScheduleApprovalPassId("");
+      setScheduleApprovalOverrideCount(false);
+      setScheduleApprovalOverrideSessionCount("6");
       await refreshAdminData(
         result.emailSent
           ? "Private schedule confirmation link created and emailed to the parent."
@@ -1853,6 +1969,96 @@ export function AdminAvailability() {
       setScheduleApprovalUrl(result.confirmationUrl || "");
     } catch (approvalError) {
       setError(approvalError instanceof Error ? approvalError.message : "Schedule approval link could not be created.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function updatePrivateRequestScheduleInput(
+    request: PrivateSessionRequestRow,
+    updates: Partial<{ date: string; startTime: string; endTime: string; location: string }>
+  ) {
+    const existing = privateRequestScheduleInputs[request.id] ?? {
+      date: request.scheduled_start ? formatDateOnly(request.scheduled_start, request.timezone) : "",
+      startTime: request.scheduled_start ? formatTimeInput(request.scheduled_start, request.timezone) : "17:00",
+      endTime: request.scheduled_end ? formatTimeInput(request.scheduled_end, request.timezone) : "18:00",
+      location: request.location || business.location
+    };
+
+    setPrivateRequestScheduleInputs((current) => ({
+      ...current,
+      [request.id]: {
+        ...existing,
+        ...updates
+      }
+    }));
+  }
+
+  async function updatePrivateRequestStatus(requestId: string, status: PrivateSessionRequestStatus) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/private-session-requests/${requestId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ status })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private request status could not be updated.");
+      }
+
+      await refreshAdminData("Private request updated.");
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "Private request status could not be updated.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function schedulePrivateRequest(request: PrivateSessionRequestRow) {
+    const input = privateRequestScheduleInputs[request.id] ?? {
+      date: request.scheduled_start ? formatDateOnly(request.scheduled_start, request.timezone) : "",
+      startTime: request.scheduled_start ? formatTimeInput(request.scheduled_start, request.timezone) : "17:00",
+      endTime: request.scheduled_end ? formatTimeInput(request.scheduled_end, request.timezone) : "18:00",
+      location: request.location || business.location
+    };
+
+    if (!input.date || !input.startTime) {
+      setError("Choose a date and start time before scheduling the private session.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/private-session-requests/${request.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(input)
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; request?: PrivateSessionRequestRow };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private session could not be scheduled.");
+      }
+
+      await refreshAdminData(
+        result.request?.calendar_status === "Failed"
+          ? "Private session scheduled, but Google Calendar needs attention."
+          : "Private session scheduled and synced if Google Calendar is configured."
+      );
+    } catch (scheduleError) {
+      setError(scheduleError instanceof Error ? scheduleError.message : "Private session could not be scheduled.");
     } finally {
       setIsSaving(false);
     }
@@ -2207,7 +2413,7 @@ export function AdminAvailability() {
             <p className="text-sm font-black uppercase text-electric">Admin Dashboard</p>
             <h2 className="mt-2 text-3xl font-black text-navy">Manage EST CV quickly.</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Create openings, review bookings, track payments, manage Launch Pass credits, and export your email list.
+              Create openings, review bookings, track payments, manage training credits, and export your email list.
             </p>
           </div>
           <button
@@ -2262,7 +2468,8 @@ export function AdminAvailability() {
               ["Upcoming Bookings", counts.upcomingBookings],
               ["Spots This Week", counts.spotsBookedThisWeek],
               ["Pending Zelle", counts.pendingZellePayments],
-              ["Active Passes", counts.activePasses],
+              ["Active Packages", counts.activePasses],
+              ["Private Requests", counts.privateRequests],
               ["Email Subscribers", counts.emailSubscribers]
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -2617,7 +2824,7 @@ export function AdminAvailability() {
                             <p><span className="font-black text-navy">Parent email:</span> {booking.parent_email}</p>
                             <p><span className="font-black text-navy">Parent phone:</span> {booking.parent_phone}</p>
                             <p>
-                              <span className="font-black text-navy">Launch Pass:</span>{" "}
+                              <span className="font-black text-navy">Training Package:</span>{" "}
                               {booking.payment_type === "launch_pass_credit"
                                 ? `Credit used${booking.passPurchase ? ` · ${booking.passPurchase.remaining_credits}/${booking.passPurchase.total_credits} remaining` : ""}`
                                 : "Not used"}
@@ -2646,6 +2853,31 @@ export function AdminAvailability() {
                 <p className="mt-2">Click any session on the calendar to see booked players and contact details.</p>
               </div>
             )}
+
+            <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+              <p className="text-xs font-black uppercase text-electric">Private 1-on-1 Calendar</p>
+              <h4 className="mt-2 text-lg font-black text-navy">Scheduled private sessions</h4>
+              <div className="mt-4 grid gap-3">
+                {scheduledPrivateRequests.length > 0 ? (
+                  scheduledPrivateRequests.map((request) => (
+                    <div key={request.id} className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+                      <p className="font-black text-navy">
+                        {request.scheduled_start ? formatDateTime(request.scheduled_start, request.timezone) : "Not scheduled"}
+                      </p>
+                      <p className="mt-1 font-bold text-slate-700">Private 1-on-1 - {request.player_name}</p>
+                      <p className="mt-1 text-slate-600">{request.focus_areas.join(", ") || "General Technical Work"}</p>
+                      <p className="mt-1 text-xs font-black uppercase text-slate-500">
+                        Calendar: {request.calendar_status || "not synced"}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                    No private sessions scheduled yet.
+                  </p>
+                )}
+              </div>
+            </div>
           </aside>
         </section>
       ) : null}
@@ -3251,12 +3483,12 @@ export function AdminAvailability() {
                                   <p className="text-xs font-black uppercase text-electric">Confirmed Bookings</p>
                                   {session.status === "cancelled" && launchPassBookings.length > 0 ? (
                                     <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-800">
-                                      This cancelled session has Launch Pass bookings. You may issue makeup credits to affected players.
+                                      This cancelled session has Training Package bookings. You may issue makeup credits to affected players.
                                     </p>
                                   ) : null}
                                   {session.status === "cancelled" && creditedLaunchPassBookings.length > 0 ? (
                                     <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-800">
-                                      {creditedLaunchPassBookings.length} Launch Pass credit
+                                      {creditedLaunchPassBookings.length} Training credit
                                       {creditedLaunchPassBookings.length === 1 ? " was" : "s were"} returned:{" "}
                                       {creditedLaunchPassBookings.map((booking) => booking.player_name).join(", ")}.
                                     </p>
@@ -3285,7 +3517,7 @@ export function AdminAvailability() {
                                               </p>
                                               <p className="mt-1 text-sm text-slate-600">
                                                 Payment type:{" "}
-                                                {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}
+                                                {booking.payment_type === "launch_pass_credit" ? "Training credit" : "Single Session"}
                                               </p>
                                               <p className="mt-1 text-sm text-slate-600">Amount paid: {formatMoney(booking.amount_paid)}</p>
                                               {booking.creditAdjustment ? (
@@ -3503,7 +3735,7 @@ export function AdminAvailability() {
                     {isExpanded ? (
                       <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-2">
                         <div className="grid gap-2 text-sm text-slate-600">
-                          <p><span className="font-black text-navy">Booking source:</span> {booking.payment_type === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"}</p>
+                          <p><span className="font-black text-navy">Booking source:</span> {booking.payment_type === "launch_pass_credit" ? "Training credit" : "Single Session"}</p>
                           <p><span className="font-black text-navy">Created:</span> {formatWaiverTimestamp(booking.created_at)}</p>
                           <p><span className="font-black text-navy">Amount:</span> {formatMoney(booking.amount_paid)}</p>
                           <p><span className="font-black text-navy">Player count:</span> {booking.player_count}</p>
@@ -3583,9 +3815,9 @@ export function AdminAvailability() {
         <section className="panel overflow-hidden">
           <div className="grid gap-4 border-b border-slate-200 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:p-6">
             <div>
-              <p className="text-xs font-black uppercase text-electric">Passes & Credits</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Launch Pass tracking</h3>
-              <p className="mt-2 text-sm text-slate-600">Review pass purchases, remaining credits, and redemptions.</p>
+              <p className="text-xs font-black uppercase text-electric">Training Packages & Credits</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Training Package tracking</h3>
+              <p className="mt-2 text-sm text-slate-600">Review package purchases, remaining credits, and redemptions.</p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="rounded-lg border border-slate-200 bg-mist p-3">
@@ -3606,11 +3838,11 @@ export function AdminAvailability() {
           <div className="border-b border-slate-200 p-5 sm:p-6">
             <div className="flex flex-wrap gap-2">
               {[
-                ["active", "Active Passes"],
+                ["active", "Active Packages"],
                 ["all", "All"],
                 ["used-up", "Used Up"],
-                ["four", "4-Session Pass"],
-                ["six", "6-Session Pass"]
+                ["four", "4-Session Package"],
+                ["six", "6-Session Package"]
               ].map(([value, label]) => (
                 <button
                   key={value}
@@ -3635,12 +3867,38 @@ export function AdminAvailability() {
                   <p className="text-xs font-black uppercase text-electric">Private Schedule Confirmation</p>
                   <h4 className="mt-1 text-xl font-black text-navy">Schedule Approval Link</h4>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Create a manual 6-Session Launch Pass for a player who already paid, propose 6 sessions, and send the parent a private confirmation link.
+                    Select an existing Training Package holder with open credits, or create a new manual 6-Session
+                    Training Package for a player who already paid directly.
                   </p>
                 </div>
                 <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm font-black text-navy">
-                  {scheduleApprovalSessionIds.length}/6 sessions selected
+                  {scheduleApprovalSessionIds.length}/{scheduleApprovalRequiredSessionCount} sessions selected
                 </div>
+              </div>
+
+              <div className="mt-5 grid gap-4">
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Existing Training Package Holder
+                  <select
+                    className={inputClass}
+                    value={scheduleApprovalPassId}
+                    onChange={(event) => selectScheduleApprovalPass(event.target.value)}
+                  >
+                    <option value="">Create new manual Training Package</option>
+                    {activePasses.map((pass) => (
+                      <option key={pass.id} value={pass.id}>
+                        {pass.player_name} - {pass.parent_name} - {pass.remaining_credits} credit
+                        {pass.remaining_credits === 1 ? "" : "s"} - {passTypeLabel(pass.pass_type)} - {pass.parent_email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedScheduleApprovalPass ? (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold leading-6 text-emerald-900">
+                    Existing package selected. Contact details have been filled in from the paid Training Package.
+                    Available credits: {selectedScheduleApprovalPass.remaining_credits}.
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-5 grid gap-4 lg:grid-cols-4">
@@ -3669,6 +3927,7 @@ export function AdminAvailability() {
                   <select
                     className={inputClass}
                     value={scheduleApprovalGroup}
+                    disabled={Boolean(selectedScheduleApprovalPass)}
                     onChange={(event) => {
                       setScheduleApprovalGroup(event.target.value as TrainingGroupId);
                       setScheduleApprovalSessionIds([]);
@@ -3683,7 +3942,7 @@ export function AdminAvailability() {
                 </label>
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                   Plan Type
-                  <input className={inputClass} value="6-Session Launch Pass" readOnly />
+                  <input className={inputClass} value={selectedScheduleApprovalPass ? passTypeLabel(selectedScheduleApprovalPass.pass_type) : "6-Session Training Package"} readOnly />
                 </label>
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                   Amount Paid
@@ -3711,7 +3970,41 @@ export function AdminAvailability() {
               </div>
 
               <div className="mt-5">
-                <p className="text-xs font-black uppercase text-slate-500">Propose 6 Sessions</p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs font-black uppercase text-slate-500">
+                    Propose {scheduleApprovalRequiredSessionCount} Sessions
+                  </p>
+                  {selectedScheduleApprovalPass ? (
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={scheduleApprovalOverrideCount}
+                        onChange={(event) => {
+                          setScheduleApprovalOverrideCount(event.target.checked);
+                          setScheduleApprovalSessionIds([]);
+                          setScheduleApprovalOverrideSessionCount(String(selectedScheduleApprovalPass.remaining_credits));
+                        }}
+                      />
+                      Override session count
+                    </label>
+                  ) : null}
+                </div>
+                {scheduleApprovalOverrideCount ? (
+                  <label className="mt-3 grid max-w-xs gap-2 text-xs font-black uppercase text-slate-500">
+                    Sessions to propose
+                    <input
+                      className={inputClass}
+                      type="number"
+                      min={1}
+                      max={selectedScheduleApprovalPass?.remaining_credits ?? 6}
+                      value={scheduleApprovalOverrideSessionCount}
+                      onChange={(event) => {
+                        setScheduleApprovalOverrideSessionCount(event.target.value);
+                        setScheduleApprovalSessionIds([]);
+                      }}
+                    />
+                  </label>
+                ) : null}
                 <div className="mt-3 grid max-h-[28rem] gap-3 overflow-y-auto rounded-lg border border-slate-200 bg-mist p-3">
                   {scheduleApprovalSessions.length > 0 ? (
                     scheduleApprovalSessions.map((session) => {
@@ -3760,7 +4053,12 @@ export function AdminAvailability() {
                 <p className="text-sm font-semibold leading-6 text-slate-600">
                   Parent will not pay again. The sessions book only after they confirm the private link.
                 </p>
-                <button type="button" disabled={isSaving || scheduleApprovalSessionIds.length !== 6} onClick={() => void createScheduleApprovalLink()} className={primaryButtonClass}>
+                <button
+                  type="button"
+                  disabled={isSaving || scheduleApprovalSessionIds.length !== scheduleApprovalRequiredSessionCount}
+                  onClick={() => void createScheduleApprovalLink()}
+                  className={primaryButtonClass}
+                >
                   Create & Send Link
                 </button>
               </div>
@@ -3784,9 +4082,9 @@ export function AdminAvailability() {
               </div>
               <div className="mt-5 grid gap-4 lg:grid-cols-4">
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
-                  Select Launch Pass
+                  Select Training Package
                   <select className={inputClass} value={manualCreditPassId} onChange={(event) => setManualCreditPassId(event.target.value)}>
-                    <option value="">Choose a paid Launch Pass</option>
+                    <option value="">Choose a paid Training Package</option>
                     {paidPasses.map((pass) => (
                       <option key={pass.id} value={pass.id}>
                         {pass.player_name} - {pass.parent_email} - {pass.remaining_credits}/{pass.total_credits} credits
@@ -3864,7 +4162,7 @@ export function AdminAvailability() {
                           {pass.remaining_credits}/{pass.total_credits} credits remaining
                         </p>
                         <p className="mt-1 text-slate-600">Status: {pass.status}</p>
-                        <p className="mt-1 text-slate-600">Expiration: Never expires</p>
+                        <p className="mt-1 text-slate-600">Training credits do not expire</p>
                         <p className="mt-1 text-slate-600">Paid: {formatMoney(pass.amount_paid)}</p>
                         <button type="button" onClick={() => editPassContact(pass)} className={`${secondaryButtonClass} mt-3 w-full`}>
                           Edit Contact Info
@@ -3937,9 +4235,158 @@ export function AdminAvailability() {
           ) : (
             <div className="p-5 sm:p-6">
               <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
-                No Launch Passes match this filter.
+                No Training Packages match this filter.
               </p>
             </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeSection === "private-requests" ? (
+        <section className="panel overflow-hidden">
+          <div className="grid gap-4 border-b border-slate-200 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-start">
+            <div>
+              <p className="text-xs font-black uppercase text-electric">Private 1-on-1 Requests</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Review and schedule private session inquiries.</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                These requests are inquiry-only. Scheduling a request adds it to the admin queue and attempts Google
+                Calendar sync, but it does not affect small group capacity or training credits.
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+              <p className="text-2xl font-black text-navy">{privateSessionRequests.length}</p>
+              <p className="text-[10px] font-black uppercase text-slate-500">Total Requests</p>
+              <p className="mt-2 font-black text-electric">
+                {privateSessionRequests.filter((request) => request.status === "new").length} New
+              </p>
+            </div>
+          </div>
+
+          {privateSessionRequests.length > 0 ? (
+            <div className="grid divide-y divide-slate-200">
+              {privateSessionRequests.map((request) => {
+                const scheduleInput = privateRequestScheduleInputs[request.id] ?? {
+                  date: request.scheduled_start ? formatDateOnly(request.scheduled_start, request.timezone) : "",
+                  startTime: request.scheduled_start ? formatTimeInput(request.scheduled_start, request.timezone) : "17:00",
+                  endTime: request.scheduled_end ? formatTimeInput(request.scheduled_end, request.timezone) : "18:00",
+                  location: request.location || business.location
+                };
+
+                return (
+                  <article key={request.id} className="grid gap-5 p-5 sm:p-6">
+                    <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-electric/30 bg-blue-50 px-3 py-1 text-[11px] font-black uppercase text-electric">
+                            Private 1-on-1
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-navy">
+                            {request.status}
+                          </span>
+                          {request.calendar_status ? (
+                            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black uppercase text-slate-600">
+                              Calendar: {request.calendar_status}
+                            </span>
+                          ) : null}
+                        </div>
+                        <h4 className="mt-3 text-xl font-black text-navy">{request.player_name}</h4>
+                        <p className="mt-1 text-sm font-bold text-slate-600">Age {request.player_age}</p>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">
+                          Parent: {request.parent_name} - {request.parent_email} - {request.parent_phone}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          Preferred times: {request.preferred_times}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          Focus: {request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not selected"}
+                        </p>
+                        {request.notes ? <p className="mt-2 text-sm leading-6 text-slate-600">Notes: {request.notes}</p> : null}
+                        {request.scheduled_start ? (
+                          <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm font-bold text-emerald-900">
+                            Scheduled: {formatDateTime(request.scheduled_start, request.timezone)}
+                          </p>
+                        ) : null}
+                        {request.calendar_message ? (
+                          <p className="mt-2 text-sm font-semibold text-slate-600">{request.calendar_message}</p>
+                        ) : null}
+                      </div>
+                      <div className="grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Status
+                          <select
+                            className={inputClass}
+                            value={request.status}
+                            disabled={isSaving}
+                            onChange={(event) =>
+                              void updatePrivateRequestStatus(request.id, event.target.value as PrivateSessionRequestStatus)
+                            }
+                          >
+                            {["new", "contacted", "scheduled", "completed", "cancelled"].map((status) => (
+                              <option key={status} value={status}>
+                                {status}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 bg-white p-4">
+                      <p className="text-xs font-black uppercase text-electric">Schedule Private Session</p>
+                      <div className="mt-4 grid gap-4 lg:grid-cols-4">
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Date
+                          <input
+                            className={inputClass}
+                            type="date"
+                            value={scheduleInput.date}
+                            onChange={(event) => updatePrivateRequestScheduleInput(request, { date: event.target.value })}
+                          />
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Start Time
+                          <input
+                            className={inputClass}
+                            type="time"
+                            value={scheduleInput.startTime}
+                            onChange={(event) => updatePrivateRequestScheduleInput(request, { startTime: event.target.value })}
+                          />
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          End Time
+                          <input
+                            className={inputClass}
+                            type="time"
+                            value={scheduleInput.endTime}
+                            onChange={(event) => updatePrivateRequestScheduleInput(request, { endTime: event.target.value })}
+                          />
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                          Location
+                          <input
+                            className={inputClass}
+                            value={scheduleInput.location}
+                            onChange={(event) => updatePrivateRequestScheduleInput(request, { location: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <div className="mt-4 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={isSaving || !scheduleInput.date || !scheduleInput.startTime}
+                          onClick={() => void schedulePrivateRequest(request)}
+                          className={primaryButtonClass}
+                        >
+                          Schedule Private Session
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="p-5 text-sm font-bold text-slate-600">No private session requests yet.</p>
           )}
         </section>
       ) : null}
@@ -3976,8 +4423,8 @@ export function AdminAvailability() {
                 ["card-paid", "Card Paid"],
                 ["pending-card", "Pending Card"],
                 ["single-session", "Single Session"],
-                ["four-pass", "4-Session Pass"],
-                ["six-pass", "6-Session Pass"]
+                ["four-pass", "4-Session Package"],
+                ["six-pass", "6-Session Package"]
               ].map(([value, label]) => (
                 <button
                   key={value}

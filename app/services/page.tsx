@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
+import { PrivateSessionRequestForm } from "@/components/PrivateSessionRequestForm";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SpecialRequestForm } from "@/components/SpecialRequestForm";
 import { TrainingCard } from "@/components/TrainingCard";
@@ -38,7 +39,7 @@ export default function ServicesPage() {
               ))}
             </div>
             <p className="mt-4 text-sm font-bold leading-6 text-slate-600">
-              Single Sessions and Launch Passes can be purchased through the booking page. Launch Pass credits can then be used to reserve available sessions.
+              Single Sessions and Training Packages can be purchased through the booking page. Training credits can then be used to reserve available sessions.
             </p>
           </div>
           <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -66,6 +67,22 @@ export default function ServicesPage() {
               </article>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section id="private-session-request" className="bg-white py-16 sm:py-20">
+        <div className="section-shell grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div>
+            <p className="text-sm font-black uppercase text-electric">Private 1-on-1</p>
+            <h2 className="mt-3 text-3xl font-black leading-tight text-navy">
+              Private Session Request
+            </h2>
+            <p className="mt-4 leading-7 text-slate-600">
+              For players who need individual attention, custom attacking work, confidence building, position-specific
+              training, or a schedule outside the regular group sessions.
+            </p>
+          </div>
+          <PrivateSessionRequestForm />
         </div>
       </section>
 

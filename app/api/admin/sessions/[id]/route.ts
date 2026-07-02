@@ -150,8 +150,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       const emailSentCount = returned.filter((item) => item.emailSent).length;
       const creditMessage =
         launchPassBookings.length === 0
-          ? "Session cancelled. No Launch Pass credits needed to be returned."
-          : `Session cancelled. ${returned.length} Launch Pass credit${returned.length === 1 ? "" : "s"} returned. ${emailSentCount} parent email${emailSentCount === 1 ? "" : "s"} sent.`;
+          ? "Session cancelled. No Training credits needed to be returned."
+          : `Session cancelled. ${returned.length} Training credit${returned.length === 1 ? "" : "s"} returned. ${emailSentCount} parent email${emailSentCount === 1 ? "" : "s"} sent.`;
       const cardNotice =
         cardPaidBookings.length > 0
           ? " This session has card-paid bookings. Refunds must be handled separately in Stripe or manually."

@@ -89,13 +89,13 @@ const paymentCards: Array<{
   },
   {
     option: "four_session_launch_pass",
-    title: "4-Session Launch Pass",
+    title: "4-Session Training Package",
     price: "$200/player",
     description: "Includes 4 total training credits. Good for players training consistently."
   },
   {
     option: "six_session_launch_pass",
-    title: "6-Session Launch Pass",
+    title: "6-Session Training Package",
     price: "$285/player",
     description: "Includes 6 total training credits. Best value for players training multiple times per week."
   }
@@ -391,7 +391,7 @@ export function DirectPayForm() {
           </label>
         ) : (
           <p className="mt-5 rounded-md border border-slate-200 bg-mist px-4 py-3 text-sm font-semibold leading-6 text-slate-600">
-            Launch Passes already include multiple training credits.
+            Training Packages already include multiple training credits.
           </p>
         )}
 

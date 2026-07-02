@@ -36,7 +36,7 @@ export async function POST(request: Request) {
   const creditAmount = Math.max(1, Math.floor(Number(payload?.creditAmount) || 1));
 
   if (!payload?.passPurchaseId) {
-    return NextResponse.json({ error: "Choose a Launch Pass before adding credit." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a Training Package before adding credit." }, { status: 400 });
   }
 
   if (!allowedReasons.has(reason)) {

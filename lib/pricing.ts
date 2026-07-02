@@ -22,21 +22,21 @@ export const launchPassOptions: Record<
 > = {
   four_session_launch_pass: {
     passType: "four_session_launch_pass",
-    title: "4-Session Launch Pass",
+    title: "4-Session Training Package",
     price: "$200",
     amountCents: 20000,
     credits: 4,
     description: "4 training credits for EST CV small group training.",
-    stripeLineItemName: "Elite Soccer Training CV - 4-Session Launch Pass"
+    stripeLineItemName: "Elite Soccer Training CV - 4-Session Training Package"
   },
   six_session_launch_pass: {
     passType: "six_session_launch_pass",
-    title: "6-Session Launch Pass",
+    title: "6-Session Training Package",
     price: "$285",
     amountCents: 28500,
     credits: 6,
     description: "6 training credits for EST CV small group training.",
-    stripeLineItemName: "Elite Soccer Training CV - 6-Session Launch Pass"
+    stripeLineItemName: "Elite Soccer Training CV - 6-Session Training Package"
   }
 };
 

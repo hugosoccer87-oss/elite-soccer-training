@@ -12,7 +12,7 @@ import {
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
 import { getSessionFocusLabel } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
-import type { TrainingSessionRow } from "@/lib/supabase-db";
+import type { PrivateSessionRequestRow, TrainingSessionRow } from "@/lib/supabase-db";
 import { createSign } from "node:crypto";
 
 const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -504,7 +504,7 @@ function getDurationMinutes(startDateTime?: string, endDateTime?: string) {
 function bookingDescription(booking: BookingRecord) {
   const paidWithLaunchPass = booking.paymentType === "launch_pass_credit";
   const paymentAmount = paidWithLaunchPass
-    ? "Paid using Launch Pass credit"
+    ? "Paid using Training credit"
     : `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`;
 
   return [
@@ -517,10 +517,10 @@ function bookingDescription(booking: BookingRecord) {
     `Session date/time: ${booking.sessionDate} at ${booking.sessionTime}`,
     `Location: ${business.location}`,
     `Number of players: ${booking.players}`,
-    `Payment status: ${paidWithLaunchPass ? "Paid using Launch Pass credit" : "Paid"}`,
+    `Payment status: ${paidWithLaunchPass ? "Paid using Training credit" : "Paid"}`,
     `Payment amount: ${paymentAmount}`,
-    `Payment type: ${paidWithLaunchPass ? "Launch Pass credit" : "Single Session"}`,
-    `Remaining Launch Pass credits: ${typeof booking.remainingCreditsAfter === "number" ? booking.remainingCreditsAfter : "Not applicable"}`,
+    `Payment type: ${paidWithLaunchPass ? "Training credit" : "Single Session"}`,
+    `Remaining Training credits: ${typeof booking.remainingCreditsAfter === "number" ? booking.remainingCreditsAfter : "Not applicable"}`,
     `Waiver status: ${booking.waiverAccepted ? "Signed" : "Not recorded"}`,
     `Typed waiver signature: ${booking.guardianSignature || "Not recorded"}`,
     `Waiver signed date/time: ${booking.waiverAcceptedAt || "Not recorded"}`,
@@ -647,6 +647,27 @@ async function findExistingTrainingSessionEvent(sessionId: string, accessToken: 
     maxResults: "1",
     singleEvents: "true",
     privateExtendedProperty: `estSessionId=${sessionId}`
+  });
+  const response = await fetch(
+    `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+    {
+      headers: calendarHeaders(accessToken)
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as GoogleCalendarListResponse;
+  return data.items?.[0] ?? null;
+}
+
+async function findExistingPrivateSessionEvent(requestId: string, accessToken: string) {
+  const params = new URLSearchParams({
+    maxResults: "1",
+    singleEvents: "true",
+    privateExtendedProperty: `estPrivateSessionRequestId=${requestId}`
   });
   const response = await fetch(
     `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
@@ -803,6 +824,141 @@ export async function syncTrainingSessionCalendarEvent(session: TrainingSessionR
   });
 
   return { status: "Synced", eventId: event.id };
+}
+
+function privateSessionDescription(request: PrivateSessionRequestRow) {
+  return [
+    `Session type: Private 1-on-1`,
+    `Player name: ${request.player_name}`,
+    `Player age: ${request.player_age}`,
+    `Parent/guardian name: ${request.parent_name}`,
+    `Parent email: ${request.parent_email}`,
+    `Parent phone: ${request.parent_phone}`,
+    `Preferred dates/times: ${request.preferred_times}`,
+    `Focus areas: ${request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not recorded"}`,
+    `Notes: ${request.notes || "None"}`,
+    `Status: ${request.status}`,
+    `Location: ${request.location || business.location}`,
+    `Request ID: ${request.id}`,
+    "",
+    "Admin note: This private session request does not count toward small group capacity."
+  ].join("\n");
+}
+
+export async function syncPrivateSessionCalendarEvent(request: PrivateSessionRequestRow): Promise<CalendarBookingResult> {
+  console.info("[EST Calendar] Starting private session calendar event sync", {
+    requestId: request.id,
+    playerName: request.player_name,
+    status: request.status,
+    start: request.scheduled_start
+  });
+  console.info("[EST Calendar] Calendar ID:", calendarId);
+  console.info("[EST Calendar] Service account email:", getGoogleServiceAccountEmail() || "not configured");
+
+  if (!request.scheduled_start || !request.scheduled_end) {
+    return {
+      status: "Ready",
+      message: "Private session has not been scheduled yet."
+    };
+  }
+
+  if (!isGoogleCalendarConfigured()) {
+    setLastCalendarEventCreationResult({
+      bookingId: request.id,
+      status: "Google Calendar not configured",
+      calendarId,
+      message: "Private session sync skipped because Google Calendar is not configured."
+    });
+    return {
+      status: "Google Calendar not configured",
+      message: "Google Calendar is not configured."
+    };
+  }
+
+  const token = await getGoogleAccessToken();
+
+  if (!token.accessToken) {
+    setLastCalendarEventCreationResult({
+      bookingId: request.id,
+      status: "Failed",
+      calendarId,
+      message: token.error ?? "Could not connect to Google Calendar."
+    });
+    return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
+  }
+
+  const existingEvent = request.google_calendar_event_id
+    ? ({ id: request.google_calendar_event_id } as GoogleCalendarEvent)
+    : await findExistingPrivateSessionEvent(request.id, token.accessToken);
+  const payload = {
+    summary: `EST CV - Private 1-on-1: ${request.player_name}`,
+    description: privateSessionDescription(request),
+    location: request.location || business.location,
+    start: {
+      dateTime: request.scheduled_start,
+      timeZone: request.timezone || calendarTimeZone
+    },
+    end: {
+      dateTime: request.scheduled_end,
+      timeZone: request.timezone || calendarTimeZone
+    },
+    extendedProperties: {
+      private: {
+        estType: "private_session",
+        estPrivateSessionRequestId: request.id,
+        playerName: request.player_name,
+        parentEmail: request.parent_email,
+        status: request.status
+      }
+    }
+  };
+  const response = await fetch(
+    existingEvent?.id
+      ? `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(existingEvent.id)}`
+      : `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: existingEvent?.id ? "PATCH" : "POST",
+      headers: calendarHeaders(token.accessToken, existingEvent?.etag ? { "If-Match": existingEvent.etag } : undefined),
+      body: JSON.stringify(payload)
+    }
+  );
+
+  if (!response.ok) {
+    const message = await googleErrorMessage(response, "Could not sync private session to Google Calendar");
+    setLastCalendarEventCreationResult({
+      bookingId: request.id,
+      status: "Failed",
+      calendarId,
+      message
+    });
+    console.error("[EST Calendar] Calendar event creation failed", {
+      requestId: request.id,
+      reason: message
+    });
+    return { status: "Failed", message };
+  }
+
+  const event = (await response.json()) as GoogleCalendarEvent;
+  setLastCalendarEventCreationResult({
+    bookingId: request.id,
+    status: "Created",
+    calendarId,
+    eventId: event.id,
+    message: existingEvent?.id ? "Private session calendar event updated." : "Private session calendar event created."
+  });
+  console.info("[EST Calendar] Calendar event created successfully", {
+    requestId: request.id,
+    eventId: event.id,
+    eventUrl: event.htmlLink,
+    updatedExistingEvent: Boolean(existingEvent?.id)
+  });
+
+  return {
+    status: "Created",
+    eventId: event.id,
+    eventUrl: event.htmlLink,
+    alreadyExists: Boolean(existingEvent?.id)
+  };
 }
 
 function eventToTrainingSlot(event: GoogleCalendarEvent): TrainingSlot | null {

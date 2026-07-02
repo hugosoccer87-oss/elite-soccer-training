@@ -283,14 +283,14 @@ function formatWaiverAcceptedAt(booking: BookingRecord) {
 
 function bookingPaymentText(booking: BookingRecord) {
   if (booking.paymentType === "launch_pass_credit") {
-    return "Paid using Launch Pass credit.";
+    return "Paid using Training credit.";
   }
 
   return `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`;
 }
 
 function bookingPaymentStatusText(booking: BookingRecord) {
-  return booking.paymentType === "launch_pass_credit" ? "Paid using Launch Pass credit" : "Payment confirmed";
+  return booking.paymentType === "launch_pass_credit" ? "Paid using Training credit" : "Payment confirmed";
 }
 
 function brandedEmailShell({ title, intro, body }: { title: string; intro: string; body: string }) {
@@ -410,9 +410,9 @@ function adminEmail(booking: BookingRecord): EmailMessage {
     ["Date / Time", `${booking.sessionDate} at ${booking.sessionTime}`],
     ["Location", business.location],
     ["Number of Players", booking.players],
-    ["Payment Type", booking.paymentType === "launch_pass_credit" ? "Launch Pass credit" : "Single Session"],
+    ["Payment Type", booking.paymentType === "launch_pass_credit" ? "Training credit" : "Single Session"],
     ["Payment Amount", bookingPaymentText(booking)],
-    ["Remaining Launch Pass Credits", typeof booking.remainingCreditsAfter === "number" ? String(booking.remainingCreditsAfter) : "Not applicable"],
+    ["Remaining Training Credits", typeof booking.remainingCreditsAfter === "number" ? String(booking.remainingCreditsAfter) : "Not applicable"],
     ["Notes", booking.notes || "None"],
     ["Medical Notes/Injuries", booking.medicalNotes || "None"],
     ["Emergency Contact", `${booking.emergencyName} - ${booking.emergencyPhone}`],
@@ -451,7 +451,7 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
   const bookingUrl = `${(process.env.NEXT_PUBLIC_SITE_URL || "https://www.elitesoccertrainingcv.com").replace(/\/$/, "")}/booking`;
   const selectedSessionCount = pass.selected_session_ids?.length ?? 0;
   const rows: Array<[string, string]> = [
-    ["Launch Pass", option.title],
+    ["Training Package", option.title],
     ["Player", pass.player_name],
     ["Training Group", pass.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
     ["Credits", `${pass.total_credits} session credits`],
@@ -460,13 +460,13 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
     ["Amount Paid", formatCurrencyFromCents(pass.amount_paid || option.amountCents)]
   ];
   const text = [
-    "Elite Soccer Training CV Launch Pass Confirmation",
+    "Elite Soccer Training CV Training Package Confirmation",
     "",
     `Hi ${pass.parent_name},`,
     "",
     selectedSessionCount > 0
-      ? "Your Launch Pass has been purchased. Selected sessions will be confirmed by email."
-      : "Your Launch Pass has been purchased. You can now book sessions using your pass credits.",
+      ? "Your Training Package has been purchased. Selected sessions will be confirmed by email."
+      : "Your Training Package has been purchased. You can now book sessions using your training credits.",
     "",
     ...rows.map(([label, value]) => `${label}: ${value}`),
     "",
@@ -475,8 +475,8 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
     `Questions? Email ${business.email} or call ${business.phone}.`
   ].join("\n");
   const html = brandedEmailShell({
-    title: "Launch Pass Confirmed",
-    intro: "Your Launch Pass has been purchased. You can now book sessions using your pass credits.",
+    title: "Training Package Confirmed",
+    intro: "Your Training Package has been purchased. You can now book sessions using your training credits.",
     body: `
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(pass.parent_name)}, your Elite Soccer Training CV ${escapeHtml(option.title)} is active for ${escapeHtml(pass.player_name)}.</p>
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
@@ -484,7 +484,7 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
       </table>
       <div style="margin-top:22px;border-left:4px solid #1783ff;background:#eef6ff;padding:16px;color:#334155;line-height:1.6">
         <strong style="color:#06152b">Next step</strong><br />
-        <p style="margin:10px 0 0">${selectedSessionCount > 0 ? "Any remaining credits can be used later from the booking page." : "Visit the booking page and choose \"Use Existing Launch Pass Credits\" to reserve sessions with this pass."}</p>
+        <p style="margin:10px 0 0">${selectedSessionCount > 0 ? "Any remaining credits can be used later from the booking page." : "Visit the booking page and choose \"Use Existing Training Credits\" to reserve sessions with this package."}</p>
         <p style="margin:10px 0 0"><a href="${escapeHtml(bookingUrl)}" style="color:#1783ff;font-weight:800">Book sessions</a></p>
       </div>
     `
@@ -494,7 +494,7 @@ function launchPassCustomerEmail(pass: PassPurchaseRow): EmailMessage {
     from: process.env.EMAIL_FROM as string,
     to: pass.parent_email,
     replyTo: business.email,
-    subject: "Elite Soccer Training CV Launch Pass Confirmation",
+    subject: "Elite Soccer Training CV Training Package Confirmation",
     text,
     html
   };
@@ -504,14 +504,14 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
   const option = getLaunchPassOption(pass.pass_type);
   const selectedSessionCount = pass.selected_session_ids?.length ?? 0;
   const rows: Array<[string, string]> = [
-    ["Pass Purchase ID", pass.id],
+    ["Training Package Purchase ID", pass.id],
     ["Parent/Guardian", pass.parent_name],
     ["Parent Email", pass.parent_email],
     ["Parent Phone", pass.parent_phone],
     ["Player", pass.player_name],
     ["Player Age", pass.player_age],
     ["Training Group", pass.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
-    ["Pass Type", option.title],
+    ["Training Package Type", option.title],
     ["Credits", `${pass.total_credits} total / ${pass.remaining_credits} remaining`],
     ["Sessions Selected at Purchase", selectedSessionCount > 0 ? `${selectedSessionCount} selected` : "None"],
     ["Selected Session IDs", selectedSessionCount > 0 ? (pass.selected_session_ids ?? []).join(", ") : "None"],
@@ -524,11 +524,11 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
     from: process.env.EMAIL_FROM as string,
     to: bookingNotificationEmail,
     replyTo: pass.parent_email,
-    subject: `New EST CV Launch Pass: ${pass.player_name} - ${option.title}`,
+    subject: `New EST CV Training Package: ${pass.player_name} - ${option.title}`,
     text: rows.map(([label, value]) => `${label}: ${value}`).join("\n"),
     html: brandedEmailShell({
-      title: "New Launch Pass Purchase",
-      intro: "A parent purchased an Elite Soccer Training CV Launch Pass.",
+      title: "New Training Package Purchase",
+      intro: "A parent purchased an Elite Soccer Training CV Training Package.",
       body: `
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
           ${detailsRows(rows)}
@@ -543,10 +543,11 @@ function scheduleApprovalLinkEmail(input: {
   sessions: TrainingSessionRow[];
   confirmationUrl: string;
 }): EmailMessage {
+  const plan = getLaunchPassOption(input.approval.plan_type);
   const rows: Array<[string, string]> = [
     ["Player", input.approval.player_name],
     ["Training Group", input.approval.training_group === "future-elite" ? "Future Elite" : "Elite Performance"],
-    ["Plan", "6-Session Launch Pass"],
+    ["Plan", plan.title],
     ["Sessions Proposed", String(input.sessions.length)]
   ];
   const sessionLines = input.sessions.map(
@@ -649,7 +650,7 @@ function makeupCreditCustomerEmail(input: {
     "",
     `The EST CV session scheduled for ${sessionDate} at ${sessionTime} has been cancelled.`,
     "",
-    `Because ${input.booking.player_name} used a Launch Pass credit for this session, we have added 1 credit back to their Launch Pass.`,
+    `Because ${input.booking.player_name} used a Training credit for this session, we have added 1 credit back to their Training Package.`,
     "",
     `Updated remaining credits: ${remainingCredits ?? "Updated"}`,
     "",
@@ -662,11 +663,11 @@ function makeupCreditCustomerEmail(input: {
   ].join("\n");
   const html = brandedEmailShell({
     title: "Session Credit Returned",
-    intro: "A training credit has been returned to your Launch Pass.",
+    intro: "A training credit has been returned to your Training Package.",
     body: `
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(input.booking.parent_name)},</p>
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">The EST CV session scheduled for <strong style="color:#06152b">${escapeHtml(sessionDate)}</strong> at <strong style="color:#06152b">${escapeHtml(sessionTime)}</strong> has been cancelled.</p>
-      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Because ${escapeHtml(input.booking.player_name)} used a Launch Pass credit for this session, we have added <strong style="color:#06152b">1 credit</strong> back to their Launch Pass.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Because ${escapeHtml(input.booking.player_name)} used a Training credit for this session, we have added <strong style="color:#06152b">1 credit</strong> back to their Training Package.</p>
       <p style="margin:0 0 18px;color:#334155;line-height:1.7"><strong style="color:#06152b">Updated remaining credits:</strong> ${escapeHtml(String(remainingCredits ?? "Updated"))}</p>
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">This credit can be used toward a future available EST CV training session.</p>
       <p style="margin:24px 0 0;color:#334155;line-height:1.7">Thank you for your understanding.<br />Coach Hugo<br />Elite Soccer Training CV</p>
@@ -693,7 +694,7 @@ function manualCreditCustomerEmail(input: {
     "",
     `Hi ${input.pass.parent_name},`,
     "",
-    `A training credit has been added to ${input.pass.player_name}'s EST CV Launch Pass.`,
+    `A training credit has been added to ${input.pass.player_name}'s EST CV Training Package.`,
     "",
     `Credit added: ${input.adjustment.credit_amount}`,
     `Reason: ${reason}`,
@@ -707,10 +708,10 @@ function manualCreditCustomerEmail(input: {
   ].join("\n");
   const html = brandedEmailShell({
     title: "Training Credit Added",
-    intro: "A training credit has been added to your EST CV Launch Pass.",
+    intro: "A training credit has been added to your EST CV Training Package.",
     body: `
       <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(input.pass.parent_name)},</p>
-      <p style="margin:0 0 18px;color:#334155;line-height:1.7">A training credit has been added to ${escapeHtml(input.pass.player_name)}'s EST CV Launch Pass.</p>
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">A training credit has been added to ${escapeHtml(input.pass.player_name)}'s EST CV Training Package.</p>
       <p style="margin:0 0 8px;color:#334155;line-height:1.7"><strong style="color:#06152b">Credit added:</strong> ${input.adjustment.credit_amount}</p>
       <p style="margin:0 0 8px;color:#334155;line-height:1.7"><strong style="color:#06152b">Reason:</strong> ${escapeHtml(reason)}</p>
       <p style="margin:0 0 18px;color:#334155;line-height:1.7"><strong style="color:#06152b">Updated remaining credits:</strong> ${input.pass.remaining_credits}</p>
@@ -1175,7 +1176,7 @@ export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): 
   logSmtpEnvironment();
 
   if (!isSmtpConfigured()) {
-    const message = "Launch Pass confirmed, but emails were not sent because email configuration is missing.";
+    const message = "Training Package confirmed, but emails were not sent because email configuration is missing.";
 
     console.warn(`[EST Email] ${message}`, {
       passPurchaseId: pass.id
@@ -1253,21 +1254,21 @@ export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): 
       ...baseAttempt,
       customerStatus: customerSent ? "sent" : "failed",
       adminStatus: adminSent ? "sent" : "failed",
-      message: customerSent && adminSent ? undefined : "One or more Launch Pass emails failed to send."
+      message: customerSent && adminSent ? undefined : "One or more Training Package emails failed to send."
     });
 
     return {
       sent: customerSent && adminSent,
       customerSent,
       adminSent,
-      message: customerSent && adminSent ? undefined : "One or more Launch Pass emails failed to send."
+      message: customerSent && adminSent ? undefined : "One or more Training Package emails failed to send."
     };
   } catch (error) {
     setLastEmailAttempt({
       ...baseAttempt,
       customerStatus: "failed",
       adminStatus: "failed",
-      message: error instanceof Error ? error.message : "Launch Pass email failed to send."
+      message: error instanceof Error ? error.message : "Training Package email failed to send."
     });
 
     console.error("[EST Email] Customer email failed:", {
@@ -1285,7 +1286,7 @@ export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): 
       sent: false,
       customerSent: false,
       adminSent: false,
-      message: error instanceof Error ? error.message : "Launch Pass email failed to send."
+      message: error instanceof Error ? error.message : "Training Package email failed to send."
     };
   }
 }

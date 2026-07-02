@@ -80,7 +80,7 @@ function waiverLines(booking: BookingRecord): PdfLine[] {
     ["Parent/Guardian Name", booking.parentName],
     ["Parent Email", booking.email],
     ["Parent Phone", booking.phone],
-    ["Payment Status", booking.paymentType === "launch_pass_credit" ? "Paid using Launch Pass credit" : "Paid"],
+    ["Payment Status", booking.paymentType === "launch_pass_credit" ? "Paid using Training credit" : "Paid"],
     ["Waiver Signed", booking.waiverAccepted ? "Yes" : "Not recorded"],
     ["Typed Signature", booking.guardianSignature || "Not recorded"],
     ["Signed Date/Time", formatWaiverTimestamp(booking.waiverAcceptedAt)],

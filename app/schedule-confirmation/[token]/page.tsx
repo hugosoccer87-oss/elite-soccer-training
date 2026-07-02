@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ScheduleApprovalConfirm } from "@/components/ScheduleApprovalConfirm";
+import { getLaunchPassOption } from "@/lib/pricing";
 import { getSessionFocusLabel } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import { getScheduleApprovalByToken } from "@/lib/supabase-db";
@@ -64,6 +65,7 @@ export default async function ScheduleConfirmationPage({ params }: ScheduleConfi
   }
 
   const disabled = details.approval.status !== "pending";
+  const plan = getLaunchPassOption(details.approval.plan_type);
 
   return (
     <section className="bg-mist py-16 sm:py-20">
@@ -75,13 +77,13 @@ export default async function ScheduleConfirmationPage({ params }: ScheduleConfi
           </h1>
           <p className="mt-4 leading-7 text-slate-600">
             Review the proposed EST CV sessions below for {details.approval.player_name}. Confirming will reserve these
-            sessions using the already-paid 6-Session Launch Pass credits.
+            sessions using the already-paid {plan.title} credits.
           </p>
 
           <div className="mt-6 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-700 sm:grid-cols-2">
             <p><span className="font-black text-navy">Player:</span> {details.approval.player_name}</p>
             <p><span className="font-black text-navy">Training group:</span> {trainingGroupLabel(details.approval.training_group)}</p>
-            <p><span className="font-black text-navy">Plan:</span> 6-Session Launch Pass</p>
+            <p><span className="font-black text-navy">Plan:</span> {plan.title}</p>
             <p><span className="font-black text-navy">Location:</span> {business.location}</p>
           </div>
 

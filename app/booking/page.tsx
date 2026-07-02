@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { BookingForm } from "@/components/BookingForm";
 import { PageHero } from "@/components/PageHero";
+import { PrivateSessionRequestForm } from "@/components/PrivateSessionRequestForm";
 import { business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
@@ -27,8 +28,8 @@ export default function BookingPage() {
             <div className="mt-5 grid gap-3">
               {[
                 ["Single Session", "$55", "Book one available training session online."],
-                ["4-Session Launch Pass", "$200", "4 training credits for EST CV small group training."],
-                ["6-Session Launch Pass", "$285", "6 training credits for EST CV small group training."]
+                ["4-Session Training Package", "$200", "4 training credits for EST CV small group training."],
+                ["6-Session Training Package", "$285", "6 training credits for EST CV small group training."]
               ].map(([title, price, description]) => (
                 <div key={title} className="rounded-lg border border-slate-200 bg-white p-4">
                   <p className="font-black text-navy">
@@ -50,6 +51,22 @@ export default function BookingPage() {
             </a>
           </aside>
           <BookingForm />
+        </div>
+      </section>
+
+      <section className="bg-white py-16 sm:py-20">
+        <div className="section-shell grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div>
+            <p className="text-sm font-black uppercase text-electric">Private Session Request</p>
+            <h2 className="mt-3 text-3xl font-black leading-tight text-navy">
+              Need private 1-on-1 training?
+            </h2>
+            <p className="mt-4 leading-7 text-slate-600">
+              Submit a request with preferred dates, times, and training goals. Coach Hugo will review availability and
+              follow up before scheduling.
+            </p>
+          </div>
+          <PrivateSessionRequestForm />
         </div>
       </section>
     </>

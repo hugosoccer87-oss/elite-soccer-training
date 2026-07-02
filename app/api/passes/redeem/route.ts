@@ -29,11 +29,11 @@ export async function POST(request: Request) {
     !booking.waiverAccepted ||
     !booking.guardianSignature
   ) {
-    return NextResponse.json({ error: "Complete the session, athlete details, and signed waiver before using a pass credit." }, { status: 400 });
+    return NextResponse.json({ error: "Complete the session, athlete details, and signed waiver before using a training credit." }, { status: 400 });
   }
 
   try {
-    console.info("[EST Pass] Redeeming Launch Pass credit", {
+    console.info("[EST Pass] Redeeming Training credit", {
       passPurchaseId: payload.passPurchaseId,
       sessionId: booking.sessionId,
       playerName: booking.playerName
@@ -77,14 +77,14 @@ export async function POST(request: Request) {
       message.toLowerCase().includes("not paid") ||
       message.toLowerCase().includes("expired");
 
-    console.error("[EST Pass] Launch Pass credit redemption failed", {
+    console.error("[EST Pass] Training credit redemption failed", {
       passPurchaseId: payload?.passPurchaseId,
       error: message
     });
 
     return NextResponse.json(
       {
-        error: isMissingCredits ? "No active Launch Pass credits were found for this player." : message
+        error: isMissingCredits ? "No active Training credits were found for this player." : message
       },
       { status: 500 }
     );

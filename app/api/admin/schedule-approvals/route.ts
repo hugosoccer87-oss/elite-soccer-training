@@ -4,7 +4,9 @@ import { verifyAdminSession } from "@/lib/admin-api";
 import { trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import {
   createManualScheduleApprovalLink,
+  createScheduleApprovalForExistingPass,
   getScheduleApprovalByToken,
+  getPassPurchaseById,
   getSupabaseAvailability,
   type ScheduleApprovalPaymentMethod
 } from "@/lib/supabase-db";
@@ -45,11 +47,20 @@ export async function POST(request: Request) {
     paymentMethod?: ScheduleApprovalPaymentMethod;
     internalNote?: string;
     proposedSessionIds?: unknown;
+    passPurchaseId?: string;
+    overrideSessionCount?: number;
   } | null;
   const proposedSessionIds = Array.isArray(payload?.proposedSessionIds)
     ? Array.from(new Set(payload.proposedSessionIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))))
     : [];
   const amountPaid = Math.max(0, Math.round(Number(payload?.amountPaid) * 100 || 0));
+
+  const existingPassId = payload?.passPurchaseId?.trim() || "";
+  const existingPass = existingPassId ? await getPassPurchaseById(existingPassId) : null;
+  const requestedOverrideCount = Math.max(0, Math.floor(Number(payload?.overrideSessionCount) || 0));
+  const requiredSessionCount = existingPass
+    ? requestedOverrideCount || Number(existingPass.remaining_credits) || 0
+    : 6;
 
   if (
     !payload?.playerName?.trim() ||
@@ -60,12 +71,26 @@ export async function POST(request: Request) {
     !payload.parentPhone?.trim() ||
     !payload.trainingGroup ||
     !isTrainingGroupId(payload.trainingGroup) ||
-    !payload.paymentMethod ||
-    !paymentMethods.has(payload.paymentMethod) ||
-    proposedSessionIds.length !== 6
+    (!existingPass && (!payload.paymentMethod || !paymentMethods.has(payload.paymentMethod))) ||
+    requiredSessionCount < 1 ||
+    proposedSessionIds.length !== requiredSessionCount
   ) {
     return NextResponse.json(
-      { error: "Complete the customer details and choose exactly 6 proposed sessions." },
+      { error: `Complete the customer details and choose exactly ${requiredSessionCount || 6} proposed sessions.` },
+      { status: 400 }
+    );
+  }
+
+  if (existingPass && (existingPass.status !== "paid" || existingPass.training_group !== payload.trainingGroup)) {
+    return NextResponse.json(
+      { error: "Selected Training Package is not active for this training group." },
+      { status: 400 }
+    );
+  }
+
+  if (existingPass && requiredSessionCount > existingPass.remaining_credits) {
+    return NextResponse.json(
+      { error: "Selected Training Package does not have enough remaining credits for this schedule." },
       { status: 400 }
     );
   }
@@ -87,19 +112,26 @@ export async function POST(request: Request) {
     }
 
     const token = randomBytes(24).toString("hex");
-    const created = await createManualScheduleApprovalLink({
-      token,
-      parentName: payload.parentName,
-      parentEmail: payload.parentEmail,
-      parentPhone: payload.parentPhone,
-      playerName: payload.playerName,
-      playerAge: payload.playerAge,
-      trainingGroup: payload.trainingGroup,
-      amountPaid,
-      paymentMethod: payload.paymentMethod,
-      internalNote: payload.internalNote,
-      proposedSessionIds
-    });
+    const created = existingPass
+      ? await createScheduleApprovalForExistingPass({
+          token,
+          passPurchaseId: existingPass.id,
+          internalNote: payload.internalNote,
+          proposedSessionIds
+        })
+      : await createManualScheduleApprovalLink({
+          token,
+          parentName: payload.parentName,
+          parentEmail: payload.parentEmail,
+          parentPhone: payload.parentPhone,
+          playerName: payload.playerName,
+          playerAge: payload.playerAge,
+          trainingGroup: payload.trainingGroup,
+          amountPaid,
+          paymentMethod: payload.paymentMethod as ScheduleApprovalPaymentMethod,
+          internalNote: payload.internalNote,
+          proposedSessionIds
+        });
     const details = await getScheduleApprovalByToken(token);
     const confirmationUrl = `${siteUrl()}/schedule-confirmation/${token}`;
     const emailResult = details

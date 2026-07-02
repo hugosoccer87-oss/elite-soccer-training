@@ -178,14 +178,14 @@ async function createLaunchPassCheckout(
 
     if (!response.ok) {
       return {
-        error: result.error ?? "Launch Pass payment could not be started."
+        error: result.error ?? "Training Package payment could not be started."
       };
     }
 
     return result;
   } catch {
     return {
-      error: "Launch Pass payment could not be reached. Please try again."
+      error: "Training Package payment could not be reached. Please try again."
     };
   }
 }
@@ -204,7 +204,7 @@ async function lookupLaunchPassCredits(fields: PassLookupFields) {
     if (!response.ok) {
       return {
         passes: [],
-        error: result.error ?? "Launch Pass credits could not be checked."
+        error: result.error ?? "Training credits could not be checked."
       };
     }
 
@@ -215,7 +215,7 @@ async function lookupLaunchPassCredits(fields: PassLookupFields) {
   } catch {
     return {
       passes: [],
-      error: "Launch Pass credits could not be reached. Please try again."
+      error: "Training credits could not be reached. Please try again."
     };
   }
 }
@@ -241,14 +241,14 @@ async function redeemLaunchPassCredit(passPurchaseId: string, booking: BookingRe
 
     if (!response.ok) {
       return {
-        error: result.error ?? "Launch Pass credit could not be used."
+        error: result.error ?? "Training credit could not be used."
       };
     }
 
     return result;
   } catch {
     return {
-      error: "Launch Pass credit could not be reached. Please try again."
+      error: "Training credit could not be reached. Please try again."
     };
   }
 }
@@ -570,7 +570,7 @@ export function BookingForm() {
   const playerOptions = usesExistingPass
     ? [1]
     : Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
-  const paymentTotal = usesExistingPass ? "Launch Pass credit" : formatCurrencyFromCents(getSessionTotalCents(fields.players));
+  const paymentTotal = usesExistingPass ? "Training credit" : formatCurrencyFromCents(getSessionTotalCents(fields.players));
   const paidSessionSummaryLabel = "Elite Soccer Training CV - Single Session";
 
   function clearFieldError(field: BookingFieldErrorKey) {
@@ -700,7 +700,7 @@ export function BookingForm() {
       }
 
       if (selectedPassCreditLimit && current.length >= selectedPassCreditLimit) {
-        setError(`Choose up to ${selectedPassCreditLimit} sessions for this Launch Pass.`);
+        setError(`Choose up to ${selectedPassCreditLimit} sessions for this Training Package.`);
         return current;
       }
 
@@ -724,7 +724,7 @@ export function BookingForm() {
       !passPurchaseFields.playerName.trim() ||
       !passPurchaseFields.playerAge.trim()
     ) {
-      setError("Complete all Launch Pass purchase fields before continuing to payment.");
+      setError("Complete all Training Package purchase fields before continuing to payment.");
       return;
     }
 
@@ -735,7 +735,7 @@ export function BookingForm() {
       }
 
       if (selectedPassSessionIds.length > selectedPassCreditLimit) {
-        setError(`Choose no more than ${selectedPassCreditLimit} sessions for this Launch Pass.`);
+        setError(`Choose no more than ${selectedPassCreditLimit} sessions for this Training Package.`);
         return;
       }
 
@@ -776,7 +776,7 @@ export function BookingForm() {
 
     if (!checkout.checkoutUrl) {
       setIsSubmitting(false);
-      setError(checkout.error ?? "Launch Pass payment could not be started. Please try again.");
+      setError(checkout.error ?? "Training Package payment could not be started. Please try again.");
       return;
     }
 
@@ -785,7 +785,7 @@ export function BookingForm() {
 
   async function checkLaunchPassCredits() {
     if (!passLookupFields.parentEmail.trim() || !passLookupFields.playerName.trim()) {
-      setError("Enter the parent email and player name tied to the Launch Pass.");
+      setError("Enter the parent email and player name tied to the Training Package.");
       return;
     }
 
@@ -807,7 +807,7 @@ export function BookingForm() {
 
     if (result.passes.length === 0) {
       setSelectedPassId("");
-      setPassNotice("No active Launch Pass credits were found for this player.");
+      setPassNotice("No active Training credits were found for this player.");
       return;
     }
 
@@ -823,7 +823,7 @@ export function BookingForm() {
       phone: firstPass.parentPhone,
       players: "1"
     }));
-    setPassNotice(`${firstPass.remainingCredits} Launch Pass credit(s) available for ${firstPass.playerName}.`);
+    setPassNotice(`${firstPass.remainingCredits} Training credit(s) available for ${firstPass.playerName}.`);
   }
 
   function selectLaunchPass(pass: LaunchPassSummary) {
@@ -841,7 +841,7 @@ export function BookingForm() {
       phone: pass.parentPhone,
       players: "1"
     }));
-    setPassNotice(`${pass.remainingCredits} Launch Pass credit(s) available for ${pass.playerName}.`);
+    setPassNotice(`${pass.remainingCredits} Training credit(s) available for ${pass.playerName}.`);
   }
 
   function requireSchedule() {
@@ -1035,7 +1035,7 @@ export function BookingForm() {
   async function confirmWithLaunchPassCredit() {
     if (!selectedPass || !selectedSlot) {
       setStep("session");
-      setError("Choose an active Launch Pass and an available session before confirming.");
+      setError("Choose an active Training Package and an available session before confirming.");
       return;
     }
 
@@ -1047,7 +1047,7 @@ export function BookingForm() {
       setAvailabilityStatus(latestAvailability?.status ?? "Failed");
       setAvailabilityError(latestAvailability?.message ?? "");
       setStep("session");
-      setError("That session is no longer available for this Launch Pass. Please choose another open time.");
+      setError("That session is no longer available for this Training Package. Please choose another open time.");
       return;
     }
 
@@ -1060,7 +1060,7 @@ export function BookingForm() {
 
     if (!result.bookingId) {
       setIsSubmitting(false);
-      setError(result.error ?? "Launch Pass credit could not be used. Please try again.");
+      setError(result.error ?? "Training credit could not be used. Please try again.");
       return;
     }
 
@@ -1069,7 +1069,7 @@ export function BookingForm() {
       bookingId: result.bookingId,
       remainingCredits: result.remainingCredits
     });
-    setPassNotice("Your session is confirmed using a Launch Pass credit.");
+    setPassNotice("Your session is confirmed using a Training credit.");
     void readAvailableSessions().then((next) => {
       if (next) {
         setApiSessions(next.sessions);
@@ -1124,7 +1124,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Choose a single session, purchase a Launch Pass, or book with existing Launch Pass credits.
+                Choose a single session, purchase a Training Package, or book with existing Training credits.
               </p>
             </div>
 
@@ -1137,17 +1137,17 @@ export function BookingForm() {
                 ["single_session", "Single Session", "$55", "Book online"],
                 [
                   "four_session_launch_pass",
-                  "4-Session Launch Pass",
+                  "4-Session Training Package",
                   "$200",
                   "Buy credits"
                 ],
                 [
                   "six_session_launch_pass",
-                  "6-Session Launch Pass",
+                  "6-Session Training Package",
                   "$285",
                   "Buy credits"
                 ],
-                ["use_existing_pass", "Use Existing Credits", "Launch Pass", "Reserve with credits"]
+                ["use_existing_pass", "Use Existing Credits", "Training Package", "Reserve with credits"]
               ].map(([value, title, price, description]) => {
                 const isSelected = bookingOption === value;
 
@@ -1218,14 +1218,14 @@ export function BookingForm() {
                 </div>
                 <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
                   <div>
-                    <p className="text-xs font-black uppercase text-electric">How would you like to use your pass?</p>
+                    <p className="text-xs font-black uppercase text-electric">How would you like to use your package?</p>
                     <p className="mt-2 text-sm leading-6 text-slate-600">
-                      Choose sessions now, or buy the pass first and come back later to use the credits.
+                      Choose sessions now, or buy the package first and come back later to use the credits.
                     </p>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {[
-                      ["choose_now", "Choose session dates now", "Reserve up to your pass credits after payment."],
+                      ["choose_now", "Choose session dates now", "Reserve up to your training credits after payment."],
                       ["choose_later", "Choose session dates later", "Keep all credits available for future booking."]
                     ].map(([value, title, description]) => {
                       const isSelected = launchPassUseMode === value;
@@ -1395,7 +1395,7 @@ export function BookingForm() {
                           type="checkbox"
                           onChange={(event) => setField("waiverAgreement", event.target.checked)}
                         />
-                        <span>I have read and agree to the Elite Soccer Training CV waiver for the selected Launch Pass sessions.</span>
+                        <span>I have read and agree to the Elite Soccer Training CV waiver for the selected Training Package sessions.</span>
                       </label>
                       <label className="mt-4 grid gap-2 text-xs font-bold uppercase tracking-wide text-navy">
                         Parent/Guardian Digital Signature
@@ -1423,17 +1423,17 @@ export function BookingForm() {
                   {isSubmitting
                     ? "Starting Payment..."
                     : launchPassUseMode === "choose_now"
-                      ? `Buy Pass & Book ${selectedPassSessionIds.length || ""} Session${selectedPassSessionIds.length === 1 ? "" : "s"}`
+                      ? `Buy Package & Book ${selectedPassSessionIds.length || ""} Session${selectedPassSessionIds.length === 1 ? "" : "s"}`
                       : `Buy ${getLaunchPassOption(bookingOption as LaunchPassType).title}`}
                 </button>
               </div>
             ) : usesExistingPass ? (
               <div className="grid gap-5 rounded-lg border border-slate-200 bg-mist p-5">
                 <div>
-                  <p className="text-xs font-black uppercase text-electric">Launch Pass Credits</p>
+                  <p className="text-xs font-black uppercase text-electric">Training Credits</p>
                   <h4 className="mt-2 text-2xl font-black text-navy">Find your active credits</h4>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Enter the parent email and player name used when purchasing the Launch Pass.
+                    Enter the parent email and player name used when purchasing the Training Package.
                   </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
@@ -1855,7 +1855,7 @@ export function BookingForm() {
             </label>
             {usesExistingPass ? (
               <div className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600">
-                Launch Pass booking uses 1 credit for {fields.playerName || "this player"}.
+                Training Package booking uses 1 credit for {fields.playerName || "this player"}.
               </div>
             ) : (
               <label className={fieldLabelClass("players")}>
@@ -2084,24 +2084,24 @@ export function BookingForm() {
               <ShieldIcon className="h-9 w-9 text-electric" />
               <p className="mt-4 text-sm font-black uppercase text-electric">Step 3</p>
               <h3 className="mt-2 text-2xl font-black text-navy">
-                {usesExistingPass ? "Parent waiver + Launch Pass credit" : "Parent waiver + secure payment"}
+                {usesExistingPass ? "Parent waiver + Training credit" : "Parent waiver + secure payment"}
               </h3>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 {usesExistingPass
-                  ? "Your paid Launch Pass credit will reserve this session after the waiver."
+                  ? "Your paid Training credit will reserve this session after the waiver."
                   : "Secure online payment is completed after the waiver."}
               </p>
               {selectedSlot ? (
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
                   <p className="font-black text-navy">{selectedSlot.dateLabel} at {sessionTimeRange(selectedSlot)}</p>
-                  <p>{usesExistingPass ? "1 player using Launch Pass credit" : `${fields.players} player(s) attending`}</p>
+                  <p>{usesExistingPass ? "1 player using Training credit" : `${fields.players} player(s) attending`}</p>
                   <p>{bookingGroup?.name ?? "Selected training group"}</p>
                   <p className="mt-2 rounded-md border border-electric/20 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-electric">
                     {sessionFocusTitle(selectedSlot)}
                   </p>
                   <p className="mt-2 text-xs font-bold uppercase text-slate-500">{groupSizeMessage}</p>
                   <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
-                    {usesExistingPass ? "Payment: Launch Pass credit" : `${fields.players} x ${sessionPriceLabel} = ${paymentTotal}`}
+                    {usesExistingPass ? "Payment: Training credit" : `${fields.players} x ${sessionPriceLabel} = ${paymentTotal}`}
                   </p>
                 </div>
               ) : null}
@@ -2111,13 +2111,13 @@ export function BookingForm() {
               {creditBookingSuccess ? (
                 <div className="rounded-md border border-field/20 bg-field/10 p-5">
                   <p className="text-sm font-black uppercase text-field">Session Confirmed</p>
-                  <h3 className="mt-2 text-2xl font-black text-navy">Booked with Launch Pass credit.</h3>
+                  <h3 className="mt-2 text-2xl font-black text-navy">Booked with Training credit.</h3>
                   <p className="mt-3 text-sm leading-6 text-slate-700">
                     Confirmation details were sent by email. Booking ID: {creditBookingSuccess.bookingId}
                   </p>
                   {typeof creditBookingSuccess.remainingCredits === "number" ? (
                     <p className="mt-2 text-sm font-black text-navy">
-                      Remaining Launch Pass credits: {creditBookingSuccess.remainingCredits}
+                      Remaining Training credits: {creditBookingSuccess.remainingCredits}
                     </p>
                   ) : null}
                 </div>
@@ -2129,7 +2129,7 @@ export function BookingForm() {
                 <div className="mt-4 grid gap-3 text-sm text-slate-700">
                   <div className="flex items-center justify-between gap-4">
                     <span>
-                      {usesExistingPass ? "Elite Soccer Training CV - Launch Pass Credit" : paidSessionSummaryLabel}
+                      {usesExistingPass ? "Elite Soccer Training CV - Training Package Credit" : paidSessionSummaryLabel}
                     </span>
                     <span className="font-black text-navy">{usesExistingPass ? "1 credit" : sessionPriceLabel}</span>
                   </div>
@@ -2145,7 +2145,7 @@ export function BookingForm() {
               </div>
               {usesExistingPass ? (
                 <p className="text-sm leading-6 text-slate-600">
-                  No card payment is collected for this booking because one Launch Pass credit will be used.
+                  No card payment is collected for this booking because one Training credit will be used.
                 </p>
               ) : (
                 <>

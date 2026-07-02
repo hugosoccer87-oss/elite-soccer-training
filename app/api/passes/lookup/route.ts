@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   } | null;
 
   if (!payload?.parentEmail?.trim() || !payload.playerName?.trim()) {
-    return NextResponse.json({ error: "Enter the parent email and player name tied to the Launch Pass." }, { status: 400 });
+    return NextResponse.json({ error: "Enter the parent email and player name tied to the Training Package." }, { status: 400 });
   }
 
   try {
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Launch Pass credits could not be checked."
+        error: error instanceof Error ? error.message : "Training credits could not be checked."
       },
       { status: 500 }
     );
