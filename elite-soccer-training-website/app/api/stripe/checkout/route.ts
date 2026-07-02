@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { type BookingRecord } from "@/lib/booking-data";
 import { createStripeCheckoutSession, getStripeEnvironmentDiagnostics } from "@/lib/stripe";
-import { attachStripeCheckoutSession, createPendingBooking } from "@/lib/supabase-db";
+import { attachStripeCheckoutSession, createPendingBooking, saveEmailSubscriberOptIn } from "@/lib/supabase-db";
 
 function getRequestIpAddress(request: Request) {
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
@@ -52,6 +52,17 @@ export async function POST(request: Request) {
 
     const session = await createStripeCheckoutSession(booking);
     await attachStripeCheckoutSession(booking.id, session.id);
+
+    if (rawBooking.marketingOptIn) {
+      await saveEmailSubscriberOptIn({
+        parentName: booking.parentName,
+        email: booking.email,
+        phone: booking.phone,
+        playerName: booking.playerName,
+        playerAge: booking.playerAge,
+        source: "booking_checkout"
+      });
+    }
 
     console.info("[EST Stripe] Checkout session created", {
       bookingId: booking.id,

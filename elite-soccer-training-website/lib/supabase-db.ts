@@ -13,7 +13,7 @@ import {
   type DirectPaymentOption,
   type LaunchPassType
 } from "@/lib/pricing";
-import { getTrainingFocusDisplay } from "@/lib/session-focus";
+import { getTrainingFocusDisplay, normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { PublicAvailableSession, PublicAvailabilityDebugResponse, PublicAvailabilityResponse } from "@/lib/public-availability";
 
@@ -58,9 +58,26 @@ export type BookingRow = {
   payment_type?: "single_session" | "launch_pass_credit";
   pass_purchase_id?: string | null;
   credit_redemption_id?: string | null;
+  manual_source?: boolean | null;
+  admin_payment_status?: ManualBookingPaymentStatus | null;
+  admin_payment_method?: ManualBookingPaymentMethod | null;
+  waiver_status?: ManualBookingWaiverStatus | null;
+  internal_note?: string | null;
+  admin_override_capacity?: boolean | null;
   created_at: string;
   updated_at: string;
 };
+
+export type ManualBookingPaymentStatus = "paid" | "pending_payment" | "comped" | "training_credit_used";
+export type ManualBookingPaymentMethod =
+  | "Zelle"
+  | "Cash"
+  | "Venmo"
+  | "Card"
+  | "Training Package credit"
+  | "Comped"
+  | "Other";
+export type ManualBookingWaiverStatus = "signed" | "missing";
 
 export type PassPurchaseRow = {
   id: string;
@@ -106,8 +123,58 @@ export type CreditRedemptionRow = {
   created_at: string;
 };
 
+export type CreditAdjustmentRow = {
+  id: string;
+  pass_purchase_id: string;
+  original_booking_id?: string | null;
+  original_session_id?: string | null;
+  player_name: string;
+  parent_email: string;
+  credit_amount: number;
+  reason: string;
+  note?: string | null;
+  adjustment_type?: "automatic_cancellation_credit" | "manual_credit" | string | null;
+  created_by?: string | null;
+  email_status: "not_sent" | "sent" | "failed";
+  email_error?: string | null;
+  email_sent?: boolean | null;
+  email_sent_at?: string | null;
+  created_at: string;
+};
+
 export type AdminPassPurchase = PassPurchaseRow & {
   redemptions: Array<CreditRedemptionRow & { booking?: BookingRow | null }>;
+  adjustments: CreditAdjustmentRow[];
+};
+
+export type ScheduleApprovalPaymentMethod = "cash" | "zelle" | "venmo" | "stripe_manual" | "other";
+
+export type ScheduleApprovalRow = {
+  id: string;
+  token: string;
+  pass_purchase_id: string;
+  parent_name: string;
+  parent_email: string;
+  parent_phone: string;
+  player_name: string;
+  player_age: string;
+  training_group: TrainingGroupId;
+  plan_type: LaunchPassType;
+  amount_paid: number;
+  payment_method: ScheduleApprovalPaymentMethod;
+  internal_note?: string | null;
+  proposed_session_ids: string[];
+  status: "pending" | "confirmed" | "cancelled";
+  booking_ids: string[];
+  confirmed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduleApprovalDetails = {
+  approval: ScheduleApprovalRow;
+  pass: PassPurchaseRow | null;
+  sessions: TrainingSessionRow[];
 };
 
 export type WaiverRow = {
@@ -139,6 +206,31 @@ export type EmailLogRow = {
   status: "sent" | "failed";
   error_message?: string | null;
   created_at: string;
+};
+
+export type EmailSubscriberRow = {
+  id: string;
+  parent_name?: string | null;
+  email: string;
+  phone?: string | null;
+  player_name?: string | null;
+  player_age?: string | null;
+  source?: string | null;
+  opted_in: boolean;
+  opted_in_at?: string | null;
+  unsubscribed: boolean;
+  unsubscribed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type EmailSubscriberInput = {
+  parentName?: string;
+  email: string;
+  phone?: string;
+  playerName?: string;
+  playerAge?: string;
+  source?: string;
 };
 
 export type DirectPaymentStatus = "pending_card_payment" | "zelle_pending" | "paid" | "cancelled";
@@ -180,12 +272,48 @@ export type DirectPaymentPaidRow = DirectPaymentRow & {
   wasAlreadyPaid: boolean;
 };
 
+export type PrivateSessionRequestStatus = "new" | "contacted" | "scheduled" | "completed" | "cancelled";
+
+export type PrivateSessionRequestRow = {
+  id: string;
+  player_name: string;
+  player_age: string;
+  parent_name: string;
+  parent_email: string;
+  parent_phone: string;
+  preferred_times: string;
+  focus_areas: string[];
+  notes?: string | null;
+  status: PrivateSessionRequestStatus;
+  scheduled_start?: string | null;
+  scheduled_end?: string | null;
+  timezone: string;
+  location: string;
+  google_calendar_event_id?: string | null;
+  calendar_status?: string | null;
+  calendar_message?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PrivateSessionRequestInput = {
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  preferredTimes: string;
+  focusAreas: string[];
+  notes?: string;
+};
+
 export type AdminBookingRecord = BookingRow & {
   waiver?: WaiverRow | null;
   calendarEvent?: CalendarEventRow | null;
   emailLogs: EmailLogRow[];
   passPurchase?: PassPurchaseRow | null;
   creditRedemption?: CreditRedemptionRow | null;
+  creditAdjustment?: CreditAdjustmentRow | null;
 };
 
 export type AdminTrainingSession = TrainingSessionRow & {
@@ -193,6 +321,39 @@ export type AdminTrainingSession = TrainingSessionRow & {
   remainingSpots: number;
   paidBookings: AdminBookingRecord[];
 };
+
+export function isAdminBookingConfirmed(
+  booking: Pick<
+    BookingRow,
+    | "status"
+    | "amount_paid"
+    | "payment_type"
+    | "stripe_payment_intent_id"
+    | "pass_purchase_id"
+    | "credit_redemption_id"
+    | "manual_source"
+    | "admin_payment_status"
+  >
+) {
+  if (booking.status !== "paid") {
+    return false;
+  }
+
+  if (
+    booking.manual_source &&
+    (booking.admin_payment_status === "paid" ||
+      booking.admin_payment_status === "comped" ||
+      booking.admin_payment_status === "training_credit_used")
+  ) {
+    return true;
+  }
+
+  if (booking.payment_type === "launch_pass_credit" || booking.pass_purchase_id || booking.credit_redemption_id) {
+    return true;
+  }
+
+  return Boolean(booking.stripe_payment_intent_id) || Number(booking.amount_paid) > 0;
+}
 
 export type DirectPaymentInput = {
   playerCount: number;
@@ -217,6 +378,55 @@ export type DirectPaymentInput = {
   emergencyPhone: string;
   medicalNotes: string;
   ipAddress?: string;
+};
+
+export type ContactInfoInput = {
+  parentName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
+  playerName?: string;
+  playerFirstName?: string;
+  playerLastName?: string;
+  playerAge?: string;
+  secondPlayerFirstName?: string;
+  secondPlayerLastName?: string;
+  secondPlayerAge?: string;
+};
+
+export type ManualBookingInput = {
+  sessionId: string;
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  medicalNotes?: string;
+  paymentStatus: ManualBookingPaymentStatus;
+  paymentMethod: ManualBookingPaymentMethod;
+  amountPaid: number;
+  waiverStatus: ManualBookingWaiverStatus;
+  internalNote?: string;
+  passPurchaseId?: string;
+  overrideCapacity?: boolean;
+};
+
+export type ManualBookingUpdateInput = {
+  playerName?: string;
+  playerAge?: string;
+  parentName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
+  paymentStatus?: ManualBookingPaymentStatus;
+  paymentMethod?: ManualBookingPaymentMethod;
+  amountPaid?: number;
+  waiverStatus?: ManualBookingWaiverStatus;
+  notes?: string;
+  medicalNotes?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  internalNote?: string;
 };
 
 export type SupabaseDiagnostics = {
@@ -396,7 +606,7 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
 }
 
 function publicSessionProgramName(publicSession: PublicAvailableSession) {
-  return publicSession.trainingFocus ? `${publicSession.trainingFocus} - ${publicSession.trainingGroup}` : publicSession.trainingGroup;
+  return `${publicSession.trainingFocus || "General Training"} - ${publicSession.trainingGroup}`;
 }
 
 export async function listTrainingSessions() {
@@ -404,7 +614,9 @@ export async function listTrainingSessions() {
 }
 
 async function listPaidBookings() {
-  return supabaseRequest<BookingRow[]>("bookings?select=*&status=eq.paid");
+  const bookings = await supabaseRequest<BookingRow[]>("bookings?select=*&status=eq.paid");
+
+  return bookings.filter(isAdminBookingConfirmed);
 }
 
 function toBookingRecordFromRows(input: {
@@ -560,6 +772,7 @@ export async function createTrainingSession(input: {
   trainingGroup: TrainingGroupId;
   date: string;
   time: string;
+  endTime?: string;
   trainingFocus?: string;
   capacity?: number;
   location?: string;
@@ -567,7 +780,8 @@ export async function createTrainingSession(input: {
 }) {
   const group = getTrainingGroup(input.trainingGroup);
   const start = zonedDateTimeToUtc(input.date, input.time, defaultTimeZone);
-  const end = new Date(start.getTime() + 60 * 60_000);
+  const explicitEnd = input.endTime ? zonedDateTimeToUtc(input.date, input.endTime, defaultTimeZone) : null;
+  const end = explicitEnd && explicitEnd.getTime() > start.getTime() ? explicitEnd : new Date(start.getTime() + 60 * 60_000);
   const payload: Partial<TrainingSessionRow> & {
     training_group: TrainingGroupId;
     start_datetime: string;
@@ -583,8 +797,10 @@ export async function createTrainingSession(input: {
     status: input.status || "open"
   };
 
-  if (input.trainingFocus) {
-    payload.training_focus = input.trainingFocus;
+  const normalizedTrainingFocus = normalizeTrainingFocusForStorage(input.trainingFocus);
+
+  if (normalizedTrainingFocus) {
+    payload.training_focus = normalizedTrainingFocus;
   }
 
   return supabaseRequest<TrainingSessionRow[]>("training_sessions", {
@@ -613,18 +829,24 @@ export async function deleteTrainingSession(id: string) {
 }
 
 export async function listAdminBookings() {
-  const [bookings, waivers, calendarEvents, emailLogs, passPurchases, redemptions] = await Promise.all([
+  const [bookings, waivers, calendarEvents, emailLogs, passPurchases, redemptions, adjustments] = await Promise.all([
     supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc"),
     supabaseRequest<WaiverRow[]>("waivers?select=*"),
     supabaseRequest<CalendarEventRow[]>("calendar_events?select=*"),
     supabaseRequest<EmailLogRow[]>("email_logs?select=*&order=created_at.desc"),
     supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
-    supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => [])
+    supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<CreditAdjustmentRow[]>("credit_adjustments?select=*&order=created_at.desc").catch(() => [])
   ]);
   const waiverMap = new Map(waivers.map((waiver) => [waiver.booking_id, waiver]));
   const calendarMap = new Map(calendarEvents.map((event) => [event.booking_id, event]));
   const passMap = new Map(passPurchases.map((pass) => [pass.id, pass]));
   const redemptionMap = new Map(redemptions.map((redemption) => [redemption.booking_id, redemption]));
+  const adjustmentMap = new Map(
+    adjustments
+      .filter((adjustment) => Boolean(adjustment.original_booking_id))
+      .map((adjustment) => [adjustment.original_booking_id as string, adjustment])
+  );
 
   return bookings.map((booking) => ({
     ...booking,
@@ -632,14 +854,59 @@ export async function listAdminBookings() {
     calendarEvent: calendarMap.get(booking.id) ?? null,
     emailLogs: emailLogs.filter((log) => log.booking_id === booking.id),
     passPurchase: booking.pass_purchase_id ? passMap.get(booking.pass_purchase_id) ?? null : null,
-    creditRedemption: redemptionMap.get(booking.id) ?? null
+    creditRedemption: redemptionMap.get(booking.id) ?? null,
+    creditAdjustment: adjustmentMap.get(booking.id) ?? null
   }));
 }
 
+export async function getAdminBookingById(bookingId: string) {
+  const bookings = await listAdminBookings();
+
+  return bookings.find((booking) => booking.id === bookingId) ?? null;
+}
+
+export async function cancelIncompleteBooking(bookingId: string) {
+  const booking = await getAdminBookingById(bookingId);
+
+  if (!booking) {
+    throw new Error("Booking was not found.");
+  }
+
+  if (isAdminBookingConfirmed(booking)) {
+    throw new Error("Confirmed bookings cannot be cancelled from the incomplete booking action.");
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: "cancelled"
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function deleteIncompleteBooking(bookingId: string) {
+  const booking = await getAdminBookingById(bookingId);
+
+  if (!booking) {
+    throw new Error("Booking was not found.");
+  }
+
+  if (isAdminBookingConfirmed(booking)) {
+    throw new Error("Confirmed bookings cannot be deleted from the incomplete booking action.");
+  }
+
+  await supabaseRequest<null>(`bookings?id=eq.${encodeFilter(bookingId)}`, {
+    method: "DELETE"
+  });
+}
+
 export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
-  const [passes, redemptions, bookings] = await Promise.all([
+  const [passes, redemptions, adjustments, bookings] = await Promise.all([
     supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => []),
+    supabaseRequest<CreditAdjustmentRow[]>("credit_adjustments?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc").catch(() => [])
   ]);
   const bookingMap = new Map(bookings.map((booking) => [booking.id, booking]));
@@ -651,12 +918,331 @@ export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
       .map((redemption) => ({
         ...redemption,
         booking: bookingMap.get(redemption.booking_id) ?? null
-      }))
+      })),
+    adjustments: adjustments.filter((adjustment) => adjustment.pass_purchase_id === pass.id)
   }));
+}
+
+export async function createManualScheduleApprovalLink(input: {
+  token: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  playerName: string;
+  playerAge: string;
+  trainingGroup: TrainingGroupId;
+  amountPaid: number;
+  paymentMethod: ScheduleApprovalPaymentMethod;
+  internalNote?: string;
+  proposedSessionIds: string[];
+}) {
+  const option = getLaunchPassOption("six_session_launch_pass");
+  const insertedPasses = await supabaseRequest<PassPurchaseRow[]>("pass_purchases", {
+    method: "POST",
+    body: JSON.stringify({
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: input.trainingGroup,
+      pass_type: "six_session_launch_pass",
+      total_credits: option.credits,
+      remaining_credits: option.credits,
+      amount_paid: input.amountPaid,
+      status: "paid",
+      selected_session_ids: input.proposedSessionIds,
+      booking_details: {
+        source: "manual_schedule_approval",
+        paymentMethod: input.paymentMethod,
+        internalNote: input.internalNote ?? ""
+      },
+      expires_at: launchPassExpirationDate
+    })
+  });
+  const pass = insertedPasses[0];
+
+  if (!pass) {
+    throw new Error("Manual Training Package could not be created.");
+  }
+
+  const insertedApprovals = await supabaseRequest<ScheduleApprovalRow[]>("schedule_approval_links", {
+    method: "POST",
+    body: JSON.stringify({
+      token: input.token,
+      pass_purchase_id: pass.id,
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: input.trainingGroup,
+      plan_type: "six_session_launch_pass",
+      amount_paid: input.amountPaid,
+      payment_method: input.paymentMethod,
+      internal_note: input.internalNote?.trim() || null,
+      proposed_session_ids: input.proposedSessionIds,
+      status: "pending"
+    })
+  });
+  const approval = insertedApprovals[0];
+
+  if (!approval) {
+    throw new Error("Schedule approval link could not be created.");
+  }
+
+  return {
+    pass,
+    approval
+  };
+}
+
+export async function createScheduleApprovalForExistingPass(input: {
+  token: string;
+  passPurchaseId: string;
+  internalNote?: string;
+  proposedSessionIds: string[];
+}) {
+  const pass = await getPassPurchaseById(input.passPurchaseId);
+
+  if (!pass) {
+    throw new Error("Training Package could not be found.");
+  }
+
+  if (pass.status !== "paid") {
+    throw new Error("Training Package is not marked paid.");
+  }
+
+  if (pass.remaining_credits < input.proposedSessionIds.length) {
+    throw new Error("Training Package does not have enough remaining credits for this schedule.");
+  }
+
+  const insertedApprovals = await supabaseRequest<ScheduleApprovalRow[]>("schedule_approval_links", {
+    method: "POST",
+    body: JSON.stringify({
+      token: input.token,
+      pass_purchase_id: pass.id,
+      parent_name: pass.parent_name,
+      parent_email: pass.parent_email,
+      parent_phone: pass.parent_phone,
+      player_name: pass.player_name,
+      player_age: pass.player_age,
+      training_group: pass.training_group,
+      plan_type: pass.pass_type,
+      amount_paid: pass.amount_paid,
+      payment_method: "other",
+      internal_note: input.internalNote?.trim() || null,
+      proposed_session_ids: input.proposedSessionIds,
+      status: "pending"
+    })
+  });
+  const approval = insertedApprovals[0];
+
+  if (!approval) {
+    throw new Error("Schedule approval link could not be created.");
+  }
+
+  return {
+    pass,
+    approval
+  };
+}
+
+export async function getScheduleApprovalByToken(token: string): Promise<ScheduleApprovalDetails | null> {
+  const approvals = await supabaseRequest<ScheduleApprovalRow[]>(
+    `schedule_approval_links?select=*&token=eq.${encodeFilter(token)}&limit=1`
+  ).catch(() => []);
+  const approval = approvals[0];
+
+  if (!approval) {
+    return null;
+  }
+
+  const [pass, sessions] = await Promise.all([
+    getPassPurchaseById(approval.pass_purchase_id),
+    approval.proposed_session_ids.length > 0
+      ? supabaseRequest<TrainingSessionRow[]>(
+          `training_sessions?select=*&id=in.(${approval.proposed_session_ids.map(encodeFilter).join(",")})`
+        ).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+
+  return {
+    approval,
+    pass,
+    sessions: approval.proposed_session_ids
+      .map((sessionId) => sessionMap.get(sessionId))
+      .filter((session): session is TrainingSessionRow => Boolean(session))
+  };
+}
+
+export async function confirmScheduleApprovalLink(token: string) {
+  return supabaseRequest<Array<{ booking_id: string; session_id: string; credit_redemption_id: string; remaining_credits: number }>>(
+    "rpc/confirm_schedule_approval_link",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_token: token
+      })
+    }
+  );
 }
 
 export async function listAdminDirectPayments() {
   return supabaseRequest<DirectPaymentRow[]>("direct_payments?select=*&order=created_at.desc").catch(() => []);
+}
+
+export async function createPrivateSessionRequest(input: PrivateSessionRequestInput) {
+  const rows = await supabaseRequest<PrivateSessionRequestRow[]>("private_session_requests", {
+    method: "POST",
+    body: JSON.stringify({
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      preferred_times: input.preferredTimes.trim(),
+      focus_areas: input.focusAreas.filter(Boolean),
+      notes: input.notes?.trim() || null,
+      status: "new",
+      location: business.location,
+      timezone: defaultTimeZone
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function listAdminPrivateSessionRequests() {
+  return supabaseRequest<PrivateSessionRequestRow[]>(
+    "private_session_requests?select=*&order=created_at.desc"
+  ).catch(() => []);
+}
+
+export async function updatePrivateSessionRequest(
+  id: string,
+  updates: Partial<Pick<PrivateSessionRequestRow, "status" | "scheduled_start" | "scheduled_end" | "location" | "google_calendar_event_id" | "calendar_status" | "calendar_message">>
+) {
+  const rows = await supabaseRequest<PrivateSessionRequestRow[]>(`private_session_requests?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(updates)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function schedulePrivateSessionRequest(input: {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime?: string;
+  location?: string;
+}) {
+  const start = zonedDateTimeToUtc(input.date, input.startTime, defaultTimeZone);
+  const explicitEnd = input.endTime ? zonedDateTimeToUtc(input.date, input.endTime, defaultTimeZone) : null;
+  const end = explicitEnd && explicitEnd.getTime() > start.getTime() ? explicitEnd : new Date(start.getTime() + 60 * 60_000);
+
+  return updatePrivateSessionRequest(input.id, {
+    status: "scheduled",
+    scheduled_start: start.toISOString(),
+    scheduled_end: end.toISOString(),
+    location: input.location?.trim() || business.location,
+    calendar_status: "Ready",
+    calendar_message: null
+  });
+}
+
+export async function listAdminEmailSubscribers() {
+  return supabaseRequest<EmailSubscriberRow[]>("email_subscribers?select=*&order=opted_in_at.desc").catch(() => []);
+}
+
+async function upsertEmailSubscriber(input: EmailSubscriberInput) {
+  const email = input.email.trim().toLowerCase();
+
+  if (!email) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const payload = {
+    parent_name: input.parentName?.trim() || null,
+    email,
+    phone: input.phone?.trim() || null,
+    player_name: input.playerName?.trim() || null,
+    player_age: input.playerAge?.trim() || null,
+    source: input.source?.trim() || null,
+    opted_in: true,
+    opted_in_at: now,
+    updated_at: now
+  };
+  const existing = await supabaseRequest<EmailSubscriberRow[]>(
+    `email_subscribers?select=*&email=eq.${encodeFilter(email)}&limit=1`
+  );
+  const current = existing[0];
+
+  if (current) {
+    const updated = await supabaseRequest<EmailSubscriberRow[]>(`email_subscribers?id=eq.${encodeFilter(current.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+
+    return updated[0] ?? current;
+  }
+
+  const inserted = await supabaseRequest<EmailSubscriberRow[]>("email_subscribers", {
+    method: "POST",
+    body: JSON.stringify({
+      ...payload,
+      unsubscribed: false
+    })
+  });
+
+  return inserted[0] ?? null;
+}
+
+export async function saveEmailSubscriberOptIn(input: EmailSubscriberInput) {
+  try {
+    const subscriber = await upsertEmailSubscriber(input);
+
+    if (subscriber) {
+      console.info("[EST Email List] Opt-in saved", {
+        email: subscriber.email,
+        source: subscriber.source
+      });
+    }
+
+    return subscriber;
+  } catch (error) {
+    console.error("[EST Email List] Opt-in could not be saved", {
+      email: input.email,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return null;
+  }
+}
+
+export async function updateEmailSubscriberStatus(id: string, unsubscribed: boolean) {
+  const rows = await supabaseRequest<EmailSubscriberRow[]>(`email_subscribers?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      unsubscribed,
+      unsubscribed_at: unsubscribed ? new Date().toISOString() : null
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function deleteEmailSubscriber(id: string) {
+  await supabaseRequest<null>(`email_subscribers?id=eq.${encodeFilter(id)}`, {
+    method: "DELETE",
+    headers: {
+      Prefer: "return=minimal"
+    }
+  });
 }
 
 export async function createDirectPaymentRecord(input: DirectPaymentInput) {
@@ -665,9 +1251,8 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
   const sessionCount =
     input.paymentOption === "single_session" ? Math.min(6, Math.max(1, Math.floor(input.sessionCount || 1))) : 1;
   const status: DirectPaymentStatus = input.paymentMethod === "card" ? "pending_card_payment" : "zelle_pending";
-  const basePayload = {
+  const basePayload: Record<string, unknown> = {
     player_count: playerCount,
-    session_count: sessionCount,
     player_first_name: input.playerFirstName.trim(),
     player_last_name: input.playerLastName.trim(),
     player_age: input.playerAge.trim(),
@@ -692,6 +1277,11 @@ export async function createDirectPaymentRecord(input: DirectPaymentInput) {
     medical_notes: input.medicalNotes.trim(),
     ip_address: input.ipAddress || null
   };
+
+  if (input.paymentOption === "single_session") {
+    basePayload.session_count = sessionCount;
+  }
+
   const inserted = await supabaseRequest<DirectPaymentRow[]>("direct_payments", {
     method: "POST",
     body: JSON.stringify(basePayload)
@@ -772,11 +1362,382 @@ export async function updateDirectPaymentStatus(id: string, status: DirectPaymen
   return rows[0] ?? null;
 }
 
+export async function updateBookingContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updatePassPurchaseContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<PassPurchaseRow[]>(`pass_purchases?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updateDirectPaymentContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.playerFirstName === "string") payload.player_first_name = input.playerFirstName.trim();
+  if (typeof input.playerLastName === "string") payload.player_last_name = input.playerLastName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+  if (typeof input.secondPlayerFirstName === "string") payload.second_player_first_name = input.secondPlayerFirstName.trim();
+  if (typeof input.secondPlayerLastName === "string") payload.second_player_last_name = input.secondPlayerLastName.trim();
+  if (typeof input.secondPlayerAge === "string") payload.second_player_age = input.secondPlayerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<DirectPaymentRow[]>(`direct_payments?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updateEmailSubscriberContactInfo(id: string, input: ContactInfoInput) {
+  const payload: Record<string, string> = {};
+
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.phone = input.parentPhone.trim();
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("No contact changes were provided.");
+  }
+
+  const rows = await supabaseRequest<EmailSubscriberRow[]>(`email_subscribers?id=eq.${encodeFilter(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      ...payload,
+      updated_at: new Date().toISOString()
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+function adminStatusToBookingStatus(status: ManualBookingPaymentStatus): BookingRow["status"] {
+  return status === "pending_payment" ? "pending_payment" : "paid";
+}
+
+function normalizeManualPaymentMethod(method: string): ManualBookingPaymentMethod {
+  const allowed: ManualBookingPaymentMethod[] = [
+    "Zelle",
+    "Cash",
+    "Venmo",
+    "Card",
+    "Training Package credit",
+    "Comped",
+    "Other"
+  ];
+
+  return allowed.includes(method as ManualBookingPaymentMethod) ? (method as ManualBookingPaymentMethod) : "Other";
+}
+
+function normalizeManualPaymentStatus(status: string): ManualBookingPaymentStatus {
+  const allowed: ManualBookingPaymentStatus[] = ["paid", "pending_payment", "comped", "training_credit_used"];
+
+  return allowed.includes(status as ManualBookingPaymentStatus) ? (status as ManualBookingPaymentStatus) : "pending_payment";
+}
+
+function normalizeWaiverStatus(status: string): ManualBookingWaiverStatus {
+  return status === "signed" ? "signed" : "missing";
+}
+
+async function ensureManualCapacity(input: {
+  session: TrainingSessionRow;
+  playerCount?: number;
+  overrideCapacity?: boolean;
+  excludeBookingId?: string;
+}) {
+  if (input.overrideCapacity) {
+    return;
+  }
+
+  if (input.session.status !== "open") {
+    throw new Error("This session is not open. Use admin override only if you intentionally want to add the player anyway.");
+  }
+
+  const bookings = await listAdminBookings();
+  const confirmedPlayers = bookings
+    .filter((booking) => booking.session_id === input.session.id && booking.id !== input.excludeBookingId && isAdminBookingConfirmed(booking))
+    .reduce((total, booking) => total + (Number(booking.player_count) || 1), 0);
+
+  if (confirmedPlayers + (input.playerCount || 1) > input.session.capacity) {
+    throw new Error("This session is full. Turn on admin override only if you intentionally want to exceed capacity.");
+  }
+}
+
+async function saveManualWaiverIfNeeded(booking: BookingRecord, waiverStatus: ManualBookingWaiverStatus) {
+  if (waiverStatus !== "signed") {
+    return;
+  }
+
+  await saveWaiverForBooking({
+    ...booking,
+    waiverAccepted: true,
+    guardianSignature: booking.guardianSignature || booking.parentName,
+    waiverAcceptedAt: booking.waiverAcceptedAt || new Date().toISOString(),
+    mediaConsent: booking.mediaConsent || "Granted"
+  });
+}
+
+export async function createManualAdminBooking(input: ManualBookingInput) {
+  const session = await getSessionOrThrow(input.sessionId);
+  const paymentStatus = normalizeManualPaymentStatus(input.paymentStatus);
+  const paymentMethod = normalizeManualPaymentMethod(input.paymentMethod);
+  const waiverStatus = normalizeWaiverStatus(input.waiverStatus);
+  const isTrainingCredit = paymentMethod === "Training Package credit" || paymentStatus === "training_credit_used";
+
+  if (isTrainingCredit) {
+    if (!input.passPurchaseId) {
+      throw new Error("Choose a Training Package holder before using a Training credit.");
+    }
+
+    const redeemed = await supabaseRequest<Array<{ booking_id: string; credit_redemption_id: string; remaining_credits: number }>>(
+      "rpc/admin_redeem_launch_pass_credit",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          p_pass_purchase_id: input.passPurchaseId,
+          p_session_id: session.id,
+          p_parent_name: input.parentName,
+          p_parent_email: input.parentEmail,
+          p_parent_phone: input.parentPhone,
+          p_player_name: input.playerName,
+          p_player_age: input.playerAge,
+          p_training_group: session.training_group,
+          p_notes: "",
+          p_medical_notes: input.medicalNotes || "",
+          p_emergency_name: input.emergencyName || "",
+          p_emergency_phone: input.emergencyPhone || "",
+          p_admin_payment_status: "training_credit_used",
+          p_admin_payment_method: "Training Package credit",
+          p_internal_note: input.internalNote || "",
+          p_waiver_status: waiverStatus,
+          p_override_capacity: Boolean(input.overrideCapacity)
+        })
+      }
+    );
+    const redemption = redeemed[0];
+
+    if (!redemption) {
+      throw new Error("Manual Training Package booking could not be saved.");
+    }
+
+    const booking = await getBookingRecordForConfirmation(redemption.booking_id, redemption.remaining_credits);
+    await saveManualWaiverIfNeeded(booking, waiverStatus);
+
+    return {
+      booking: await getBookingRecordForConfirmation(redemption.booking_id, redemption.remaining_credits),
+      bookingRow: await getAdminBookingById(redemption.booking_id)
+    };
+  }
+
+  const confirmedStatus = adminStatusToBookingStatus(paymentStatus);
+
+  if (confirmedStatus === "paid") {
+    await ensureManualCapacity({
+      session,
+      overrideCapacity: input.overrideCapacity
+    });
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>("bookings", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: session.id,
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: session.training_group,
+      status: confirmedStatus,
+      amount_paid: Math.max(0, Math.round(Number(input.amountPaid) || 0)),
+      player_count: 1,
+      notes: null,
+      medical_notes: input.medicalNotes?.trim() || null,
+      emergency_name: input.emergencyName?.trim() || null,
+      emergency_phone: input.emergencyPhone?.trim() || null,
+      payment_type: "single_session",
+      manual_source: true,
+      admin_payment_status: paymentStatus,
+      admin_payment_method: paymentMethod,
+      waiver_status: waiverStatus,
+      internal_note: input.internalNote?.trim() || null,
+      admin_override_capacity: Boolean(input.overrideCapacity)
+    })
+  });
+  const bookingRow = rows[0];
+
+  if (!bookingRow) {
+    throw new Error("Manual booking could not be saved.");
+  }
+
+  const booking = await getBookingRecordForConfirmation(bookingRow.id);
+  await saveManualWaiverIfNeeded(booking, waiverStatus);
+
+  return {
+    booking: await getBookingRecordForConfirmation(bookingRow.id),
+    bookingRow: await getAdminBookingById(bookingRow.id)
+  };
+}
+
+export async function updateAdminBookingManualDetails(bookingId: string, input: ManualBookingUpdateInput) {
+  const existing = await getAdminBookingById(bookingId);
+
+  if (!existing) {
+    throw new Error("Booking was not found.");
+  }
+
+  const paymentStatus =
+    typeof input.paymentStatus === "string" ? normalizeManualPaymentStatus(input.paymentStatus) : existing.admin_payment_status || existing.status;
+  const nextStatus = adminStatusToBookingStatus(paymentStatus as ManualBookingPaymentStatus);
+  const session = await getSessionOrThrow(existing.session_id);
+
+  if (nextStatus === "paid" && existing.status !== "paid") {
+    await ensureManualCapacity({
+      session,
+      excludeBookingId: existing.id
+    });
+  }
+
+  const payload: Record<string, unknown> = {};
+
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.paymentStatus === "string") {
+    payload.status = nextStatus;
+    payload.admin_payment_status = paymentStatus;
+  }
+  if (typeof input.paymentMethod === "string") payload.admin_payment_method = normalizeManualPaymentMethod(input.paymentMethod);
+  if (typeof input.amountPaid === "number") payload.amount_paid = Math.max(0, Math.round(input.amountPaid));
+  if (typeof input.waiverStatus === "string") payload.waiver_status = normalizeWaiverStatus(input.waiverStatus);
+  if (typeof input.notes === "string") payload.notes = input.notes.trim() || null;
+  if (typeof input.medicalNotes === "string") payload.medical_notes = input.medicalNotes.trim() || null;
+  if (typeof input.emergencyName === "string") payload.emergency_name = input.emergencyName.trim() || null;
+  if (typeof input.emergencyPhone === "string") payload.emergency_phone = input.emergencyPhone.trim() || null;
+  if (typeof input.internalNote === "string") payload.internal_note = input.internalNote.trim() || null;
+  payload.manual_source = existing.manual_source ?? true;
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+  const updated = rows[0];
+
+  if (!updated) {
+    throw new Error("Booking could not be updated.");
+  }
+
+  if (input.waiverStatus === "signed") {
+    const booking = await getBookingRecordForConfirmation(updated.id);
+    await saveManualWaiverIfNeeded(booking, "signed");
+  }
+
+  return getAdminBookingById(updated.id);
+}
+
+export async function cancelAdminBooking(input: {
+  bookingId: string;
+  returnCredit?: boolean;
+}) {
+  const booking = await getAdminBookingById(input.bookingId);
+
+  if (!booking) {
+    throw new Error("Booking was not found.");
+  }
+
+  let creditReturned = false;
+
+  if (input.returnCredit) {
+    const passPurchaseId = booking.pass_purchase_id || booking.creditRedemption?.pass_purchase_id;
+
+    if (!passPurchaseId) {
+      throw new Error("This booking is not connected to a Training Package credit.");
+    }
+
+    if (booking.creditAdjustment) {
+      throw new Error("A Training credit has already been returned for this booking.");
+    }
+
+    const issued = await issueManualLaunchPassCredit({
+      passPurchaseId,
+      creditAmount: 1,
+      reason: "Admin correction",
+      note: `Returned after admin cancelled booking ${booking.id} for ${booking.player_name}.`,
+      createdBy: "admin"
+    });
+
+    await supabaseRequest<CreditAdjustmentRow[]>(`credit_adjustments?id=eq.${encodeFilter(issued.adjustment.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        original_booking_id: booking.id,
+        original_session_id: booking.session_id
+      })
+    });
+    creditReturned = true;
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(input.bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: "cancelled"
+    })
+  });
+
+  return {
+    booking: rows[0] ?? null,
+    creditReturned
+  };
+}
+
 export async function listAdminTrainingSessions(): Promise<AdminTrainingSession[]> {
   const [sessions, bookings] = await Promise.all([listTrainingSessions(), listAdminBookings()]);
 
   return sessions.map((session) => {
-    const paidBookings = bookings.filter((booking) => booking.session_id === session.id && booking.status === "paid");
+    const paidBookings = bookings.filter((booking) => booking.session_id === session.id && isAdminBookingConfirmed(booking));
     const paidPlayers = paidBookings.reduce((total, booking) => total + (Number(booking.player_count) || 1), 0);
 
     return {
@@ -799,6 +1760,119 @@ async function getSessionOrThrow(sessionId: string) {
   }
 
   return session;
+}
+
+export async function issueLaunchPassMakeupCredit(input: {
+  bookingId: string;
+  createdBy?: string;
+}) {
+  const issued = await supabaseRequest<CreditAdjustmentRow[] | CreditAdjustmentRow>(
+    "rpc/issue_launch_pass_makeup_credit",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_booking_id: input.bookingId,
+        p_created_by: input.createdBy || "admin"
+      })
+    }
+  );
+  const adjustment = Array.isArray(issued) ? issued[0] : issued;
+
+  if (!adjustment) {
+    throw new Error("Makeup credit could not be issued.");
+  }
+
+  if (!adjustment.original_booking_id || !adjustment.original_session_id) {
+    throw new Error("Credited booking details could not be loaded.");
+  }
+
+  const bookingRows = await supabaseRequest<BookingRow[]>(
+    `bookings?select=*&id=eq.${encodeFilter(adjustment.original_booking_id)}&limit=1`
+  );
+  const booking = bookingRows[0];
+
+  if (!booking) {
+    throw new Error("Credited booking could not be loaded.");
+  }
+
+  const session = await getSessionOrThrow(adjustment.original_session_id);
+  const pass = await getPassPurchaseById(adjustment.pass_purchase_id);
+
+  if (!pass) {
+    throw new Error("Credited Training Package could not be loaded.");
+  }
+
+  return {
+    adjustment,
+    booking,
+    session,
+    pass
+  };
+}
+
+export async function issueManualLaunchPassCredit(input: {
+  passPurchaseId: string;
+  creditAmount: number;
+  reason: string;
+  note?: string;
+  createdBy?: string;
+}) {
+  const issued = await supabaseRequest<CreditAdjustmentRow[] | CreditAdjustmentRow>(
+    "rpc/issue_manual_launch_pass_credit",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        p_pass_purchase_id: input.passPurchaseId,
+        p_credit_amount: Math.max(1, Math.floor(Number(input.creditAmount) || 1)),
+        p_reason: input.reason,
+        p_note: input.note || null,
+        p_created_by: input.createdBy || "admin"
+      })
+    }
+  );
+  const adjustment = Array.isArray(issued) ? issued[0] : issued;
+
+  if (!adjustment) {
+    throw new Error("Manual credit could not be added.");
+  }
+
+  const pass = await getPassPurchaseById(adjustment.pass_purchase_id);
+
+  if (!pass) {
+    throw new Error("Credited Training Package could not be loaded.");
+  }
+
+  return {
+    adjustment,
+    pass
+  };
+}
+
+export async function listPaidBookingsForSession(sessionId: string) {
+  const bookings = await listAdminBookings();
+
+  return bookings.filter((booking) => booking.session_id === sessionId && isAdminBookingConfirmed(booking));
+}
+
+export async function updateCreditAdjustmentEmailStatus(input: {
+  adjustmentId: string;
+  status: "sent" | "failed";
+  errorMessage?: string;
+}) {
+  const rows = await supabaseRequest<CreditAdjustmentRow[]>(
+    `credit_adjustments?id=eq.${encodeFilter(input.adjustmentId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        email_status: input.status,
+        email_error: input.status === "failed" ? input.errorMessage || "Email could not be sent." : null,
+        email_sent: input.status === "sent",
+        email_sent_at: input.status === "sent" ? new Date().toISOString() : null
+      })
+    }
+  );
+
+  return rows[0] ?? null;
 }
 
 export async function createPendingBooking(rawBooking: BookingRecord, ipAddress = "") {
@@ -837,25 +1911,29 @@ export async function createPendingBooking(rawBooking: BookingRecord, ipAddress 
     throw new Error("Booking could not be saved before payment.");
   }
 
+  const booking = {
+    ...rawBooking,
+    id: bookingRow.id,
+    createdAt: bookingRow.created_at,
+    players: String(playerCount),
+    ipAddress,
+    programId: session.training_group,
+    programName: publicSessionProgramName(publicSession),
+    sessionId: session.id,
+    sessionDateIso: publicSession.date,
+    sessionDate: publicSession.dateLabel,
+    sessionTime: publicSession.startTime,
+    sessionDurationMinutes: 60,
+    sessionCalendarEventId: undefined,
+    paymentStatus: "pending_payment",
+    notificationStatus: "Ready",
+    calendarStatus: "Ready"
+  } satisfies BookingRecord;
+
+  await saveWaiverForBooking(booking);
+
   return {
-    booking: {
-      ...rawBooking,
-      id: bookingRow.id,
-      createdAt: bookingRow.created_at,
-      players: String(playerCount),
-      ipAddress,
-      programId: session.training_group,
-      programName: publicSessionProgramName(publicSession),
-      sessionId: session.id,
-      sessionDateIso: publicSession.date,
-      sessionDate: publicSession.dateLabel,
-      sessionTime: publicSession.startTime,
-      sessionDurationMinutes: 60,
-      sessionCalendarEventId: undefined,
-      paymentStatus: "pending_payment",
-      notificationStatus: "Ready",
-      calendarStatus: "Ready"
-    } satisfies BookingRecord,
+    booking,
     session: publicSession
   };
 }
@@ -894,7 +1972,7 @@ export async function createPendingPassPurchase(input: {
   const pass = inserted[0];
 
   if (!pass) {
-    throw new Error("Launch Pass purchase could not be saved before payment.");
+    throw new Error("Training Package purchase could not be saved before payment.");
   }
 
   return pass;
@@ -927,7 +2005,7 @@ export async function confirmPaidLaunchPassPurchase(input: {
   const pass = Array.isArray(confirmed) ? confirmed[0] : confirmed;
 
   if (!pass) {
-    throw new Error("Launch Pass payment could not be confirmed.");
+    throw new Error("Training Package payment could not be confirmed.");
   }
 
   return pass;
@@ -939,6 +2017,29 @@ export async function getPassPurchaseById(passPurchaseId: string) {
   ).catch(() => []);
 
   return rows[0] ?? null;
+}
+
+export async function getBookingRecordForConfirmation(bookingId: string, remainingCreditsAfter?: number) {
+  const bookings = await supabaseRequest<BookingRow[]>(
+    `bookings?select=*&id=eq.${encodeFilter(bookingId)}&limit=1`
+  ).catch(() => []);
+  const booking = bookings[0];
+
+  if (!booking) {
+    throw new Error("Confirmed booking could not be loaded.");
+  }
+
+  const [session, waivers] = await Promise.all([
+    getSessionOrThrow(booking.session_id),
+    supabaseRequest<WaiverRow[]>(`waivers?select=*&booking_id=eq.${encodeFilter(booking.id)}&limit=1`).catch(() => [])
+  ]);
+
+  return toBookingRecordFromRows({
+    booking,
+    session,
+    waiver: waivers[0] ?? null,
+    remainingCreditsAfter
+  });
 }
 
 export async function findActiveLaunchPasses(input: {
@@ -959,8 +2060,7 @@ export async function findActiveLaunchPasses(input: {
       `player_name=ilike.${encodeFilter(playerName)}`,
       "status=eq.paid",
       "remaining_credits=gt.0",
-      `expires_at=gte.${encodeFilter(new Date().toISOString())}`,
-      "order=expires_at.asc"
+      "order=created_at.desc"
     ].join("&")
   ).catch(() => []);
 
@@ -1018,7 +2118,7 @@ export async function redeemLaunchPassCreditAndSaveWaiver(rawBooking: BookingRec
   const redemption = redeemed[0];
 
   if (!redemption) {
-    throw new Error("Launch Pass credit could not be redeemed.");
+    throw new Error("Training credit could not be redeemed.");
   }
 
   const rows = await supabaseRequest<BookingRow[]>(
@@ -1027,7 +2127,7 @@ export async function redeemLaunchPassCreditAndSaveWaiver(rawBooking: BookingRec
   const bookingRow = rows[0];
 
   if (!bookingRow) {
-    throw new Error("Launch Pass booking could not be loaded after redemption.");
+    throw new Error("Training Package booking could not be loaded after redemption.");
   }
 
   const booking: BookingRecord = {

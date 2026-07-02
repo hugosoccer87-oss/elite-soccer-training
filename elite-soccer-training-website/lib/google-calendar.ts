@@ -10,7 +10,10 @@ import {
   type TrainingSlot
 } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
+import { getSessionFocusLabel } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
+import type { PrivateSessionRequestRow, TrainingSessionRow } from "@/lib/supabase-db";
+import { createSign } from "node:crypto";
 
 const googleAuthEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const googleTokenEndpoint = "https://oauth2.googleapis.com/token";
@@ -95,6 +98,33 @@ function getGoogleServiceAccountEmail() {
   ).trim();
 }
 
+function getGooglePrivateKey() {
+  return (
+    process.env.GOOGLE_PRIVATE_KEY ||
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
+    process.env.GOOGLE_CLIENT_PRIVATE_KEY ||
+    ""
+  )
+    .replace(/\\n/g, "\n")
+    .trim();
+}
+
+function getGoogleAuthMode() {
+  const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  const privateKey = getGooglePrivateKey();
+
+  if (serviceAccountEmail && privateKey) {
+    return "service_account";
+  }
+
+  if (clientId && clientSecret && refreshToken) {
+    return "oauth_refresh_token";
+  }
+
+  return "not_configured";
+}
+
 function setLastCalendarEventCreationResult(result: Omit<LastCalendarEventCreationResult, "checkedAt">) {
   calendarDiagnosticsStore.lastCalendarEventCreationResult = {
     checkedAt: new Date().toISOString(),
@@ -113,14 +143,17 @@ export function recordCalendarEventCreationFailure(bookingId: string, message: s
 
 export function getGoogleCalendarDiagnostics() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+  const privateKey = getGooglePrivateKey();
 
   return {
     googleCalendarConfigured: isGoogleCalendarConfigured(),
     googleCalendarId: getCalendarId(),
     googleServiceAccountEmail: getGoogleServiceAccountEmail(),
+    googleAuthMode: getGoogleAuthMode(),
     hasGoogleClientId: Boolean(clientId),
     hasGoogleClientSecret: Boolean(clientSecret),
     hasGoogleRefreshToken: Boolean(refreshToken),
+    hasGooglePrivateKey: Boolean(privateKey),
     lastCalendarEventCreationResult: calendarDiagnosticsStore.lastCalendarEventCreationResult
   };
 }
@@ -145,9 +178,11 @@ function getCalendarEnvDiagnostics() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
 
   return {
+    googleAuthMode: getGoogleAuthMode(),
     hasGoogleClientId: Boolean(clientId),
     hasGoogleClientSecret: Boolean(clientSecret),
     hasGoogleRefreshToken: Boolean(refreshToken),
+    hasGooglePrivateKey: Boolean(getGooglePrivateKey()),
     calendarId: getCalendarId(),
     googleServiceAccountEmail: getGoogleServiceAccountEmail(),
     calendarTimeZone
@@ -155,8 +190,7 @@ function getCalendarEnvDiagnostics() {
 }
 
 function isGoogleCalendarConfigured() {
-  const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
-  return Boolean(clientId && clientSecret && refreshToken);
+  return getGoogleAuthMode() !== "not_configured";
 }
 
 async function googleErrorMessage(response: Response, context: string) {
@@ -238,12 +272,19 @@ export async function exchangeGoogleCodeForTokens(code: string, request: Request
 
 async function getGoogleAccessToken() {
   const { clientId, clientSecret, refreshToken } = getGoogleClientConfig();
+  const authMode = getGoogleAuthMode();
+
+  if (authMode === "service_account") {
+    logCalendarInfo("Requesting Google service account access token", getCalendarEnvDiagnostics());
+    return getServiceAccountAccessToken();
+  }
 
   if (!clientId || !clientSecret || !refreshToken) {
     logCalendarError("Google Calendar environment variables are missing", getCalendarEnvDiagnostics());
     return {
       accessToken: null,
-      error: "Google Calendar is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
+      error:
+        "Google Calendar is not configured. Add either GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY, or GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in Vercel."
     };
   }
 
@@ -291,6 +332,95 @@ function calendarHeaders(accessToken: string, extraHeaders?: Record<string, stri
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
     ...extraHeaders
+  };
+}
+
+function base64UrlJson(value: Record<string, unknown>) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function createServiceAccountAssertion() {
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  const privateKey = getGooglePrivateKey();
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64UrlJson({
+    alg: "RS256",
+    typ: "JWT"
+  });
+  const claim = base64UrlJson({
+    iss: serviceAccountEmail,
+    scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy",
+    aud: googleTokenEndpoint,
+    iat: now,
+    exp: now + 3600
+  });
+  const unsigned = `${header}.${claim}`;
+  const signature = createSign("RSA-SHA256").update(unsigned).sign(privateKey).toString("base64url");
+
+  return `${unsigned}.${signature}`;
+}
+
+async function getServiceAccountAccessToken() {
+  const serviceAccountEmail = getGoogleServiceAccountEmail();
+  const privateKey = getGooglePrivateKey();
+
+  if (!serviceAccountEmail || !privateKey) {
+    return {
+      accessToken: null,
+      error: "Google Calendar service account is not configured. Add GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY in Vercel."
+    };
+  }
+
+  let assertion = "";
+
+  try {
+    assertion = createServiceAccountAssertion();
+  } catch (error) {
+    logCalendarError("Google service account JWT could not be signed", {
+      googleServiceAccountEmail: serviceAccountEmail,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      accessToken: null,
+      error: "Google service account private key could not be used. Check GOOGLE_PRIVATE_KEY formatting."
+    };
+  }
+
+  const response = await fetch(googleTokenEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    })
+  });
+
+  if (!response.ok) {
+    const message = await googleErrorMessage(response, "Google service account token request failed");
+    return {
+      accessToken: null,
+      error: message
+    };
+  }
+
+  const token = (await response.json()) as { access_token?: string };
+
+  if (!token.access_token) {
+    logCalendarError("Google service account token response did not include an access token", {
+      googleServiceAccountEmail: serviceAccountEmail
+    });
+    return {
+      accessToken: null,
+      error: "Google service account did not return an access token."
+    };
+  }
+
+  return {
+    accessToken: token.access_token,
+    error: null
   };
 }
 
@@ -374,7 +504,7 @@ function getDurationMinutes(startDateTime?: string, endDateTime?: string) {
 function bookingDescription(booking: BookingRecord) {
   const paidWithLaunchPass = booking.paymentType === "launch_pass_credit";
   const paymentAmount = paidWithLaunchPass
-    ? "Paid using Launch Pass credit"
+    ? "Paid using Training credit"
     : `${booking.players} x ${sessionPriceLabel} = ${formatCurrencyFromCents(getSessionTotalCents(booking.players))}`;
 
   return [
@@ -387,10 +517,10 @@ function bookingDescription(booking: BookingRecord) {
     `Session date/time: ${booking.sessionDate} at ${booking.sessionTime}`,
     `Location: ${business.location}`,
     `Number of players: ${booking.players}`,
-    `Payment status: ${paidWithLaunchPass ? "Paid using Launch Pass credit" : "Paid"}`,
+    `Payment status: ${paidWithLaunchPass ? "Paid using Training credit" : "Paid"}`,
     `Payment amount: ${paymentAmount}`,
-    `Payment type: ${paidWithLaunchPass ? "Launch Pass credit" : "Single Session"}`,
-    `Remaining Launch Pass credits: ${typeof booking.remainingCreditsAfter === "number" ? booking.remainingCreditsAfter : "Not applicable"}`,
+    `Payment type: ${paidWithLaunchPass ? "Training credit" : "Single Session"}`,
+    `Remaining Training credits: ${typeof booking.remainingCreditsAfter === "number" ? booking.remainingCreditsAfter : "Not applicable"}`,
     `Waiver status: ${booking.waiverAccepted ? "Signed" : "Not recorded"}`,
     `Typed waiver signature: ${booking.guardianSignature || "Not recorded"}`,
     `Waiver signed date/time: ${booking.waiverAcceptedAt || "Not recorded"}`,
@@ -510,6 +640,325 @@ async function findExistingBookingEvent(bookingId: string, accessToken: string) 
 
   const data = (await response.json()) as GoogleCalendarListResponse;
   return data.items?.[0] ?? null;
+}
+
+async function findExistingTrainingSessionEvent(sessionId: string, accessToken: string) {
+  const params = new URLSearchParams({
+    maxResults: "1",
+    singleEvents: "true",
+    privateExtendedProperty: `estSessionId=${sessionId}`
+  });
+  const response = await fetch(
+    `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+    {
+      headers: calendarHeaders(accessToken)
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as GoogleCalendarListResponse;
+  return data.items?.[0] ?? null;
+}
+
+async function findExistingPrivateSessionEvent(requestId: string, accessToken: string) {
+  const params = new URLSearchParams({
+    maxResults: "1",
+    singleEvents: "true",
+    privateExtendedProperty: `estPrivateSessionRequestId=${requestId}`
+  });
+  const response = await fetch(
+    `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
+    {
+      headers: calendarHeaders(accessToken)
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = (await response.json()) as GoogleCalendarListResponse;
+  return data.items?.[0] ?? null;
+}
+
+function trainingSessionDescription(session: TrainingSessionRow) {
+  const group = getTrainingGroup(session.training_group);
+  const focus = getSessionFocusLabel(session.training_focus);
+
+  return [
+    `Session focus: ${focus}`,
+    `Training group: ${group.name} (${group.ages})`,
+    `Status: ${session.status}`,
+    `Capacity: ${session.capacity}`,
+    `Location: ${session.location || business.location}`,
+    `Session ID: ${session.id}`,
+    "",
+    "Admin note: Supabase is the source of truth for EST CV availability and bookings."
+  ].join("\n");
+}
+
+function trainingSessionEventPayload(session: TrainingSessionRow) {
+  const group = getTrainingGroup(session.training_group);
+  const focus = getSessionFocusLabel(session.training_focus);
+  const cancelled = session.status === "cancelled";
+  const closed = session.status === "closed";
+
+  return {
+    summary: `${cancelled ? "[CANCELLED] " : closed ? "[CLOSED] " : ""}EST CV - ${focus}`,
+    description: trainingSessionDescription(session),
+    location: session.location || business.location,
+    start: {
+      dateTime: session.start_datetime,
+      timeZone: session.timezone || calendarTimeZone
+    },
+    end: {
+      dateTime: session.end_datetime,
+      timeZone: session.timezone || calendarTimeZone
+    },
+    transparency: cancelled || closed ? "transparent" : "opaque",
+    extendedProperties: {
+      private: {
+        estType: "training_session",
+        estSessionId: session.id,
+        groupId: session.training_group,
+        groupName: group.name,
+        trainingFocus: focus,
+        capacity: String(session.capacity),
+        status: session.status
+      }
+    }
+  };
+}
+
+export async function syncTrainingSessionCalendarEvent(session: TrainingSessionRow): Promise<CalendarAvailabilityResult> {
+  console.info("[EST Calendar] Starting calendar event creation", {
+    sessionId: session.id,
+    trainingGroup: session.training_group,
+    status: session.status,
+    start: session.start_datetime
+  });
+  console.info("[EST Calendar] Calendar ID:", calendarId);
+  console.info("[EST Calendar] Service account email:", getGoogleServiceAccountEmail() || "not configured");
+
+  if (!isGoogleCalendarConfigured()) {
+    setLastCalendarEventCreationResult({
+      status: "Google Calendar not configured",
+      calendarId,
+      message: "Session sync skipped because Google Calendar is not configured."
+    });
+    logCalendarError("Session sync skipped because Google Calendar is not configured", {
+      ...getCalendarEnvDiagnostics(),
+      sessionId: session.id
+    });
+    console.error("[EST Calendar] Calendar event creation failed", {
+      sessionId: session.id,
+      reason: "Google Calendar credentials are missing"
+    });
+    return {
+      status: "Google Calendar not configured",
+      message: "Google Calendar is not configured."
+    };
+  }
+
+  const token = await getGoogleAccessToken();
+
+  if (!token.accessToken) {
+    setLastCalendarEventCreationResult({
+      status: "Failed",
+      calendarId,
+      message: token.error ?? "Could not connect to Google Calendar."
+    });
+    console.error("[EST Calendar] Calendar event creation failed", {
+      sessionId: session.id,
+      reason: token.error ?? "Could not connect to Google Calendar."
+    });
+    return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
+  }
+
+  const existingEvent = await findExistingTrainingSessionEvent(session.id, token.accessToken);
+  const payload = trainingSessionEventPayload(session);
+  const response = await fetch(
+    existingEvent?.id
+      ? `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(existingEvent.id)}`
+      : `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: existingEvent?.id ? "PATCH" : "POST",
+      headers: calendarHeaders(token.accessToken, existingEvent?.etag ? { "If-Match": existingEvent.etag } : undefined),
+      body: JSON.stringify(payload)
+    }
+  );
+
+  if (!response.ok) {
+    const message = await googleErrorMessage(response, "Could not sync the Google Calendar session event");
+    setLastCalendarEventCreationResult({
+      status: "Failed",
+      calendarId,
+      message
+    });
+    console.error("[EST Calendar] Calendar event creation failed", {
+      sessionId: session.id,
+      reason: message
+    });
+    return { status: "Failed", message };
+  }
+
+  const event = (await response.json()) as GoogleCalendarEvent;
+  setLastCalendarEventCreationResult({
+    status: "Synced",
+    calendarId,
+    eventId: event.id,
+    message: "Session calendar event synced successfully."
+  });
+  logCalendarInfo("Google Calendar session event synced", {
+    sessionId: session.id,
+    eventId: event.id,
+    updated: Boolean(existingEvent?.id)
+  });
+  console.info("[EST Calendar] Calendar event created successfully", {
+    sessionId: session.id,
+    eventId: event.id,
+    updatedExistingEvent: Boolean(existingEvent?.id)
+  });
+
+  return { status: "Synced", eventId: event.id };
+}
+
+function privateSessionDescription(request: PrivateSessionRequestRow) {
+  return [
+    `Session type: Private 1-on-1`,
+    `Player name: ${request.player_name}`,
+    `Player age: ${request.player_age}`,
+    `Parent/guardian name: ${request.parent_name}`,
+    `Parent email: ${request.parent_email}`,
+    `Parent phone: ${request.parent_phone}`,
+    `Preferred dates/times: ${request.preferred_times}`,
+    `Focus areas: ${request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not recorded"}`,
+    `Notes: ${request.notes || "None"}`,
+    `Status: ${request.status}`,
+    `Location: ${request.location || business.location}`,
+    `Request ID: ${request.id}`,
+    "",
+    "Admin note: This private session request does not count toward small group capacity."
+  ].join("\n");
+}
+
+export async function syncPrivateSessionCalendarEvent(request: PrivateSessionRequestRow): Promise<CalendarBookingResult> {
+  console.info("[EST Calendar] Starting private session calendar event sync", {
+    requestId: request.id,
+    playerName: request.player_name,
+    status: request.status,
+    start: request.scheduled_start
+  });
+  console.info("[EST Calendar] Calendar ID:", calendarId);
+  console.info("[EST Calendar] Service account email:", getGoogleServiceAccountEmail() || "not configured");
+
+  if (!request.scheduled_start || !request.scheduled_end) {
+    return {
+      status: "Ready",
+      message: "Private session has not been scheduled yet."
+    };
+  }
+
+  if (!isGoogleCalendarConfigured()) {
+    setLastCalendarEventCreationResult({
+      bookingId: request.id,
+      status: "Google Calendar not configured",
+      calendarId,
+      message: "Private session sync skipped because Google Calendar is not configured."
+    });
+    return {
+      status: "Google Calendar not configured",
+      message: "Google Calendar is not configured."
+    };
+  }
+
+  const token = await getGoogleAccessToken();
+
+  if (!token.accessToken) {
+    setLastCalendarEventCreationResult({
+      bookingId: request.id,
+      status: "Failed",
+      calendarId,
+      message: token.error ?? "Could not connect to Google Calendar."
+    });
+    return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
+  }
+
+  const existingEvent = request.google_calendar_event_id
+    ? ({ id: request.google_calendar_event_id } as GoogleCalendarEvent)
+    : await findExistingPrivateSessionEvent(request.id, token.accessToken);
+  const payload = {
+    summary: `EST CV - Private 1-on-1: ${request.player_name}`,
+    description: privateSessionDescription(request),
+    location: request.location || business.location,
+    start: {
+      dateTime: request.scheduled_start,
+      timeZone: request.timezone || calendarTimeZone
+    },
+    end: {
+      dateTime: request.scheduled_end,
+      timeZone: request.timezone || calendarTimeZone
+    },
+    extendedProperties: {
+      private: {
+        estType: "private_session",
+        estPrivateSessionRequestId: request.id,
+        playerName: request.player_name,
+        parentEmail: request.parent_email,
+        status: request.status
+      }
+    }
+  };
+  const response = await fetch(
+    existingEvent?.id
+      ? `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(existingEvent.id)}`
+      : `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: existingEvent?.id ? "PATCH" : "POST",
+      headers: calendarHeaders(token.accessToken, existingEvent?.etag ? { "If-Match": existingEvent.etag } : undefined),
+      body: JSON.stringify(payload)
+    }
+  );
+
+  if (!response.ok) {
+    const message = await googleErrorMessage(response, "Could not sync private session to Google Calendar");
+    setLastCalendarEventCreationResult({
+      bookingId: request.id,
+      status: "Failed",
+      calendarId,
+      message
+    });
+    console.error("[EST Calendar] Calendar event creation failed", {
+      requestId: request.id,
+      reason: message
+    });
+    return { status: "Failed", message };
+  }
+
+  const event = (await response.json()) as GoogleCalendarEvent;
+  setLastCalendarEventCreationResult({
+    bookingId: request.id,
+    status: "Created",
+    calendarId,
+    eventId: event.id,
+    message: existingEvent?.id ? "Private session calendar event updated." : "Private session calendar event created."
+  });
+  console.info("[EST Calendar] Calendar event created successfully", {
+    requestId: request.id,
+    eventId: event.id,
+    eventUrl: event.htmlLink,
+    updatedExistingEvent: Boolean(existingEvent?.id)
+  });
+
+  return {
+    status: "Created",
+    eventId: event.id,
+    eventUrl: event.htmlLink,
+    alreadyExists: Boolean(existingEvent?.id)
+  };
 }
 
 function eventToTrainingSlot(event: GoogleCalendarEvent): TrainingSlot | null {
@@ -910,35 +1359,6 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     return { status: "Failed", message: token.error ?? "Could not connect to Google Calendar." };
   }
 
-  const existingEvent = await findExistingBookingEvent(booking.id, token.accessToken);
-
-  if (existingEvent?.id) {
-    setLastCalendarEventCreationResult({
-      bookingId: booking.id,
-      status: "Created",
-      calendarId,
-      eventId: existingEvent.id,
-      message: "Calendar event already exists."
-    });
-    logCalendarInfo("Google Calendar booking event already exists", {
-      bookingId: booking.id,
-      eventId: existingEvent.id,
-      eventUrl: existingEvent.htmlLink
-    });
-    console.info("[EST Calendar] Calendar event created successfully", {
-      bookingId: booking.id,
-      eventId: existingEvent.id,
-      alreadyExists: true
-    });
-
-    return {
-      status: "Created",
-      eventId: existingEvent.id,
-      eventUrl: existingEvent.htmlLink,
-      alreadyExists: true
-    };
-  }
-
   const durationMinutes = booking.sessionDurationMinutes || 60;
   const dateIso = resolveBookingDateIso(booking);
 
@@ -967,40 +1387,49 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   }
 
   const range = getCalendarDateRange(dateIso, booking.sessionTime, durationMinutes);
+  const existingEvent = await findExistingBookingEvent(booking.id, token.accessToken);
+  const bookingEventPayload = {
+    summary: `EST CV - ${booking.programName}: ${booking.playerName}`,
+    description: bookingDescription(booking),
+    location: business.location,
+    start: {
+      dateTime: range.start,
+      timeZone: calendarTimeZone
+    },
+    end: {
+      dateTime: range.end,
+      timeZone: calendarTimeZone
+    },
+    extendedProperties: {
+      private: {
+        estType: "booking",
+        estBookingId: booking.id,
+        estSessionId: booking.sessionId,
+        estAvailabilityEventId: booking.sessionCalendarEventId ?? "",
+        programId: booking.programId
+      }
+    }
+  };
+
   logCalendarInfo("Creating Google Calendar booking event", {
     bookingId: booking.id,
     programName: booking.programName,
     playerName: booking.playerName,
     start: range.start,
     end: range.end,
-    calendarId
+    calendarId,
+    updatingExistingEvent: Boolean(existingEvent?.id)
   });
-  const response = await fetch(`${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`, {
-    method: "POST",
-    headers: calendarHeaders(token.accessToken),
-    body: JSON.stringify({
-      summary: `Elite Soccer Training CV - Paid Booking: ${booking.playerName}`,
-      description: bookingDescription(booking),
-      location: business.location,
-      start: {
-        dateTime: range.start,
-        timeZone: calendarTimeZone
-      },
-      end: {
-        dateTime: range.end,
-        timeZone: calendarTimeZone
-      },
-      extendedProperties: {
-        private: {
-          estType: "booking",
-          estBookingId: booking.id,
-          estSessionId: booking.sessionId,
-          estAvailabilityEventId: booking.sessionCalendarEventId ?? "",
-          programId: booking.programId
-        }
-      }
-    })
-  });
+  const response = await fetch(
+    existingEvent?.id
+      ? `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(existingEvent.id)}`
+      : `${googleCalendarEndpoint}/calendars/${encodeURIComponent(calendarId)}/events`,
+    {
+      method: existingEvent?.id ? "PATCH" : "POST",
+      headers: calendarHeaders(token.accessToken, existingEvent?.etag ? { "If-Match": existingEvent.etag } : undefined),
+      body: JSON.stringify(bookingEventPayload)
+    }
+  );
 
   if (!response.ok) {
     const message = await googleErrorMessage(response, "Could not create the Google Calendar booking event");
@@ -1023,9 +1452,9 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
     status: "Created",
     calendarId,
     eventId: event.id,
-    message: "Calendar event created successfully."
+    message: existingEvent?.id ? "Calendar event updated successfully." : "Calendar event created successfully."
   });
-  logCalendarInfo("Google Calendar booking event created", {
+  logCalendarInfo(existingEvent?.id ? "Google Calendar booking event updated" : "Google Calendar booking event created", {
     bookingId: booking.id,
     eventId: event.id,
     eventUrl: event.htmlLink
@@ -1033,12 +1462,14 @@ export async function createBookingCalendarEvent(booking: BookingRecord): Promis
   console.info("[EST Calendar] Calendar event created successfully", {
     bookingId: booking.id,
     eventId: event.id,
-    eventUrl: event.htmlLink
+    eventUrl: event.htmlLink,
+    updatedExistingEvent: Boolean(existingEvent?.id)
   });
 
   return {
     status: "Created",
     eventId: event.id,
-    eventUrl: event.htmlLink
+    eventUrl: event.htmlLink,
+    alreadyExists: Boolean(existingEvent?.id)
   };
 }

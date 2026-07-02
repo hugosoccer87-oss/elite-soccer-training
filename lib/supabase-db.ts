@@ -58,9 +58,26 @@ export type BookingRow = {
   payment_type?: "single_session" | "launch_pass_credit";
   pass_purchase_id?: string | null;
   credit_redemption_id?: string | null;
+  manual_source?: boolean | null;
+  admin_payment_status?: ManualBookingPaymentStatus | null;
+  admin_payment_method?: ManualBookingPaymentMethod | null;
+  waiver_status?: ManualBookingWaiverStatus | null;
+  internal_note?: string | null;
+  admin_override_capacity?: boolean | null;
   created_at: string;
   updated_at: string;
 };
+
+export type ManualBookingPaymentStatus = "paid" | "pending_payment" | "comped" | "training_credit_used";
+export type ManualBookingPaymentMethod =
+  | "Zelle"
+  | "Cash"
+  | "Venmo"
+  | "Card"
+  | "Training Package credit"
+  | "Comped"
+  | "Other";
+export type ManualBookingWaiverStatus = "signed" | "missing";
 
 export type PassPurchaseRow = {
   id: string;
@@ -305,9 +322,30 @@ export type AdminTrainingSession = TrainingSessionRow & {
   paidBookings: AdminBookingRecord[];
 };
 
-export function isAdminBookingConfirmed(booking: Pick<BookingRow, "status" | "amount_paid" | "payment_type" | "stripe_payment_intent_id" | "pass_purchase_id" | "credit_redemption_id">) {
+export function isAdminBookingConfirmed(
+  booking: Pick<
+    BookingRow,
+    | "status"
+    | "amount_paid"
+    | "payment_type"
+    | "stripe_payment_intent_id"
+    | "pass_purchase_id"
+    | "credit_redemption_id"
+    | "manual_source"
+    | "admin_payment_status"
+  >
+) {
   if (booking.status !== "paid") {
     return false;
+  }
+
+  if (
+    booking.manual_source &&
+    (booking.admin_payment_status === "paid" ||
+      booking.admin_payment_status === "comped" ||
+      booking.admin_payment_status === "training_credit_used")
+  ) {
+    return true;
   }
 
   if (booking.payment_type === "launch_pass_credit" || booking.pass_purchase_id || booking.credit_redemption_id) {
@@ -353,6 +391,42 @@ export type ContactInfoInput = {
   secondPlayerFirstName?: string;
   secondPlayerLastName?: string;
   secondPlayerAge?: string;
+};
+
+export type ManualBookingInput = {
+  sessionId: string;
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  medicalNotes?: string;
+  paymentStatus: ManualBookingPaymentStatus;
+  paymentMethod: ManualBookingPaymentMethod;
+  amountPaid: number;
+  waiverStatus: ManualBookingWaiverStatus;
+  internalNote?: string;
+  passPurchaseId?: string;
+  overrideCapacity?: boolean;
+};
+
+export type ManualBookingUpdateInput = {
+  playerName?: string;
+  playerAge?: string;
+  parentName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
+  paymentStatus?: ManualBookingPaymentStatus;
+  paymentMethod?: ManualBookingPaymentMethod;
+  amountPaid?: number;
+  waiverStatus?: ManualBookingWaiverStatus;
+  notes?: string;
+  medicalNotes?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  internalNote?: string;
 };
 
 export type SupabaseDiagnostics = {
@@ -1377,6 +1451,286 @@ export async function updateEmailSubscriberContactInfo(id: string, input: Contac
   });
 
   return rows[0] ?? null;
+}
+
+function adminStatusToBookingStatus(status: ManualBookingPaymentStatus): BookingRow["status"] {
+  return status === "pending_payment" ? "pending_payment" : "paid";
+}
+
+function normalizeManualPaymentMethod(method: string): ManualBookingPaymentMethod {
+  const allowed: ManualBookingPaymentMethod[] = [
+    "Zelle",
+    "Cash",
+    "Venmo",
+    "Card",
+    "Training Package credit",
+    "Comped",
+    "Other"
+  ];
+
+  return allowed.includes(method as ManualBookingPaymentMethod) ? (method as ManualBookingPaymentMethod) : "Other";
+}
+
+function normalizeManualPaymentStatus(status: string): ManualBookingPaymentStatus {
+  const allowed: ManualBookingPaymentStatus[] = ["paid", "pending_payment", "comped", "training_credit_used"];
+
+  return allowed.includes(status as ManualBookingPaymentStatus) ? (status as ManualBookingPaymentStatus) : "pending_payment";
+}
+
+function normalizeWaiverStatus(status: string): ManualBookingWaiverStatus {
+  return status === "signed" ? "signed" : "missing";
+}
+
+async function ensureManualCapacity(input: {
+  session: TrainingSessionRow;
+  playerCount?: number;
+  overrideCapacity?: boolean;
+  excludeBookingId?: string;
+}) {
+  if (input.overrideCapacity) {
+    return;
+  }
+
+  if (input.session.status !== "open") {
+    throw new Error("This session is not open. Use admin override only if you intentionally want to add the player anyway.");
+  }
+
+  const bookings = await listAdminBookings();
+  const confirmedPlayers = bookings
+    .filter((booking) => booking.session_id === input.session.id && booking.id !== input.excludeBookingId && isAdminBookingConfirmed(booking))
+    .reduce((total, booking) => total + (Number(booking.player_count) || 1), 0);
+
+  if (confirmedPlayers + (input.playerCount || 1) > input.session.capacity) {
+    throw new Error("This session is full. Turn on admin override only if you intentionally want to exceed capacity.");
+  }
+}
+
+async function saveManualWaiverIfNeeded(booking: BookingRecord, waiverStatus: ManualBookingWaiverStatus) {
+  if (waiverStatus !== "signed") {
+    return;
+  }
+
+  await saveWaiverForBooking({
+    ...booking,
+    waiverAccepted: true,
+    guardianSignature: booking.guardianSignature || booking.parentName,
+    waiverAcceptedAt: booking.waiverAcceptedAt || new Date().toISOString(),
+    mediaConsent: booking.mediaConsent || "Granted"
+  });
+}
+
+export async function createManualAdminBooking(input: ManualBookingInput) {
+  const session = await getSessionOrThrow(input.sessionId);
+  const paymentStatus = normalizeManualPaymentStatus(input.paymentStatus);
+  const paymentMethod = normalizeManualPaymentMethod(input.paymentMethod);
+  const waiverStatus = normalizeWaiverStatus(input.waiverStatus);
+  const isTrainingCredit = paymentMethod === "Training Package credit" || paymentStatus === "training_credit_used";
+
+  if (isTrainingCredit) {
+    if (!input.passPurchaseId) {
+      throw new Error("Choose a Training Package holder before using a Training credit.");
+    }
+
+    const redeemed = await supabaseRequest<Array<{ booking_id: string; credit_redemption_id: string; remaining_credits: number }>>(
+      "rpc/admin_redeem_launch_pass_credit",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          p_pass_purchase_id: input.passPurchaseId,
+          p_session_id: session.id,
+          p_parent_name: input.parentName,
+          p_parent_email: input.parentEmail,
+          p_parent_phone: input.parentPhone,
+          p_player_name: input.playerName,
+          p_player_age: input.playerAge,
+          p_training_group: session.training_group,
+          p_notes: "",
+          p_medical_notes: input.medicalNotes || "",
+          p_emergency_name: input.emergencyName || "",
+          p_emergency_phone: input.emergencyPhone || "",
+          p_admin_payment_status: "training_credit_used",
+          p_admin_payment_method: "Training Package credit",
+          p_internal_note: input.internalNote || "",
+          p_waiver_status: waiverStatus,
+          p_override_capacity: Boolean(input.overrideCapacity)
+        })
+      }
+    );
+    const redemption = redeemed[0];
+
+    if (!redemption) {
+      throw new Error("Manual Training Package booking could not be saved.");
+    }
+
+    const booking = await getBookingRecordForConfirmation(redemption.booking_id, redemption.remaining_credits);
+    await saveManualWaiverIfNeeded(booking, waiverStatus);
+
+    return {
+      booking: await getBookingRecordForConfirmation(redemption.booking_id, redemption.remaining_credits),
+      bookingRow: await getAdminBookingById(redemption.booking_id)
+    };
+  }
+
+  const confirmedStatus = adminStatusToBookingStatus(paymentStatus);
+
+  if (confirmedStatus === "paid") {
+    await ensureManualCapacity({
+      session,
+      overrideCapacity: input.overrideCapacity
+    });
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>("bookings", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: session.id,
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      training_group: session.training_group,
+      status: confirmedStatus,
+      amount_paid: Math.max(0, Math.round(Number(input.amountPaid) || 0)),
+      player_count: 1,
+      notes: null,
+      medical_notes: input.medicalNotes?.trim() || null,
+      emergency_name: input.emergencyName?.trim() || null,
+      emergency_phone: input.emergencyPhone?.trim() || null,
+      payment_type: "single_session",
+      manual_source: true,
+      admin_payment_status: paymentStatus,
+      admin_payment_method: paymentMethod,
+      waiver_status: waiverStatus,
+      internal_note: input.internalNote?.trim() || null,
+      admin_override_capacity: Boolean(input.overrideCapacity)
+    })
+  });
+  const bookingRow = rows[0];
+
+  if (!bookingRow) {
+    throw new Error("Manual booking could not be saved.");
+  }
+
+  const booking = await getBookingRecordForConfirmation(bookingRow.id);
+  await saveManualWaiverIfNeeded(booking, waiverStatus);
+
+  return {
+    booking: await getBookingRecordForConfirmation(bookingRow.id),
+    bookingRow: await getAdminBookingById(bookingRow.id)
+  };
+}
+
+export async function updateAdminBookingManualDetails(bookingId: string, input: ManualBookingUpdateInput) {
+  const existing = await getAdminBookingById(bookingId);
+
+  if (!existing) {
+    throw new Error("Booking was not found.");
+  }
+
+  const paymentStatus =
+    typeof input.paymentStatus === "string" ? normalizeManualPaymentStatus(input.paymentStatus) : existing.admin_payment_status || existing.status;
+  const nextStatus = adminStatusToBookingStatus(paymentStatus as ManualBookingPaymentStatus);
+  const session = await getSessionOrThrow(existing.session_id);
+
+  if (nextStatus === "paid" && existing.status !== "paid") {
+    await ensureManualCapacity({
+      session,
+      excludeBookingId: existing.id
+    });
+  }
+
+  const payload: Record<string, unknown> = {};
+
+  if (typeof input.playerName === "string") payload.player_name = input.playerName.trim();
+  if (typeof input.playerAge === "string") payload.player_age = input.playerAge.trim();
+  if (typeof input.parentName === "string") payload.parent_name = input.parentName.trim();
+  if (typeof input.parentEmail === "string") payload.parent_email = input.parentEmail.trim().toLowerCase();
+  if (typeof input.parentPhone === "string") payload.parent_phone = input.parentPhone.trim();
+  if (typeof input.paymentStatus === "string") {
+    payload.status = nextStatus;
+    payload.admin_payment_status = paymentStatus;
+  }
+  if (typeof input.paymentMethod === "string") payload.admin_payment_method = normalizeManualPaymentMethod(input.paymentMethod);
+  if (typeof input.amountPaid === "number") payload.amount_paid = Math.max(0, Math.round(input.amountPaid));
+  if (typeof input.waiverStatus === "string") payload.waiver_status = normalizeWaiverStatus(input.waiverStatus);
+  if (typeof input.notes === "string") payload.notes = input.notes.trim() || null;
+  if (typeof input.medicalNotes === "string") payload.medical_notes = input.medicalNotes.trim() || null;
+  if (typeof input.emergencyName === "string") payload.emergency_name = input.emergencyName.trim() || null;
+  if (typeof input.emergencyPhone === "string") payload.emergency_phone = input.emergencyPhone.trim() || null;
+  if (typeof input.internalNote === "string") payload.internal_note = input.internalNote.trim() || null;
+  payload.manual_source = existing.manual_source ?? true;
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+  const updated = rows[0];
+
+  if (!updated) {
+    throw new Error("Booking could not be updated.");
+  }
+
+  if (input.waiverStatus === "signed") {
+    const booking = await getBookingRecordForConfirmation(updated.id);
+    await saveManualWaiverIfNeeded(booking, "signed");
+  }
+
+  return getAdminBookingById(updated.id);
+}
+
+export async function cancelAdminBooking(input: {
+  bookingId: string;
+  returnCredit?: boolean;
+}) {
+  const booking = await getAdminBookingById(input.bookingId);
+
+  if (!booking) {
+    throw new Error("Booking was not found.");
+  }
+
+  let creditReturned = false;
+
+  if (input.returnCredit) {
+    const passPurchaseId = booking.pass_purchase_id || booking.creditRedemption?.pass_purchase_id;
+
+    if (!passPurchaseId) {
+      throw new Error("This booking is not connected to a Training Package credit.");
+    }
+
+    if (booking.creditAdjustment) {
+      throw new Error("A Training credit has already been returned for this booking.");
+    }
+
+    const issued = await issueManualLaunchPassCredit({
+      passPurchaseId,
+      creditAmount: 1,
+      reason: "Admin correction",
+      note: `Returned after admin cancelled booking ${booking.id} for ${booking.player_name}.`,
+      createdBy: "admin"
+    });
+
+    await supabaseRequest<CreditAdjustmentRow[]>(`credit_adjustments?id=eq.${encodeFilter(issued.adjustment.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        original_booking_id: booking.id,
+        original_session_id: booking.session_id
+      })
+    });
+    creditReturned = true;
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(input.bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: "cancelled"
+    })
+  });
+
+  return {
+    booking: rows[0] ?? null,
+    creditReturned
+  };
 }
 
 export async function listAdminTrainingSessions(): Promise<AdminTrainingSession[]> {

@@ -6,7 +6,7 @@ export const sessionLineItemName = "Elite Soccer Training CV - Single Session";
 export type LaunchPassType = "four_session_launch_pass" | "six_session_launch_pass";
 export type DirectPaymentOption = "single_session" | LaunchPassType;
 
-export const launchPassExpirationDate = "2026-06-30T23:59:59-07:00";
+export const launchPassExpirationDate = "2099-12-31T23:59:59Z";
 
 export const launchPassOptions: Record<
   LaunchPassType,
@@ -22,21 +22,21 @@ export const launchPassOptions: Record<
 > = {
   four_session_launch_pass: {
     passType: "four_session_launch_pass",
-    title: "4-Session Launch Pass",
+    title: "4-Session Training Package",
     price: "$200",
     amountCents: 20000,
     credits: 4,
-    description: "Best for players who want consistent training through the end of June.",
-    stripeLineItemName: "Elite Soccer Training CV - 4-Session Launch Pass"
+    description: "4 training credits for EST CV small group training.",
+    stripeLineItemName: "Elite Soccer Training CV - 4-Session Training Package"
   },
   six_session_launch_pass: {
     passType: "six_session_launch_pass",
-    title: "6-Session Launch Pass",
+    title: "6-Session Training Package",
     price: "$285",
     amountCents: 28500,
     credits: 6,
-    description: "Best for committed players training multiple times per week.",
-    stripeLineItemName: "Elite Soccer Training CV - 6-Session Launch Pass"
+    description: "6 training credits for EST CV small group training.",
+    stripeLineItemName: "Elite Soccer Training CV - 6-Session Training Package"
   }
 };
 

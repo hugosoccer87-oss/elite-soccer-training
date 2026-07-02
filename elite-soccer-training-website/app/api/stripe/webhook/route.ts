@@ -119,7 +119,7 @@ export async function POST(request: Request) {
             bookingId: passPurchaseId,
             sessionStatus: session.status,
             paymentStatus: session.payment_status,
-            message: "Launch Pass Checkout session was not paid and complete."
+            message: "Training Package Checkout session was not paid and complete."
           });
           return NextResponse.json({ received: true });
         }
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
           bookingId: passPurchaseId,
           sessionStatus: session.status,
           paymentStatus: session.payment_status,
-          message: "Launch Pass payment verified."
+          message: "Training Package payment verified."
         });
 
         const result = await confirmLaunchPassPurchase({
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
           amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
         });
 
-        console.info("[EST Stripe] Launch Pass purchase confirmed", {
+        console.info("[EST Stripe] Training Package purchase confirmed", {
           eventId: event.id,
           sessionId: session.id,
           passPurchaseId,

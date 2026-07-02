@@ -30,6 +30,7 @@ type DirectPayFields = {
   mediaConsent: "" | "yes" | "no";
   waiverAgreement: boolean;
   guardianSignature: string;
+  marketingOptIn: boolean;
 };
 
 type DirectPayErrorKey =
@@ -70,7 +71,8 @@ const initialFields: DirectPayFields = {
   medicalNotes: "",
   mediaConsent: "",
   waiverAgreement: false,
-  guardianSignature: ""
+  guardianSignature: "",
+  marketingOptIn: false
 };
 
 const paymentCards: Array<{
@@ -87,13 +89,13 @@ const paymentCards: Array<{
   },
   {
     option: "four_session_launch_pass",
-    title: "4-Session Launch Pass",
+    title: "4-Session Training Package",
     price: "$200/player",
     description: "Includes 4 total training credits. Good for players training consistently."
   },
   {
     option: "six_session_launch_pass",
-    title: "6-Session Launch Pass",
+    title: "6-Session Training Package",
     price: "$285/player",
     description: "Includes 6 total training credits. Best value for players training multiple times per week."
   }
@@ -389,7 +391,7 @@ export function DirectPayForm() {
           </label>
         ) : (
           <p className="mt-5 rounded-md border border-slate-200 bg-mist px-4 py-3 text-sm font-semibold leading-6 text-slate-600">
-            Launch Passes already include multiple training credits.
+            Training Packages already include multiple training credits.
           </p>
         )}
 
@@ -524,6 +526,15 @@ export function DirectPayForm() {
               Parent Phone *
               <input className={fieldClass("parentPhone")} type="tel" value={fields.parentPhone} onChange={(event) => setField("parentPhone", event.target.value)} />
               {fieldError("parentPhone")}
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-mist p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
+              <input
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                type="checkbox"
+                checked={fields.marketingOptIn}
+                onChange={(event) => setField("marketingOptIn", event.target.checked)}
+              />
+              <span>Yes, I&apos;d like to receive EST CV training schedules, updates, and special offers by email.</span>
             </label>
           </section>
 

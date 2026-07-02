@@ -19,7 +19,12 @@ import {
   sendLaunchPassTransactionalEmails
 } from "@/lib/transactional-email";
 
-export async function finalizeConfirmedBooking(booking: BookingRecord) {
+export async function finalizeConfirmedBooking(
+  booking: BookingRecord,
+  options: {
+    sendEmails?: boolean;
+  } = {}
+) {
   console.info("[EST Booking] Confirmed booking finalization started", {
     bookingId: booking.id,
     programName: booking.programName,
@@ -81,7 +86,10 @@ export async function finalizeConfirmedBooking(booking: BookingRecord) {
     calendarAlreadyExists: Boolean(calendarResult.alreadyExists)
   });
 
-  const emailResult = calendarResult.alreadyExists
+  const shouldSendEmails = options.sendEmails !== false;
+  const emailResult = !shouldSendEmails
+    ? null
+    : calendarResult.alreadyExists
     ? null
     : await (async () => {
         console.info("[EST Stripe] Starting email notifications", {
@@ -114,7 +122,13 @@ export async function finalizeConfirmedBooking(booking: BookingRecord) {
         return result;
       })();
 
-  if (calendarResult.alreadyExists) {
+  if (!shouldSendEmails) {
+    console.info("[EST Stripe] Email notifications complete", {
+      bookingId: booking.id,
+      skipped: true,
+      reason: "Admin chose not to send confirmation email"
+    });
+  } else if (calendarResult.alreadyExists) {
     console.info("[EST Stripe] Email notifications complete", {
       bookingId: booking.id,
       skipped: true,

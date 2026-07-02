@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
 import { type LaunchPassType, launchPassOptions } from "@/lib/pricing";
 import { createStripeLaunchPassCheckoutSession, getStripeEnvironmentDiagnostics } from "@/lib/stripe";
-import { attachPassStripeCheckoutSession, createPendingPassPurchase, getSupabaseAvailability } from "@/lib/supabase-db";
+import {
+  attachPassStripeCheckoutSession,
+  createPendingPassPurchase,
+  getSupabaseAvailability,
+  saveEmailSubscriberOptIn
+} from "@/lib/supabase-db";
 import { waiverVersion } from "@/lib/waiver-content";
 
 export const runtime = "nodejs";
@@ -47,6 +52,7 @@ export async function POST(request: Request) {
       waiverAcceptedAt?: string;
       mediaConsent?: "Granted" | "Declined";
     };
+    marketingOptIn?: boolean;
   } | null;
 
   if (
@@ -61,7 +67,7 @@ export async function POST(request: Request) {
     !payload.passType ||
     !isLaunchPassType(payload.passType)
   ) {
-    return NextResponse.json({ error: "Complete all Launch Pass purchase fields before payment." }, { status: 400 });
+    return NextResponse.json({ error: "Complete all Training Package purchase fields before payment." }, { status: 400 });
   }
 
   try {
@@ -79,7 +85,7 @@ export async function POST(request: Request) {
 
     if (selectedSessionIds.length > option.credits) {
       return NextResponse.json(
-        { error: `Choose no more than ${option.credits} sessions for this Launch Pass.` },
+        { error: `Choose no more than ${option.credits} sessions for this Training Package.` },
         { status: 400 }
       );
     }
@@ -95,7 +101,7 @@ export async function POST(request: Request) {
 
       if (invalidSession) {
         return NextResponse.json(
-          { error: "One or more selected sessions are no longer available for this Launch Pass." },
+          { error: "One or more selected sessions are no longer available for this Training Package." },
           { status: 400 }
         );
       }
@@ -109,7 +115,7 @@ export async function POST(request: Request) {
         !payload.bookingDetails.mediaConsent
       ) {
         return NextResponse.json(
-          { error: "Complete the emergency details and signed waiver before choosing sessions with a Launch Pass." },
+          { error: "Complete the emergency details and signed waiver before choosing sessions with a Training Package." },
           { status: 400 }
         );
       }
@@ -155,6 +161,17 @@ export async function POST(request: Request) {
     const session = await createStripeLaunchPassCheckoutSession(pass);
     await attachPassStripeCheckoutSession(pass.id, session.id);
 
+    if (payload.marketingOptIn) {
+      await saveEmailSubscriberOptIn({
+        parentName: pass.parent_name,
+        email: pass.parent_email,
+        phone: pass.parent_phone,
+        playerName: pass.player_name,
+        playerAge: pass.player_age,
+        source: selectedSessionIds.length > 0 ? "launch_pass_with_sessions" : "launch_pass_purchase"
+      });
+    }
+
     console.info("[EST Stripe] Redirecting to Stripe Checkout", {
       purchaseType: "launch_pass",
       passPurchaseId: pass.id,
@@ -167,13 +184,13 @@ export async function POST(request: Request) {
       passPurchaseId: pass.id
     });
   } catch (error) {
-    console.error("[EST Stripe] Failed to create Launch Pass Checkout session", {
+    console.error("[EST Stripe] Failed to create Training Package Checkout session", {
       error: error instanceof Error ? error.message : String(error)
     });
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Launch Pass checkout could not be started."
+        error: error instanceof Error ? error.message : "Training Package checkout could not be started."
       },
       { status: 500 }
     );

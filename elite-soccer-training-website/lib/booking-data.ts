@@ -71,6 +71,7 @@ export type BookingRecord = {
   passPurchaseId?: string;
   creditRedemptionId?: string;
   remainingCreditsAfter?: number;
+  marketingOptIn?: boolean;
 };
 
 export const availabilityStorageKey = "est-availability-v3";

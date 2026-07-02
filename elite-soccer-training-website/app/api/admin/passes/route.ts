@@ -18,7 +18,7 @@ export async function GET() {
     return NextResponse.json({ status: "Synced", passes });
   } catch (error) {
     return NextResponse.json(
-      { status: "Failed", error: error instanceof Error ? error.message : "Launch Passes could not be loaded." },
+      { status: "Failed", error: error instanceof Error ? error.message : "Training Packages could not be loaded." },
       { status: 500 }
     );
   }

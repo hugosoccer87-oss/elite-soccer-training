@@ -208,6 +208,46 @@ type BulkPreviewSession = {
   duplicateInPreview: boolean;
 };
 
+type ManualBookingPaymentStatus = "paid" | "pending_payment" | "comped" | "training_credit_used";
+type ManualBookingPaymentMethod =
+  | "Zelle"
+  | "Cash"
+  | "Venmo"
+  | "Card"
+  | "Training Package credit"
+  | "Comped"
+  | "Other";
+type ManualBookingWaiverStatus = "signed" | "missing";
+type ManualBookingModalState =
+  | {
+      mode: "add";
+      session: AdminTrainingSession;
+    }
+  | {
+      mode: "edit";
+      booking: AdminBookingRecord;
+      session?: AdminTrainingSession;
+    };
+
+type ManualBookingFormState = {
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  emergencyName: string;
+  emergencyPhone: string;
+  medicalNotes: string;
+  paymentStatus: ManualBookingPaymentStatus;
+  paymentMethod: ManualBookingPaymentMethod;
+  amountPaid: string;
+  waiverStatus: ManualBookingWaiverStatus;
+  internalNote: string;
+  passPurchaseId: string;
+  overrideCapacity: boolean;
+  sendConfirmationEmail: boolean;
+};
+
 const adminSections: Array<{ id: AdminSection; label: string; note: string }> = [
   { id: "dashboard", label: "Overview", note: "Today and this week" },
   { id: "calendar", label: "Calendar", note: "Booked sessions by date" },
@@ -239,6 +279,39 @@ const manualCreditReasons = [
   "Goodwill credit",
   "Other"
 ];
+const manualBookingPaymentStatuses: Array<{ value: ManualBookingPaymentStatus; label: string }> = [
+  { value: "paid", label: "Paid" },
+  { value: "pending_payment", label: "Pending payment" },
+  { value: "comped", label: "Comped" },
+  { value: "training_credit_used", label: "Training credit used" }
+];
+const manualBookingPaymentMethods: Array<{ value: ManualBookingPaymentMethod; label: string }> = [
+  { value: "Zelle", label: "Zelle" },
+  { value: "Cash", label: "Cash" },
+  { value: "Venmo", label: "Venmo" },
+  { value: "Card", label: "Card" },
+  { value: "Training Package credit", label: "Training Package credit" },
+  { value: "Comped", label: "Comped" },
+  { value: "Other", label: "Other" }
+];
+const defaultManualBookingForm: ManualBookingFormState = {
+  playerName: "",
+  playerAge: "",
+  parentName: "",
+  parentEmail: "",
+  parentPhone: "",
+  emergencyName: "",
+  emergencyPhone: "",
+  medicalNotes: "",
+  paymentStatus: "paid",
+  paymentMethod: "Zelle",
+  amountPaid: "55",
+  waiverStatus: "missing",
+  internalNote: "",
+  passPurchaseId: "",
+  overrideCapacity: false,
+  sendConfirmationEmail: true
+};
 const scheduleApprovalPaymentMethods: Array<{ value: ScheduleApprovalPaymentMethod; label: string }> = [
   { value: "cash", label: "Cash" },
   { value: "zelle", label: "Zelle" },
@@ -574,6 +647,10 @@ function adminCalendarBlockClass(session: AdminTrainingSession) {
 }
 
 function paymentTypeLabel(booking: AdminBookingRecord) {
+  if (booking.admin_payment_method) {
+    return booking.admin_payment_method;
+  }
+
   if (booking.payment_type === "launch_pass_credit") {
     return "Training credit";
   }
@@ -584,6 +661,15 @@ function paymentTypeLabel(booking: AdminBookingRecord) {
 function isBookingConfirmedForAdmin(booking: AdminBookingRecord) {
   if (booking.status !== "paid") {
     return false;
+  }
+
+  if (
+    booking.manual_source &&
+    (booking.admin_payment_status === "paid" ||
+      booking.admin_payment_status === "comped" ||
+      booking.admin_payment_status === "training_credit_used")
+  ) {
+    return true;
   }
 
   if (booking.payment_type === "launch_pass_credit" || booking.pass_purchase_id || booking.credit_redemption_id) {
@@ -1067,6 +1153,10 @@ export function AdminAvailability() {
   const [directPaymentFilter, setDirectPaymentFilter] = useState<DirectPaymentFilter>("all");
   const [expandedDirectPaymentId, setExpandedDirectPaymentId] = useState("");
   const [activeContactEdit, setActiveContactEdit] = useState<ContactEditState | null>(null);
+  const [activeManualBooking, setActiveManualBooking] = useState<ManualBookingModalState | null>(null);
+  const [manualBookingForm, setManualBookingForm] = useState<ManualBookingFormState>(defaultManualBookingForm);
+  const [manualBookingErrors, setManualBookingErrors] = useState<Record<string, string>>({});
+  const [savingManualBooking, setSavingManualBooking] = useState(false);
   const [contactForm, setContactForm] = useState<ContactFormState>({
     parentName: "",
     parentEmail: "",
@@ -1123,6 +1213,116 @@ export function AdminAvailability() {
   useEffect(() => {
     void refreshAdminData();
   }, []);
+
+  function openManualBookingForm(session: AdminTrainingSession) {
+    setManualBookingErrors({});
+    setManualBookingForm({
+      ...defaultManualBookingForm,
+      sendConfirmationEmail: true
+    });
+    setActiveManualBooking({ mode: "add", session });
+  }
+
+  function openEditManualBookingForm(booking: AdminBookingRecord, session?: AdminTrainingSession) {
+    setManualBookingErrors({});
+    setManualBookingForm({
+      playerName: booking.player_name || "",
+      playerAge: booking.player_age || "",
+      parentName: booking.parent_name || "",
+      parentEmail: booking.parent_email || "",
+      parentPhone: booking.parent_phone || "",
+      emergencyName: booking.emergency_name || "",
+      emergencyPhone: booking.emergency_phone || "",
+      medicalNotes: booking.medical_notes || "",
+      paymentStatus:
+        booking.admin_payment_status ||
+        (booking.payment_type === "launch_pass_credit" ? "training_credit_used" : booking.status === "paid" ? "paid" : "pending_payment"),
+      paymentMethod:
+        booking.admin_payment_method ||
+        (booking.payment_type === "launch_pass_credit" ? "Training Package credit" : "Other"),
+      amountPaid: String((Number(booking.amount_paid) || 0) / 100),
+      waiverStatus: booking.waiver_status || (booking.waiver?.waiver_signed ? "signed" : "missing"),
+      internalNote: booking.internal_note || booking.notes || "",
+      passPurchaseId: booking.pass_purchase_id || "",
+      overrideCapacity: Boolean(booking.admin_override_capacity),
+      sendConfirmationEmail: false
+    });
+    setActiveManualBooking({ mode: "edit", booking, session });
+  }
+
+  function updateManualBookingField<K extends keyof ManualBookingFormState>(field: K, value: ManualBookingFormState[K]) {
+    setManualBookingForm((current) => {
+      const next = { ...current, [field]: value };
+
+      if (field === "paymentStatus") {
+        if (value === "pending_payment") {
+          next.sendConfirmationEmail = false;
+        } else if (activeManualBooking?.mode === "add") {
+          next.sendConfirmationEmail = true;
+        }
+
+        if (value === "comped") {
+          next.paymentMethod = "Comped";
+          next.amountPaid = "0";
+        }
+
+        if (value === "training_credit_used") {
+          next.paymentMethod = "Training Package credit";
+          next.amountPaid = "0";
+        }
+      }
+
+      if (field === "paymentMethod") {
+        if (value === "Training Package credit") {
+          next.paymentStatus = "training_credit_used";
+          next.amountPaid = "0";
+        }
+
+        if (value === "Comped") {
+          next.paymentStatus = "comped";
+          next.amountPaid = "0";
+        }
+      }
+
+      return next;
+    });
+    setManualBookingErrors((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function validateManualBookingForm() {
+    const nextErrors: Record<string, string> = {};
+
+    if (!manualBookingForm.playerName.trim()) nextErrors.playerName = "Player name is required.";
+    if (!manualBookingForm.playerAge.trim()) nextErrors.playerAge = "Player age is required.";
+    if (!manualBookingForm.parentName.trim()) nextErrors.parentName = "Parent name is required.";
+    if (!manualBookingForm.parentEmail.trim()) {
+      nextErrors.parentEmail = "Parent email is required.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(manualBookingForm.parentEmail.trim())) {
+      nextErrors.parentEmail = "Enter a valid parent email.";
+    }
+    if (!manualBookingForm.parentPhone.trim()) nextErrors.parentPhone = "Parent phone is required.";
+    if (manualBookingForm.paymentMethod === "Training Package credit" && !manualBookingForm.passPurchaseId) {
+      nextErrors.passPurchaseId = "Choose a Training Package holder.";
+    }
+    if (manualBookingForm.paymentStatus === "paid" && Number(manualBookingForm.amountPaid) < 0) {
+      nextErrors.amountPaid = "Enter a valid amount paid.";
+    }
+
+    setManualBookingErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function manualFieldClass(field: string) {
+    return `${inputClass} ${manualBookingErrors[field] ? "border-red-500 bg-red-50 ring-1 ring-red-500" : ""}`;
+  }
+
+  function manualFieldError(field: string) {
+    return manualBookingErrors[field] ? <p className="text-xs font-bold text-red-700">{manualBookingErrors[field]}</p> : null;
+  }
 
   const sessionById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
   const activeEmailSubscribers = useMemo(
@@ -1670,6 +1870,135 @@ export function AdminAvailability() {
       setError(creditError instanceof Error ? creditError.message : "Makeup credit could not be issued.");
     } finally {
       setCreditingBookingId("");
+    }
+  }
+
+  async function saveManualBooking() {
+    if (!activeManualBooking || !validateManualBookingForm()) {
+      return;
+    }
+
+    setSavingManualBooking(true);
+    setError("");
+    setNotice("");
+
+    const amountPaid = Math.round(Math.max(0, Number(manualBookingForm.amountPaid) || 0) * 100);
+
+    try {
+      if (activeManualBooking.mode === "add") {
+        const response = await fetch("/api/admin/bookings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            sessionId: activeManualBooking.session.id,
+            playerName: manualBookingForm.playerName,
+            playerAge: manualBookingForm.playerAge,
+            parentName: manualBookingForm.parentName,
+            parentEmail: manualBookingForm.parentEmail,
+            parentPhone: manualBookingForm.parentPhone,
+            emergencyName: manualBookingForm.emergencyName,
+            emergencyPhone: manualBookingForm.emergencyPhone,
+            medicalNotes: manualBookingForm.medicalNotes,
+            paymentStatus: manualBookingForm.paymentStatus,
+            paymentMethod: manualBookingForm.paymentMethod,
+            amountPaid,
+            waiverStatus: manualBookingForm.waiverStatus,
+            internalNote: manualBookingForm.internalNote,
+            passPurchaseId: manualBookingForm.passPurchaseId,
+            overrideCapacity: manualBookingForm.overrideCapacity,
+            sendConfirmationEmail: manualBookingForm.sendConfirmationEmail
+          })
+        });
+        const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+        if (!response.ok) {
+          throw new Error(result.error || "Manual booking could not be saved.");
+        }
+
+        setActiveManualBooking(null);
+        await refreshAdminData(result.message || "Manual booking saved.");
+        return;
+      }
+
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(activeManualBooking.booking.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "update_manual_booking",
+          updates: {
+            playerName: manualBookingForm.playerName,
+            playerAge: manualBookingForm.playerAge,
+            parentName: manualBookingForm.parentName,
+            parentEmail: manualBookingForm.parentEmail,
+            parentPhone: manualBookingForm.parentPhone,
+            paymentStatus: manualBookingForm.paymentStatus,
+            paymentMethod: manualBookingForm.paymentMethod,
+            amountPaid,
+            waiverStatus: manualBookingForm.waiverStatus,
+            medicalNotes: manualBookingForm.medicalNotes,
+            emergencyName: manualBookingForm.emergencyName,
+            emergencyPhone: manualBookingForm.emergencyPhone,
+            internalNote: manualBookingForm.internalNote
+          }
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Booking could not be updated.");
+      }
+
+      setActiveManualBooking(null);
+      await refreshAdminData(result.message || "Contact information updated successfully.");
+    } catch (manualError) {
+      setError(manualError instanceof Error ? manualError.message : "Manual booking could not be saved.");
+    } finally {
+      setSavingManualBooking(false);
+    }
+  }
+
+  async function cancelAdminPlayerBooking(booking: AdminBookingRecord) {
+    const isCreditBooking =
+      booking.payment_type === "launch_pass_credit" || Boolean(booking.pass_purchase_id) || Boolean(booking.credit_redemption_id);
+    const returnCredit =
+      isCreditBooking &&
+      !booking.creditAdjustment &&
+      window.confirm(`This booking used a Training Package credit. Return 1 credit to ${booking.player_name}'s package?`);
+
+    if (!window.confirm(`Remove/cancel ${booking.player_name} from this session?`)) {
+      return;
+    }
+
+    setUpdatingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(booking.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "cancel_booking",
+          returnCredit
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Booking could not be cancelled.");
+      }
+
+      await refreshAdminData(result.message || "Player removed from session.");
+    } catch (bookingError) {
+      setError(bookingError instanceof Error ? bookingError.message : "Booking could not be cancelled.");
+    } finally {
+      setUpdatingBookingId("");
     }
   }
 
@@ -2803,6 +3132,13 @@ export function AdminAvailability() {
                     {diagnostics?.googleCalendar?.googleCalendarConfigured ? "Configured" : "Not configured"} · Last status:{" "}
                     {diagnostics?.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"}
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => openManualBookingForm(selectedCalendarSession)}
+                    className={`${primaryButtonClass} mt-4 w-full`}
+                  >
+                    Add Player Manually
+                  </button>
                 </div>
 
                 <div>
@@ -2837,6 +3173,19 @@ export function AdminAvailability() {
                           <button type="button" onClick={() => editBookingContact(booking)} className={`${secondaryButtonClass} mt-3`}>
                             Edit Contact Info
                           </button>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => openEditManualBookingForm(booking, selectedCalendarSession)} className={secondaryButtonClass}>
+                              Edit Booking
+                            </button>
+                            <button
+                              type="button"
+                              disabled={updatingBookingId === booking.id}
+                              onClick={() => void cancelAdminPlayerBooking(booking)}
+                              className={dangerButtonClass}
+                            >
+                              {updatingBookingId === booking.id ? "Removing..." : "Remove Player"}
+                            </button>
+                          </div>
                         </article>
                       ))
                     ) : (
@@ -3403,6 +3752,13 @@ export function AdminAvailability() {
                                 </button>
                                 <button
                                   type="button"
+                                  onClick={() => openManualBookingForm(session)}
+                                  className={primaryButtonClass}
+                                >
+                                  Add Player Manually
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => setActionsSessionId(actionsOpen ? "" : session.id)}
                                   className={secondaryButtonClass}
                                 >
@@ -3424,6 +3780,9 @@ export function AdminAvailability() {
                                     </button>
                                     <button type="button" onClick={() => duplicateSession(session)} className={secondaryButtonClass}>
                                       Duplicate
+                                    </button>
+                                    <button type="button" onClick={() => openManualBookingForm(session)} className={primaryButtonClass}>
+                                      Add Player Manually
                                     </button>
                                   </div>
                                 </div>
@@ -3517,8 +3876,13 @@ export function AdminAvailability() {
                                               </p>
                                               <p className="mt-1 text-sm text-slate-600">
                                                 Payment type:{" "}
-                                                {booking.payment_type === "launch_pass_credit" ? "Training credit" : "Single Session"}
+                                                {paymentTypeLabel(booking)}
                                               </p>
+                                              {booking.manual_source ? (
+                                                <p className="mt-1 text-sm font-bold text-slate-600">
+                                                  Manual admin booking · {booking.admin_payment_status || booking.status}
+                                                </p>
+                                              ) : null}
                                               <p className="mt-1 text-sm text-slate-600">Amount paid: {formatMoney(booking.amount_paid)}</p>
                                               {booking.creditAdjustment ? (
                                                 <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold leading-5 text-emerald-700">
@@ -3533,6 +3897,7 @@ export function AdminAvailability() {
                                               <p><span className="font-black text-navy">Email:</span> {booking.parent_email}</p>
                                               <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
                                               <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
+                                              <p><span className="font-black text-navy">Internal:</span> {booking.internal_note || "None"}</p>
                                               <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
                                             </div>
                                           </div>
@@ -3561,6 +3926,17 @@ export function AdminAvailability() {
                                                 ) : null}
                                                 <button type="button" onClick={() => editBookingContact(booking)} className={secondaryButtonClass}>
                                                   Edit Contact Info
+                                                </button>
+                                                <button type="button" onClick={() => openEditManualBookingForm(booking, session)} className={secondaryButtonClass}>
+                                                  Edit Booking
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={updatingBookingId === booking.id}
+                                                  onClick={() => void cancelAdminPlayerBooking(booking)}
+                                                  className={dangerButtonClass}
+                                                >
+                                                  {updatingBookingId === booking.id ? "Removing..." : "Remove Player"}
                                                 </button>
                                                 <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
                                                   View Waiver Record
@@ -3736,11 +4112,15 @@ export function AdminAvailability() {
                       <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-mist p-4 lg:grid-cols-2">
                         <div className="grid gap-2 text-sm text-slate-600">
                           <p><span className="font-black text-navy">Booking source:</span> {booking.payment_type === "launch_pass_credit" ? "Training credit" : "Single Session"}</p>
+                          {booking.manual_source ? (
+                            <p><span className="font-black text-navy">Admin payment:</span> {booking.admin_payment_status || booking.status} · {paymentTypeLabel(booking)}</p>
+                          ) : null}
                           <p><span className="font-black text-navy">Created:</span> {formatWaiverTimestamp(booking.created_at)}</p>
                           <p><span className="font-black text-navy">Amount:</span> {formatMoney(booking.amount_paid)}</p>
                           <p><span className="font-black text-navy">Player count:</span> {booking.player_count}</p>
                           <p><span className="font-black text-navy">Emergency:</span> {booking.emergency_name || "Not recorded"} - {booking.emergency_phone || "Not recorded"}</p>
                           <p><span className="font-black text-navy">Notes:</span> {booking.notes || "None"}</p>
+                          <p><span className="font-black text-navy">Internal note:</span> {booking.internal_note || "None"}</p>
                           <p><span className="font-black text-navy">Medical:</span> {booking.medical_notes || "None"}</p>
                         </div>
                         <div className="grid gap-2 text-sm text-slate-600">
@@ -3759,6 +4139,19 @@ export function AdminAvailability() {
                             <button type="button" onClick={() => editBookingContact(booking)} className={secondaryButtonClass}>
                               Edit Contact Info
                             </button>
+                            <button type="button" onClick={() => openEditManualBookingForm(booking, session)} className={secondaryButtonClass}>
+                              Edit Booking
+                            </button>
+                            {isConfirmed ? (
+                              <button
+                                type="button"
+                                disabled={isUpdatingBooking}
+                                onClick={() => void cancelAdminPlayerBooking(booking)}
+                                className={dangerButtonClass}
+                              >
+                                {isUpdatingBooking ? "Removing..." : "Remove Player"}
+                              </button>
+                            ) : null}
                             {!isConfirmed ? (
                               <>
                                 <button
@@ -4660,6 +5053,242 @@ export function AdminAvailability() {
             )}
           </div>
         </section>
+      ) : null}
+
+      {activeManualBooking ? (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-navy/70 px-4 py-8">
+          <div className="mx-auto max-w-5xl rounded-xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+            <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase text-electric">Admin Booking</p>
+                <h3 className="mt-1 text-2xl font-black text-navy">
+                  {activeManualBooking.mode === "add" ? "Add Player Manually" : "Edit Booking"}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {activeManualBooking.mode === "add"
+                    ? `${sessionFocusLabel(activeManualBooking.session)} · ${formatDateTime(activeManualBooking.session.start_datetime, activeManualBooking.session.timezone)}`
+                    : activeManualBooking.session
+                      ? `${sessionFocusLabel(activeManualBooking.session)} · ${formatDateTime(activeManualBooking.session.start_datetime, activeManualBooking.session.timezone)}`
+                      : "Update saved booking details."}
+                </p>
+              </div>
+              <button type="button" onClick={() => setActiveManualBooking(null)} className={secondaryButtonClass}>
+                Close
+              </button>
+            </div>
+
+            {Object.keys(manualBookingErrors).length > 0 ? (
+              <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-black text-red-700">
+                Please complete the highlighted required fields before saving.
+              </p>
+            ) : null}
+
+            <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+              <div className="grid gap-4">
+                <div className="rounded-lg border border-slate-200 bg-mist p-4">
+                  <p className="text-xs font-black uppercase text-electric">Player & Parent</p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Player Name
+                      <input
+                        className={manualFieldClass("playerName")}
+                        value={manualBookingForm.playerName}
+                        onChange={(event) => updateManualBookingField("playerName", event.target.value)}
+                      />
+                      {manualFieldError("playerName")}
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Player Age
+                      <input
+                        className={manualFieldClass("playerAge")}
+                        value={manualBookingForm.playerAge}
+                        onChange={(event) => updateManualBookingField("playerAge", event.target.value)}
+                      />
+                      {manualFieldError("playerAge")}
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Parent Name
+                      <input
+                        className={manualFieldClass("parentName")}
+                        value={manualBookingForm.parentName}
+                        onChange={(event) => updateManualBookingField("parentName", event.target.value)}
+                      />
+                      {manualFieldError("parentName")}
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Parent Email
+                      <input
+                        className={manualFieldClass("parentEmail")}
+                        type="email"
+                        value={manualBookingForm.parentEmail}
+                        onChange={(event) => updateManualBookingField("parentEmail", event.target.value)}
+                      />
+                      {manualFieldError("parentEmail")}
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Parent Phone
+                      <input
+                        className={manualFieldClass("parentPhone")}
+                        value={manualBookingForm.parentPhone}
+                        onChange={(event) => updateManualBookingField("parentPhone", event.target.value)}
+                      />
+                      {manualFieldError("parentPhone")}
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Emergency Contact Name
+                      <input
+                        className={inputClass}
+                        value={manualBookingForm.emergencyName}
+                        onChange={(event) => updateManualBookingField("emergencyName", event.target.value)}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Emergency Contact Phone
+                      <input
+                        className={inputClass}
+                        value={manualBookingForm.emergencyPhone}
+                        onChange={(event) => updateManualBookingField("emergencyPhone", event.target.value)}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500 sm:col-span-2">
+                      Medical Notes
+                      <textarea
+                        className={`${inputClass} min-h-24`}
+                        value={manualBookingForm.medicalNotes}
+                        onChange={(event) => updateManualBookingField("medicalNotes", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4">
+                <div className="rounded-lg border border-slate-200 bg-mist p-4">
+                  <p className="text-xs font-black uppercase text-electric">Payment & Admin Notes</p>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Payment Status
+                      <select
+                        className={inputClass}
+                        value={manualBookingForm.paymentStatus}
+                        onChange={(event) => updateManualBookingField("paymentStatus", event.target.value as ManualBookingPaymentStatus)}
+                      >
+                        {manualBookingPaymentStatuses.map((status) => (
+                          <option key={status.value} value={status.value}>
+                            {status.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Payment Method
+                      <select
+                        className={inputClass}
+                        value={manualBookingForm.paymentMethod}
+                        onChange={(event) => updateManualBookingField("paymentMethod", event.target.value as ManualBookingPaymentMethod)}
+                      >
+                        {manualBookingPaymentMethods.map((method) => (
+                          <option key={method.value} value={method.value}>
+                            {method.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Amount Paid
+                      <input
+                        className={manualFieldClass("amountPaid")}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={manualBookingForm.amountPaid}
+                        onChange={(event) => updateManualBookingField("amountPaid", event.target.value)}
+                      />
+                      {manualFieldError("amountPaid")}
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Waiver Status
+                      <select
+                        className={inputClass}
+                        value={manualBookingForm.waiverStatus}
+                        onChange={(event) => updateManualBookingField("waiverStatus", event.target.value as ManualBookingWaiverStatus)}
+                      >
+                        <option value="missing">Waiver missing</option>
+                        <option value="signed">Waiver signed</option>
+                      </select>
+                    </label>
+
+                    {manualBookingForm.paymentMethod === "Training Package credit" ? (
+                      <label className="grid gap-2 text-xs font-black uppercase text-slate-500 sm:col-span-2">
+                        Training Package Holder
+                        <select
+                          className={manualFieldClass("passPurchaseId")}
+                          value={manualBookingForm.passPurchaseId}
+                          onChange={(event) => updateManualBookingField("passPurchaseId", event.target.value)}
+                        >
+                          <option value="">Choose active package...</option>
+                          {activePasses.map((pass) => (
+                            <option key={pass.id} value={pass.id}>
+                              {pass.player_name} · {pass.parent_email} · {pass.remaining_credits}/{pass.total_credits} credits
+                            </option>
+                          ))}
+                        </select>
+                        {manualFieldError("passPurchaseId")}
+                      </label>
+                    ) : null}
+
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500 sm:col-span-2">
+                      Internal Note
+                      <textarea
+                        className={`${inputClass} min-h-24`}
+                        value={manualBookingForm.internalNote}
+                        onChange={(event) => updateManualBookingField("internalNote", event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {activeManualBooking.mode === "add" ? (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <label className="flex items-start gap-3 text-sm font-bold leading-6 text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                        checked={manualBookingForm.overrideCapacity}
+                        onChange={(event) => updateManualBookingField("overrideCapacity", event.target.checked)}
+                      />
+                      <span>Admin override: allow this booking even if the session is full or closed.</span>
+                    </label>
+                    <label className="mt-3 flex items-start gap-3 text-sm font-bold leading-6 text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                        checked={manualBookingForm.sendConfirmationEmail}
+                        onChange={(event) => updateManualBookingField("sendConfirmationEmail", event.target.checked)}
+                        disabled={manualBookingForm.paymentStatus === "pending_payment"}
+                      />
+                      <span>Send confirmation email to parent</span>
+                    </label>
+                    {manualBookingForm.paymentStatus === "pending_payment" ? (
+                      <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
+                        Pending bookings do not count as confirmed and will not send confirmation email or sync to Google Calendar.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setActiveManualBooking(null)} className={secondaryButtonClass}>
+                Cancel
+              </button>
+              <button type="button" disabled={savingManualBooking} onClick={() => void saveManualBooking()} className={primaryButtonClass}>
+                {savingManualBooking ? "Saving..." : activeManualBooking.mode === "add" ? "Save Manual Booking" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {activeContactEdit ? (

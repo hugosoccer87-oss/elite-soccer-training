@@ -19,7 +19,12 @@ import {
   sendLaunchPassTransactionalEmails
 } from "@/lib/transactional-email";
 
-export async function finalizeConfirmedBooking(booking: BookingRecord) {
+export async function finalizeConfirmedBooking(
+  booking: BookingRecord,
+  options: {
+    sendEmails?: boolean;
+  } = {}
+) {
   console.info("[EST Booking] Confirmed booking finalization started", {
     bookingId: booking.id,
     programName: booking.programName,
@@ -81,7 +86,10 @@ export async function finalizeConfirmedBooking(booking: BookingRecord) {
     calendarAlreadyExists: Boolean(calendarResult.alreadyExists)
   });
 
-  const emailResult = calendarResult.alreadyExists
+  const shouldSendEmails = options.sendEmails !== false;
+  const emailResult = !shouldSendEmails
+    ? null
+    : calendarResult.alreadyExists
     ? null
     : await (async () => {
         console.info("[EST Stripe] Starting email notifications", {
@@ -114,7 +122,13 @@ export async function finalizeConfirmedBooking(booking: BookingRecord) {
         return result;
       })();
 
-  if (calendarResult.alreadyExists) {
+  if (!shouldSendEmails) {
+    console.info("[EST Stripe] Email notifications complete", {
+      bookingId: booking.id,
+      skipped: true,
+      reason: "Admin chose not to send confirmation email"
+    });
+  } else if (calendarResult.alreadyExists) {
     console.info("[EST Stripe] Email notifications complete", {
       bookingId: booking.id,
       skipped: true,
@@ -166,7 +180,7 @@ export async function confirmPaidBooking(
 }
 
 export async function confirmLaunchPassCreditBooking(booking: BookingRecord) {
-  console.info("[EST Booking] Launch Pass credit booking confirmation started", {
+  console.info("[EST Booking] Training credit booking confirmation started", {
     bookingId: booking.id,
     passPurchaseId: booking.passPurchaseId,
     creditRedemptionId: booking.creditRedemptionId,
@@ -226,7 +240,7 @@ async function redeemSelectedLaunchPassSessions(pass: PassPurchaseRow) {
     return [];
   }
 
-  console.info("[EST Pass] Redeeming sessions selected at Launch Pass purchase", {
+  console.info("[EST Pass] Redeeming sessions selected at Training Package purchase", {
     passPurchaseId: pass.id,
     selectedSessionCount: selectedSessionIds.length
   });
@@ -245,7 +259,7 @@ async function redeemSelectedLaunchPassSessions(pass: PassPurchaseRow) {
       results.push({
         sessionId,
         status: "skipped",
-        message: "Session was already redeemed for this Launch Pass."
+        message: "Session was already redeemed for this Training Package."
       });
       continue;
     }
@@ -266,7 +280,7 @@ async function redeemSelectedLaunchPassSessions(pass: PassPurchaseRow) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
-      console.error("[EST Pass] Selected Launch Pass session could not be booked", {
+      console.error("[EST Pass] Selected Training Package session could not be booked", {
         passPurchaseId: pass.id,
         sessionId,
         error: message
@@ -279,7 +293,7 @@ async function redeemSelectedLaunchPassSessions(pass: PassPurchaseRow) {
     }
   }
 
-  console.info("[EST Pass] Selected Launch Pass session redemption complete", {
+  console.info("[EST Pass] Selected Training Package session redemption complete", {
     passPurchaseId: pass.id,
     confirmed: results.filter((result) => result.status === "confirmed").length,
     skipped: results.filter((result) => result.status === "skipped").length,
@@ -295,7 +309,7 @@ export async function confirmLaunchPassPurchase(input: {
   paymentIntentId?: string;
   amountPaid?: number;
 }) {
-  console.info("[EST Stripe] Confirming Launch Pass purchase", {
+  console.info("[EST Stripe] Confirming Training Package purchase", {
     passPurchaseId: input.passPurchaseId,
     checkoutSessionId: input.checkoutSessionId
   });
@@ -304,11 +318,11 @@ export async function confirmLaunchPassPurchase(input: {
   const updatedPass = selectedSessionResults.length > 0 ? (await getPassPurchaseById(pass.id)) ?? pass : pass;
 
   try {
-    console.info("[EST Stripe] Starting Launch Pass email notifications", {
+    console.info("[EST Stripe] Starting Training Package email notifications", {
       passPurchaseId: updatedPass.id
     });
     const result = await sendLaunchPassTransactionalEmails(updatedPass);
-    console.info("[EST Stripe] Launch Pass email notifications complete", {
+    console.info("[EST Stripe] Training Package email notifications complete", {
       passPurchaseId: updatedPass.id,
       sent: result.sent,
       customerSent: result.customerSent,
@@ -322,7 +336,7 @@ export async function confirmLaunchPassPurchase(input: {
       emailResult: result
     };
   } catch (error) {
-    console.error("[EST Email] Launch Pass email flow failed:", {
+    console.error("[EST Email] Training Package email flow failed:", {
       passPurchaseId: updatedPass.id,
       error: error instanceof Error ? error.message : String(error)
     });
@@ -334,7 +348,7 @@ export async function confirmLaunchPassPurchase(input: {
         sent: false,
         customerSent: false,
         adminSent: false,
-        message: error instanceof Error ? error.message : "Launch Pass emails failed."
+        message: error instanceof Error ? error.message : "Training Package emails failed."
       }
     };
   }
