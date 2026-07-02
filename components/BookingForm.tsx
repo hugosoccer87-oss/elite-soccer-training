@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarIcon, ShieldIcon } from "./Icons";
+import { PrivateSessionRequestForm } from "./PrivateSessionRequestForm";
 import { SignaturePad } from "./SignaturePad";
-import { SpecialRequestForm } from "./SpecialRequestForm";
 import {
   getTrainingGroup,
   isAgeInGroup,
@@ -37,11 +37,10 @@ const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
 const publicStepLabels = ["Choose Your Training Session", "Athlete Information", "Parent Waiver + Secure Payment"];
-const specialTrainingRequestValue = "special-training-request";
 const activeBookingGroupId: TrainingGroupId = "elite-performance";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
-type BookingOption = "single_session" | LaunchPassType | "use_existing_pass";
+type BookingOption = "single_session" | LaunchPassType | "use_existing_pass" | "private_request";
 type LaunchPassUseMode = "choose_now" | "choose_later";
 
 type BookingFields = {
@@ -381,6 +380,10 @@ function bookingOptionFromTypeParam(value: string | null): BookingOption | null 
     return "six_session_launch_pass";
   }
 
+  if (normalized === "private" || normalized === "private-request" || normalized === "1-on-1") {
+    return "private_request";
+  }
+
   return null;
 }
 
@@ -394,7 +397,6 @@ export function BookingForm() {
   const [selectedSlotId, setSelectedSlotId] = useState("");
   const [selectedSessionDate, setSelectedSessionDate] = useState("");
   const [visibleMonth, setVisibleMonth] = useState("");
-  const [isSpecialRequest, setIsSpecialRequest] = useState(false);
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(true);
   const [showAvailabilityDebug, setShowAvailabilityDebug] = useState(false);
   const [availabilityDebug, setAvailabilityDebug] = useState<PublicAvailabilityDebugResponse | null>(null);
@@ -630,7 +632,6 @@ export function BookingForm() {
   }
 
   function selectGroup(groupId: TrainingGroupId | "") {
-    setIsSpecialRequest(false);
     setSelectedGroupId(groupId);
     setSelectedSlotId("");
     setSelectedSessionDate("");
@@ -641,7 +642,6 @@ export function BookingForm() {
 
   function selectBookingOption(option: BookingOption) {
     setBookingOption(option);
-    setIsSpecialRequest(false);
     setSelectedSlotId("");
     setSelectedSessionDate("");
     setVisibleMonth("");
@@ -663,20 +663,15 @@ export function BookingForm() {
       return;
     }
 
-    setSelectedGroupId(activeBookingGroupId);
-    setLaunchPassUseMode("choose_later");
-  }
-
-  function selectTrainingGroup(value: string) {
-    if (value === specialTrainingRequestValue) {
-      setIsSpecialRequest(true);
-      setSelectedSlotId("");
-      setFieldErrors({});
-      setError("");
+    if (option === "private_request") {
+      setSelectedGroupId("");
+      setSelectedPassId("");
+      setFoundPasses([]);
       return;
     }
 
-    selectGroup(value as TrainingGroupId | "");
+    setSelectedGroupId(activeBookingGroupId);
+    setLaunchPassUseMode("choose_later");
   }
 
   function setPassPurchaseField(field: keyof PassPurchaseFields, value: string) {
@@ -1124,7 +1119,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Choose a single session, purchase a Training Package, or book with existing Training credits.
+                Choose a single session, purchase a Training Package, book with existing Training credits, or request private 1-on-1 training.
               </p>
             </div>
 
@@ -1132,7 +1127,7 @@ export function BookingForm() {
               Current sessions are focused on Elite Performance players ages 13-18.
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
               {[
                 ["single_session", "Single Session", "$55", "Book online"],
                 [
@@ -1147,7 +1142,8 @@ export function BookingForm() {
                   "$285",
                   "Buy credits"
                 ],
-                ["use_existing_pass", "Use Existing Credits", "Training Package", "Reserve with credits"]
+                ["use_existing_pass", "Use Existing Credits", "Training Package", "Reserve with credits"],
+                ["private_request", "Private 1-on-1 Session Request", "Request", "Submit preferred times"]
               ].map(([value, title, price, description]) => {
                 const isSelected = bookingOption === value;
 
@@ -1168,9 +1164,9 @@ export function BookingForm() {
               })}
             </div>
 
-            {isSpecialRequest ? (
+            {bookingOption === "private_request" ? (
               <div className="rounded-lg border border-slate-200 bg-mist p-5">
-                <SpecialRequestForm embedded />
+                <PrivateSessionRequestForm embedded />
               </div>
             ) : isPassPurchaseOption ? (
               <div className="grid gap-5 rounded-lg border border-slate-200 bg-mist p-5">
@@ -1510,7 +1506,7 @@ export function BookingForm() {
                   <button
                     type="button"
                     onClick={() => {
-                      setIsSpecialRequest(true);
+                      selectBookingOption("private_request");
                       setSelectedSlotId("");
                       setError("");
                     }}
