@@ -20,6 +20,14 @@
   },
   "dynamicRoutes": [
     {
+      "page": "/api/admin/bookings/[id]",
+      "regex": "^/api/admin/bookings/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/admin/bookings/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/admin/direct-payments/[id]",
       "regex": "^/api/admin/direct\\-payments/([^/]+?)(?:/)?$",
       "routeKeys": {

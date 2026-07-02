@@ -270,6 +270,18 @@ export type AdminTrainingSession = TrainingSessionRow & {
   paidBookings: AdminBookingRecord[];
 };
 
+export function isAdminBookingConfirmed(booking: Pick<BookingRow, "status" | "amount_paid" | "payment_type" | "stripe_payment_intent_id" | "pass_purchase_id" | "credit_redemption_id">) {
+  if (booking.status !== "paid") {
+    return false;
+  }
+
+  if (booking.payment_type === "launch_pass_credit" || booking.pass_purchase_id || booking.credit_redemption_id) {
+    return true;
+  }
+
+  return Boolean(booking.stripe_payment_intent_id) || Number(booking.amount_paid) > 0;
+}
+
 export type DirectPaymentInput = {
   playerCount: number;
   sessionCount: number;
@@ -493,7 +505,9 @@ export async function listTrainingSessions() {
 }
 
 async function listPaidBookings() {
-  return supabaseRequest<BookingRow[]>("bookings?select=*&status=eq.paid");
+  const bookings = await supabaseRequest<BookingRow[]>("bookings?select=*&status=eq.paid");
+
+  return bookings.filter(isAdminBookingConfirmed);
 }
 
 function toBookingRecordFromRows(input: {
@@ -734,6 +748,49 @@ export async function listAdminBookings() {
     creditRedemption: redemptionMap.get(booking.id) ?? null,
     creditAdjustment: adjustmentMap.get(booking.id) ?? null
   }));
+}
+
+export async function getAdminBookingById(bookingId: string) {
+  const bookings = await listAdminBookings();
+
+  return bookings.find((booking) => booking.id === bookingId) ?? null;
+}
+
+export async function cancelIncompleteBooking(bookingId: string) {
+  const booking = await getAdminBookingById(bookingId);
+
+  if (!booking) {
+    throw new Error("Booking was not found.");
+  }
+
+  if (isAdminBookingConfirmed(booking)) {
+    throw new Error("Confirmed bookings cannot be cancelled from the incomplete booking action.");
+  }
+
+  const rows = await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      status: "cancelled"
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function deleteIncompleteBooking(bookingId: string) {
+  const booking = await getAdminBookingById(bookingId);
+
+  if (!booking) {
+    throw new Error("Booking was not found.");
+  }
+
+  if (isAdminBookingConfirmed(booking)) {
+    throw new Error("Confirmed bookings cannot be deleted from the incomplete booking action.");
+  }
+
+  await supabaseRequest<null>(`bookings?id=eq.${encodeFilter(bookingId)}`, {
+    method: "DELETE"
+  });
 }
 
 export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
@@ -1180,7 +1237,7 @@ export async function listAdminTrainingSessions(): Promise<AdminTrainingSession[
   const [sessions, bookings] = await Promise.all([listTrainingSessions(), listAdminBookings()]);
 
   return sessions.map((session) => {
-    const paidBookings = bookings.filter((booking) => booking.session_id === session.id && booking.status === "paid");
+    const paidBookings = bookings.filter((booking) => booking.session_id === session.id && isAdminBookingConfirmed(booking));
     const paidPlayers = paidBookings.reduce((total, booking) => total + (Number(booking.player_count) || 1), 0);
 
     return {
@@ -1294,7 +1351,7 @@ export async function issueManualLaunchPassCredit(input: {
 export async function listPaidBookingsForSession(sessionId: string) {
   const bookings = await listAdminBookings();
 
-  return bookings.filter((booking) => booking.session_id === sessionId && booking.status === "paid");
+  return bookings.filter((booking) => booking.session_id === sessionId && isAdminBookingConfirmed(booking));
 }
 
 export async function updateCreditAdjustmentEmailStatus(input: {
@@ -1354,25 +1411,29 @@ export async function createPendingBooking(rawBooking: BookingRecord, ipAddress 
     throw new Error("Booking could not be saved before payment.");
   }
 
+  const booking = {
+    ...rawBooking,
+    id: bookingRow.id,
+    createdAt: bookingRow.created_at,
+    players: String(playerCount),
+    ipAddress,
+    programId: session.training_group,
+    programName: publicSessionProgramName(publicSession),
+    sessionId: session.id,
+    sessionDateIso: publicSession.date,
+    sessionDate: publicSession.dateLabel,
+    sessionTime: publicSession.startTime,
+    sessionDurationMinutes: 60,
+    sessionCalendarEventId: undefined,
+    paymentStatus: "pending_payment",
+    notificationStatus: "Ready",
+    calendarStatus: "Ready"
+  } satisfies BookingRecord;
+
+  await saveWaiverForBooking(booking);
+
   return {
-    booking: {
-      ...rawBooking,
-      id: bookingRow.id,
-      createdAt: bookingRow.created_at,
-      players: String(playerCount),
-      ipAddress,
-      programId: session.training_group,
-      programName: publicSessionProgramName(publicSession),
-      sessionId: session.id,
-      sessionDateIso: publicSession.date,
-      sessionDate: publicSession.dateLabel,
-      sessionTime: publicSession.startTime,
-      sessionDurationMinutes: 60,
-      sessionCalendarEventId: undefined,
-      paymentStatus: "pending_payment",
-      notificationStatus: "Ready",
-      calendarStatus: "Ready"
-    } satisfies BookingRecord,
+    booking,
     session: publicSession
   };
 }

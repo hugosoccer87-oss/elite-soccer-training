@@ -157,7 +157,7 @@ type SessionFilter =
   | "shooting-attacking"
   | "shooting-finishing";
 type SessionDateRange = "all" | "today" | "this-week" | "upcoming" | "past";
-type BookingFilter = "all" | "upcoming" | "past" | "paid" | "pending";
+type BookingFilter = "confirmed" | "incomplete" | "all" | "upcoming" | "past";
 type PassFilter = "all" | "active" | "used-up" | "four" | "six";
 type CalendarView = "month" | "week" | "day";
 type DirectPaymentFilter =
@@ -562,6 +562,28 @@ function paymentTypeLabel(booking: AdminBookingRecord) {
   }
 
   return "Card / Single Session";
+}
+
+function isBookingConfirmedForAdmin(booking: AdminBookingRecord) {
+  if (booking.status !== "paid") {
+    return false;
+  }
+
+  if (booking.payment_type === "launch_pass_credit" || booking.pass_purchase_id || booking.credit_redemption_id) {
+    return true;
+  }
+
+  return Boolean(booking.stripe_payment_intent_id) || Number(booking.amount_paid) > 0;
+}
+
+function bookingAdminStatusLabel(booking: AdminBookingRecord) {
+  return isBookingConfirmedForAdmin(booking) ? "Confirmed" : "Incomplete";
+}
+
+function bookingAdminStatusBadgeClass(booking: AdminBookingRecord) {
+  return isBookingConfirmedForAdmin(booking)
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : "border-amber-200 bg-amber-50 text-amber-800";
 }
 
 function endTimeFromStartInput(value: string) {
@@ -980,10 +1002,11 @@ export function AdminAvailability() {
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(todayDateInput());
   const [actionsSessionId, setActionsSessionId] = useState("");
   const [creditingBookingId, setCreditingBookingId] = useState("");
-  const [bookingFilter, setBookingFilter] = useState<BookingFilter>("upcoming");
+  const [bookingFilter, setBookingFilter] = useState<BookingFilter>("confirmed");
   const [bookingFocusFilter, setBookingFocusFilter] = useState("");
   const [bookingDateFilter, setBookingDateFilter] = useState("");
   const [expandedBookingId, setExpandedBookingId] = useState("");
+  const [updatingBookingId, setUpdatingBookingId] = useState("");
   const [passFilter, setPassFilter] = useState<PassFilter>("active");
   const [manualCreditPassId, setManualCreditPassId] = useState("");
   const [manualCreditAmount, setManualCreditAmount] = useState("1");
@@ -1251,18 +1274,21 @@ export function AdminAvailability() {
   }, [bulkCapacity, bulkEndDate, bulkGroupId, bulkLocation, bulkPatterns, bulkStartDate, sessions]);
   const bulkNewSessionsCount = bulkPreviewSessions.filter((session) => !session.alreadyExists && !session.duplicateInPreview).length;
   const bulkSkippedSessionsCount = bulkPreviewSessions.length - bulkNewSessionsCount;
+  const confirmedBookings = useMemo(() => bookings.filter(isBookingConfirmedForAdmin), [bookings]);
+  const incompleteBookings = useMemo(() => bookings.filter((booking) => !isBookingConfirmedForAdmin(booking)), [bookings]);
   const filteredBookings = useMemo(
     () =>
       bookings.filter((booking) => {
         const session = sessionById.get(booking.session_id);
         const sessionDate = session?.start_datetime;
         const focus = session ? sessionFocusLabel(session).toLowerCase() : "";
+        const isConfirmed = isBookingConfirmedForAdmin(booking);
         const matchesStatus =
           bookingFilter === "all" ||
-          (bookingFilter === "upcoming" && (!sessionDate || isFuture(sessionDate))) ||
-          (bookingFilter === "past" && (sessionDate ? !isFuture(sessionDate) : false)) ||
-          (bookingFilter === "paid" && booking.status === "paid") ||
-          (bookingFilter === "pending" && booking.status !== "paid");
+          (bookingFilter === "confirmed" && isConfirmed) ||
+          (bookingFilter === "incomplete" && !isConfirmed) ||
+          (bookingFilter === "upcoming" && isConfirmed && (!sessionDate || isFuture(sessionDate))) ||
+          (bookingFilter === "past" && isConfirmed && (sessionDate ? !isFuture(sessionDate) : false));
         const matchesFocus = !bookingFocusFilter || focus.includes(bookingFocusFilter.toLowerCase());
         const matchesDate =
           !bookingDateFilter || (session ? formatDateOnly(session.start_datetime, session.timezone) === bookingDateFilter : false);
@@ -1566,6 +1592,126 @@ export function AdminAvailability() {
       setError(creditError instanceof Error ? creditError.message : "Makeup credit could not be issued.");
     } finally {
       setCreditingBookingId("");
+    }
+  }
+
+  async function markBookingManuallyPaid(booking: AdminBookingRecord) {
+    if (!booking.waiver?.waiver_signed) {
+      setError("This booking has no signed waiver yet, so it cannot be manually confirmed.");
+      return;
+    }
+
+    const defaultAmount = Math.max(1, Number(booking.player_count) || 1) * 55;
+    const enteredAmount = window.prompt(
+      `Enter the amount collected for ${booking.player_name} before confirming this booking.`,
+      String(defaultAmount)
+    );
+
+    if (enteredAmount === null) {
+      return;
+    }
+
+    const amountDollars = Number(enteredAmount);
+
+    if (!Number.isFinite(amountDollars) || amountDollars <= 0) {
+      setError("Enter a valid amount before marking the booking manually paid.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Mark ${booking.player_name}'s booking manually paid for ${formatMoney(Math.round(amountDollars * 100))}?\n\nThis will attempt confirmation email and Google Calendar sync.`
+      )
+    ) {
+      return;
+    }
+
+    setUpdatingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(booking.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "mark_manually_paid",
+          amountPaid: Math.round(amountDollars * 100)
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Booking could not be marked manually paid.");
+      }
+
+      await refreshAdminData(result.message || "Booking marked manually paid.");
+    } catch (bookingError) {
+      setError(bookingError instanceof Error ? bookingError.message : "Booking could not be marked manually paid.");
+    } finally {
+      setUpdatingBookingId("");
+    }
+  }
+
+  async function cancelIncompleteBooking(booking: AdminBookingRecord) {
+    if (!window.confirm(`Cancel this incomplete booking for ${booking.player_name}?`)) {
+      return;
+    }
+
+    setUpdatingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(booking.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "cancel_incomplete"
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Incomplete booking could not be cancelled.");
+      }
+
+      await refreshAdminData(result.message || "Incomplete booking cancelled.");
+    } catch (bookingError) {
+      setError(bookingError instanceof Error ? bookingError.message : "Incomplete booking could not be cancelled.");
+    } finally {
+      setUpdatingBookingId("");
+    }
+  }
+
+  async function deleteIncompleteBooking(booking: AdminBookingRecord) {
+    if (!window.confirm(`Delete this incomplete booking for ${booking.player_name}? This cannot be undone.`)) {
+      return;
+    }
+
+    setUpdatingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(booking.id)}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Incomplete booking could not be deleted.");
+      }
+
+      await refreshAdminData(result.message || "Incomplete booking deleted.");
+    } catch (bookingError) {
+      setError(bookingError instanceof Error ? bookingError.message : "Incomplete booking could not be deleted.");
+    } finally {
+      setUpdatingBookingId("");
     }
   }
 
@@ -3011,7 +3157,7 @@ export function AdminAvailability() {
                                 </div>
 
                                 <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm leading-6 text-slate-600">
-                                  <span className="font-black text-navy">Paid bookings:</span>{" "}
+                                  <span className="font-black text-navy">Confirmed bookings:</span>{" "}
                                   {session.paidBookings.length > 0 ? paidBookingNames : "None yet"}
                                 </div>
                               </div>
@@ -3102,7 +3248,7 @@ export function AdminAvailability() {
                             {detailsOpen ? (
                               session.paidBookings.length > 0 ? (
                                 <div className="rounded-lg border border-slate-200 bg-mist p-4">
-                                  <p className="text-xs font-black uppercase text-electric">Paid Bookings</p>
+                                  <p className="text-xs font-black uppercase text-electric">Confirmed Bookings</p>
                                   {session.status === "cancelled" && launchPassBookings.length > 0 ? (
                                     <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-800">
                                       This cancelled session has Launch Pass bookings. You may issue makeup credits to affected players.
@@ -3203,7 +3349,7 @@ export function AdminAvailability() {
                                 </div>
                               ) : (
                                 <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
-                                  No paid bookings for this session yet.
+                                  No confirmed bookings for this session yet.
                                 </p>
                               )
                             ) : null}
@@ -3230,15 +3376,43 @@ export function AdminAvailability() {
           <div className="border-b border-slate-200 p-5 sm:p-6">
             <p className="text-xs font-black uppercase text-electric">Bookings</p>
             <h3 className="mt-2 text-2xl font-black text-navy">Player registrations</h3>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setBookingFilter("confirmed")}
+                className={`rounded-lg border p-4 text-left transition ${
+                  bookingFilter === "confirmed"
+                    ? "border-emerald-300 bg-emerald-50"
+                    : "border-slate-200 bg-white hover:border-electric/50"
+                }`}
+              >
+                <p className="text-2xl font-black text-navy">{confirmedBookings.length}</p>
+                <p className="mt-1 text-xs font-black uppercase text-emerald-700">Confirmed bookings</p>
+                <p className="mt-2 text-sm font-semibold text-slate-600">Paid bookings that count toward session capacity.</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBookingFilter("incomplete")}
+                className={`rounded-lg border p-4 text-left transition ${
+                  bookingFilter === "incomplete"
+                    ? "border-amber-300 bg-amber-50"
+                    : "border-slate-200 bg-white hover:border-electric/50"
+                }`}
+              >
+                <p className="text-2xl font-black text-navy">{incompleteBookings.length}</p>
+                <p className="mt-1 text-xs font-black uppercase text-amber-700">Pending / incomplete bookings</p>
+                <p className="mt-2 text-sm font-semibold text-slate-600">Not paid yet — do not count as confirmed.</p>
+              </button>
+            </div>
             <div className="mt-5 grid gap-3 md:grid-cols-[minmax(12rem,15rem)_minmax(12rem,1fr)_minmax(12rem,15rem)_auto] md:items-end">
               <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                 Status
                 <select className={inputClass} value={bookingFilter} onChange={(event) => setBookingFilter(event.target.value as BookingFilter)}>
-                  <option value="upcoming">Upcoming</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="incomplete">Pending / Incomplete</option>
+                  <option value="upcoming">Upcoming Confirmed</option>
                   <option value="all">All</option>
-                  <option value="past">Past</option>
-                  <option value="paid">Paid</option>
-                  <option value="pending">Pending</option>
+                  <option value="past">Past Confirmed</option>
                 </select>
               </label>
               <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
@@ -3257,7 +3431,7 @@ export function AdminAvailability() {
               <button
                 type="button"
                 onClick={() => {
-                  setBookingFilter("upcoming");
+                  setBookingFilter("confirmed");
                   setBookingFocusFilter("");
                   setBookingDateFilter("");
                 }}
@@ -3273,9 +3447,21 @@ export function AdminAvailability() {
               {filteredBookings.map((booking) => {
                 const session = sessionById.get(booking.session_id);
                 const isExpanded = expandedBookingId === booking.id;
+                const isConfirmed = isBookingConfirmedForAdmin(booking);
+                const isUpdatingBooking = updatingBookingId === booking.id;
 
                 return (
-                  <article key={booking.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <article
+                    key={booking.id}
+                    className={`rounded-xl border p-5 shadow-sm ${
+                      isConfirmed ? "border-slate-200 bg-white" : "border-amber-200 bg-amber-50/70"
+                    }`}
+                  >
+                    {!isConfirmed ? (
+                      <p className="mb-4 rounded-lg border border-amber-300 bg-amber-100 p-4 text-sm font-black leading-6 text-amber-900">
+                        Not paid yet — do not count as confirmed.
+                      </p>
+                    ) : null}
                     <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
                       <div className="grid gap-4 md:grid-cols-3">
                         <div>
@@ -3299,6 +3485,9 @@ export function AdminAvailability() {
                         </div>
                       </div>
                       <div className="flex flex-col gap-2">
+                        <span className={`rounded-full border px-3 py-1 text-center text-[11px] font-black uppercase ${bookingAdminStatusBadgeClass(booking)}`}>
+                          {bookingAdminStatusLabel(booking)}
+                        </span>
                         <span className={`rounded-full border px-3 py-1 text-center text-[11px] font-black uppercase ${statusBadgeClass(booking.status)}`}>
                           {booking.status}
                         </span>
@@ -3338,6 +3527,34 @@ export function AdminAvailability() {
                             <button type="button" onClick={() => editBookingContact(booking)} className={secondaryButtonClass}>
                               Edit Contact Info
                             </button>
+                            {!isConfirmed ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBooking}
+                                  onClick={() => void markBookingManuallyPaid(booking)}
+                                  className={primaryButtonClass}
+                                >
+                                  {isUpdatingBooking ? "Updating..." : "Mark Manually Paid"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBooking}
+                                  onClick={() => void cancelIncompleteBooking(booking)}
+                                  className={secondaryButtonClass}
+                                >
+                                  Cancel Incomplete
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBooking}
+                                  onClick={() => void deleteIncompleteBooking(booking)}
+                                  className={dangerButtonClass}
+                                >
+                                  Delete Incomplete
+                                </button>
+                              </>
+                            ) : null}
                             <button type="button" onClick={() => setActiveWaiverRecord({ booking, session })} className={navyButtonClass}>
                               View Waiver
                             </button>
