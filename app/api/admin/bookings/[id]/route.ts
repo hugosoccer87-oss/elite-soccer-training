@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { confirmPaidBooking } from "@/lib/booking-confirmation";
+import { confirmPaidBooking, finalizeConfirmedBooking } from "@/lib/booking-confirmation";
 import { verifyAdminSession } from "@/lib/admin-api";
 import {
   cancelAdminBooking,
@@ -30,7 +30,13 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const { id } = await context.params;
   const payload = (await request.json().catch(() => null)) as {
-    action?: "cancel_incomplete" | "mark_manually_paid" | "update_manual_booking" | "cancel_booking";
+    action?:
+      | "cancel_incomplete"
+      | "mark_manually_paid"
+      | "update_manual_booking"
+      | "cancel_booking"
+      | "resend_confirmation"
+      | "retry_calendar_sync";
     amountPaid?: number;
     returnCredit?: boolean;
     updates?: ManualBookingUpdateInput;
@@ -119,6 +125,53 @@ export async function PATCH(request: Request, context: RouteContext) {
           : "Player removed from the session.",
         booking: result.booking,
         creditReturned: result.creditReturned
+      });
+    }
+
+    if (payload?.action === "resend_confirmation") {
+      const adminBooking = await getAdminBookingById(id);
+
+      if (!adminBooking || !isAdminBookingConfirmed(adminBooking)) {
+        return NextResponse.json({ error: "Only confirmed bookings can receive confirmation emails." }, { status: 400 });
+      }
+
+      const booking = await getBookingRecordForConfirmation(id);
+      const result = await finalizeConfirmedBooking(booking, {
+        syncCalendar: false,
+        sendEmails: true,
+        forceEmails: true
+      });
+
+      return NextResponse.json({
+        status: "Sent",
+        message: result.emailResult?.sent
+          ? "Confirmation email resent to parent and admin."
+          : "Confirmation email was attempted. Check email logs for delivery status.",
+        emailSent: result.emailResult?.sent ?? false
+      });
+    }
+
+    if (payload?.action === "retry_calendar_sync") {
+      const adminBooking = await getAdminBookingById(id);
+
+      if (!adminBooking || !isAdminBookingConfirmed(adminBooking)) {
+        return NextResponse.json({ error: "Only confirmed bookings can sync to Google Calendar." }, { status: 400 });
+      }
+
+      const booking = await getBookingRecordForConfirmation(id);
+      const result = await finalizeConfirmedBooking(booking, {
+        syncCalendar: true,
+        sendEmails: false
+      });
+
+      return NextResponse.json({
+        status: result.calendarResult.status,
+        message:
+          result.calendarResult.status === "Created"
+            ? "Google Calendar sync completed."
+            : result.calendarResult.message || "Google Calendar sync was attempted.",
+        calendarStatus: result.calendarResult.status,
+        calendarEventId: result.calendarResult.eventId
       });
     }
 

@@ -800,6 +800,8 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
     `Stripe Checkout Session: ${booking.stripe_checkout_session_id || "Not recorded"}`,
     `Stripe Payment Intent: ${booking.stripe_payment_intent_id || "Not recorded"}`,
     `Google Calendar Event ID: ${booking.calendarEvent?.google_calendar_event_id || "Not recorded"}`,
+    `Google Calendar Status: ${booking.calendar_sync_status || "Not recorded"}`,
+    `Google Calendar Message: ${booking.calendar_sync_message || "None"}`,
     "",
     "Full Waiver Legal Text Agreed To By Parent/Guardian",
     "",
@@ -2002,6 +2004,68 @@ export function AdminAvailability() {
     }
   }
 
+  async function resendBookingConfirmation(booking: AdminBookingRecord) {
+    if (!window.confirm(`Resend confirmation email for ${booking.player_name} to the parent and admin?`)) {
+      return;
+    }
+
+    setUpdatingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(booking.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "resend_confirmation"
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Confirmation email could not be resent.");
+      }
+
+      await refreshAdminData(result.message || "Confirmation email was attempted.");
+    } catch (bookingError) {
+      setError(bookingError instanceof Error ? bookingError.message : "Confirmation email could not be resent.");
+    } finally {
+      setUpdatingBookingId("");
+    }
+  }
+
+  async function retryBookingCalendarSync(booking: AdminBookingRecord) {
+    setUpdatingBookingId(booking.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/bookings/${encodeURIComponent(booking.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "retry_calendar_sync"
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Google Calendar sync could not be retried.");
+      }
+
+      await refreshAdminData(result.message || "Google Calendar sync was attempted.");
+    } catch (bookingError) {
+      setError(bookingError instanceof Error ? bookingError.message : "Google Calendar sync could not be retried.");
+    } finally {
+      setUpdatingBookingId("");
+    }
+  }
+
   async function markBookingManuallyPaid(booking: AdminBookingRecord) {
     if (!booking.waiver?.waiver_signed) {
       setError("This booking has no signed waiver yet, so it cannot be manually confirmed.");
@@ -3167,7 +3231,11 @@ export function AdminAvailability() {
                             </p>
                             <p>
                               <span className="font-black text-navy">Google sync:</span>{" "}
-                              {booking.calendarEvent?.google_calendar_event_id ? "Synced" : "Not synced / not recorded"}
+                              {booking.calendarEvent?.google_calendar_event_id
+                                ? "Synced"
+                                : booking.calendar_sync_status
+                                  ? `${booking.calendar_sync_status}${booking.calendar_sync_message ? ` · ${booking.calendar_sync_message}` : ""}`
+                                  : "Not synced / not recorded"}
                             </p>
                           </div>
                           <button type="button" onClick={() => editBookingContact(booking)} className={`${secondaryButtonClass} mt-3`}>
@@ -3176,6 +3244,22 @@ export function AdminAvailability() {
                           <div className="mt-2 flex flex-wrap gap-2">
                             <button type="button" onClick={() => openEditManualBookingForm(booking, selectedCalendarSession)} className={secondaryButtonClass}>
                               Edit Booking
+                            </button>
+                            <button
+                              type="button"
+                              disabled={updatingBookingId === booking.id}
+                              onClick={() => void resendBookingConfirmation(booking)}
+                              className={secondaryButtonClass}
+                            >
+                              Resend Confirmation
+                            </button>
+                            <button
+                              type="button"
+                              disabled={updatingBookingId === booking.id}
+                              onClick={() => void retryBookingCalendarSync(booking)}
+                              className={secondaryButtonClass}
+                            >
+                              Retry Calendar Sync
                             </button>
                             <button
                               type="button"
@@ -3933,6 +4017,22 @@ export function AdminAvailability() {
                                                 <button
                                                   type="button"
                                                   disabled={updatingBookingId === booking.id}
+                                                  onClick={() => void resendBookingConfirmation(booking)}
+                                                  className={secondaryButtonClass}
+                                                >
+                                                  Resend Confirmation
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={updatingBookingId === booking.id}
+                                                  onClick={() => void retryBookingCalendarSync(booking)}
+                                                  className={secondaryButtonClass}
+                                                >
+                                                  Retry Calendar Sync
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={updatingBookingId === booking.id}
                                                   onClick={() => void cancelAdminPlayerBooking(booking)}
                                                   className={dangerButtonClass}
                                                 >
@@ -4128,7 +4228,15 @@ export function AdminAvailability() {
                           <p><span className="font-black text-navy">Waiver signature:</span> {booking.waiver?.typed_signature || "Not recorded"}</p>
                           <p><span className="font-black text-navy">Signed:</span> {formatWaiverTimestamp(booking.waiver?.signed_at)}</p>
                           <p><span className="font-black text-navy">Payment intent:</span> {booking.stripe_payment_intent_id || "Not recorded"}</p>
-                          <p><span className="font-black text-navy">Calendar event:</span> {booking.calendarEvent?.google_calendar_event_id || "Not recorded"}</p>
+                          <p>
+                            <span className="font-black text-navy">Calendar event:</span>{" "}
+                            {booking.calendarEvent?.google_calendar_event_id || "Not recorded"}
+                          </p>
+                          <p>
+                            <span className="font-black text-navy">Calendar status:</span>{" "}
+                            {booking.calendar_sync_status || "Not recorded"}
+                            {booking.calendar_sync_message ? ` · ${booking.calendar_sync_message}` : ""}
+                          </p>
                           <p>
                             <span className="font-black text-navy">Email logs:</span>{" "}
                             {booking.emailLogs.length > 0
@@ -4143,14 +4251,32 @@ export function AdminAvailability() {
                               Edit Booking
                             </button>
                             {isConfirmed ? (
-                              <button
-                                type="button"
-                                disabled={isUpdatingBooking}
-                                onClick={() => void cancelAdminPlayerBooking(booking)}
-                                className={dangerButtonClass}
-                              >
-                                {isUpdatingBooking ? "Removing..." : "Remove Player"}
-                              </button>
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBooking}
+                                  onClick={() => void resendBookingConfirmation(booking)}
+                                  className={secondaryButtonClass}
+                                >
+                                  Resend Confirmation Email
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBooking}
+                                  onClick={() => void retryBookingCalendarSync(booking)}
+                                  className={secondaryButtonClass}
+                                >
+                                  Retry Google Calendar Sync
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isUpdatingBooking}
+                                  onClick={() => void cancelAdminPlayerBooking(booking)}
+                                  className={dangerButtonClass}
+                                >
+                                  {isUpdatingBooking ? "Removing..." : "Remove Player"}
+                                </button>
+                              </>
                             ) : null}
                             {!isConfirmed ? (
                               <>

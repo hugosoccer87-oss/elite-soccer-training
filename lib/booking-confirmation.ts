@@ -6,11 +6,13 @@ import {
 } from "@/lib/google-calendar";
 import {
   confirmPaidLaunchPassPurchase,
+  getBookingEmailDeliverySummary,
   getPassPurchaseById,
   listCreditRedemptionsForPass,
   logEmailStatus,
   markBookingPaidAndSaveWaiver,
   redeemLaunchPassCreditAndSaveWaiver,
+  saveBookingCalendarSyncStatus,
   saveCalendarEventRecord
 } from "@/lib/supabase-db";
 import type { PassPurchaseRow } from "@/lib/supabase-db";
@@ -23,6 +25,8 @@ export async function finalizeConfirmedBooking(
   booking: BookingRecord,
   options: {
     sendEmails?: boolean;
+    forceEmails?: boolean;
+    syncCalendar?: boolean;
   } = {}
 ) {
   console.info("[EST Booking] Confirmed booking finalization started", {
@@ -36,38 +40,56 @@ export async function finalizeConfirmedBooking(
     paymentType: booking.paymentType || "single_session"
   });
 
-  let calendarResult: CalendarBookingResult;
+  let calendarResult: CalendarBookingResult = {
+    status: "Ready",
+    message: "Calendar sync not attempted."
+  };
 
-  try {
-    calendarResult = await createBookingCalendarEvent(booking);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Google Calendar event creation failed.";
-    console.error("[EST Calendar] Calendar event creation failed", {
-      bookingId: booking.id,
-      reason: message
-    });
-    recordCalendarEventCreationFailure(booking.id, message);
-    calendarResult = {
-      status: "Failed",
-      message
-    };
-  }
+  if (options.syncCalendar !== false) {
+    try {
+      calendarResult = await createBookingCalendarEvent(booking);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Google Calendar event creation failed.";
+      console.error("[EST Calendar] Calendar event creation failed", {
+        bookingId: booking.id,
+        reason: message
+      });
+      recordCalendarEventCreationFailure(booking.id, message);
+      calendarResult = {
+        status: "Failed",
+        message
+      };
+    }
 
-  if (calendarResult.status !== "Created") {
-    console.error("[EST Booking] Paid booking calendar confirmation failed", {
-      bookingId: booking.id,
-      calendarStatus: calendarResult.status,
-      calendarMessage: calendarResult.message
-    });
-  }
+    if (calendarResult.status !== "Created") {
+      console.error("[EST Booking] Paid booking calendar confirmation failed", {
+        bookingId: booking.id,
+        calendarStatus: calendarResult.status,
+        calendarMessage: calendarResult.message
+      });
+    }
 
-  try {
-    await saveCalendarEventRecord(booking.id, calendarResult.eventId);
-  } catch (error) {
-    console.error("[EST Calendar] Calendar event ID could not be saved", {
-      bookingId: booking.id,
-      error: error instanceof Error ? error.message : String(error)
-    });
+    try {
+      await saveBookingCalendarSyncStatus({
+        bookingId: booking.id,
+        status: calendarResult.status,
+        message: calendarResult.message,
+        eventId: calendarResult.eventId
+      });
+    } catch (error) {
+      console.error("[EST Calendar] Calendar sync status could not be saved", {
+        bookingId: booking.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      try {
+        await saveCalendarEventRecord(booking.id, calendarResult.eventId);
+      } catch (fallbackError) {
+        console.error("[EST Calendar] Calendar event ID could not be saved", {
+          bookingId: booking.id,
+          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+        });
+      }
+    }
   }
 
   const confirmedBooking: BookingRecord = {
@@ -87,13 +109,14 @@ export async function finalizeConfirmedBooking(
   });
 
   const shouldSendEmails = options.sendEmails !== false;
-  const emailResult = !shouldSendEmails
-    ? null
-    : calendarResult.alreadyExists
+  const emailDeliverySummary = shouldSendEmails ? await getBookingEmailDeliverySummary(booking.id) : null;
+  const emailsAlreadySent = Boolean(emailDeliverySummary?.customerSent && emailDeliverySummary.adminSent);
+  const emailResult = !shouldSendEmails || (emailsAlreadySent && !options.forceEmails)
     ? null
     : await (async () => {
         console.info("[EST Stripe] Starting email notifications", {
-          bookingId: booking.id
+          bookingId: booking.id,
+          forceEmails: Boolean(options.forceEmails)
         });
         const result = await sendBookingTransactionalEmails(confirmedBooking);
         await Promise.allSettled([
@@ -128,11 +151,11 @@ export async function finalizeConfirmedBooking(
       skipped: true,
       reason: "Admin chose not to send confirmation email"
     });
-  } else if (calendarResult.alreadyExists) {
+  } else if (emailsAlreadySent && !options.forceEmails) {
     console.info("[EST Stripe] Email notifications complete", {
       bookingId: booking.id,
       skipped: true,
-      reason: "Booking calendar event already exists"
+      reason: "Customer and admin confirmation emails already show sent in email logs"
     });
   }
 

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHero } from "@/components/PageHero";
+import { confirmPaidBooking } from "@/lib/booking-confirmation";
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
-import { isStripePaymentVerified, retrieveStripeCheckoutSession } from "@/lib/stripe";
+import { bookingFromStripeMetadata, isStripePaymentVerified, retrieveStripeCheckoutSession } from "@/lib/stripe";
 import { bookingArrivalInstructions, business } from "@/lib/site-data";
+import { getBookingRecordForConfirmation } from "@/lib/supabase-db";
 
 export const metadata: Metadata = {
   title: "Booking Confirmation",
@@ -70,6 +72,39 @@ async function verifyCheckoutSession(sessionId: string | undefined) {
       paymentStatus: session.payment_status,
       message: verified ? undefined : "Checkout session was not paid and complete."
     });
+
+    if (verified && !isLaunchPass) {
+      const bookingFromMetadata = bookingFromStripeMetadata(session.metadata);
+
+      if (bookingFromMetadata) {
+        try {
+          const recoveredBooking = await getBookingRecordForConfirmation(bookingFromMetadata.id).catch(() => bookingFromMetadata);
+
+          await confirmPaidBooking(
+            {
+              ...recoveredBooking,
+              paymentStatus: "Paid"
+            },
+            {
+              checkoutSessionId: session.id,
+              paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+              amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+            }
+          );
+
+          console.info("[EST Stripe] Success page recovered paid booking confirmation flow", {
+            sessionId: session.id,
+            bookingId: bookingFromMetadata.id
+          });
+        } catch (recoveryError) {
+          console.error("[EST Stripe] Success page could not recover paid booking confirmation flow", {
+            sessionId: session.id,
+            bookingId: bookingFromMetadata.id,
+            error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+          });
+        }
+      }
+    }
 
     return {
       verified,

@@ -64,6 +64,9 @@ export type BookingRow = {
   waiver_status?: ManualBookingWaiverStatus | null;
   internal_note?: string | null;
   admin_override_capacity?: boolean | null;
+  calendar_sync_status?: string | null;
+  calendar_sync_message?: string | null;
+  calendar_synced_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -2213,6 +2216,42 @@ export async function saveCalendarEventRecord(bookingId: string, googleCalendarE
       google_calendar_event_id: googleCalendarEventId
     })
   });
+}
+
+export async function saveBookingCalendarSyncStatus(input: {
+  bookingId: string;
+  status: string;
+  message?: string;
+  eventId?: string;
+}) {
+  await supabaseRequest<BookingRow[]>(`bookings?id=eq.${encodeFilter(input.bookingId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      calendar_sync_status: input.status,
+      calendar_sync_message: input.message || null,
+      calendar_synced_at: new Date().toISOString()
+    })
+  });
+
+  if (input.eventId) {
+    await saveCalendarEventRecord(input.bookingId, input.eventId);
+  }
+}
+
+export async function listEmailLogsForBooking(bookingId: string) {
+  return supabaseRequest<EmailLogRow[]>(
+    `email_logs?select=*&booking_id=eq.${encodeFilter(bookingId)}&order=created_at.desc`
+  ).catch(() => []);
+}
+
+export async function getBookingEmailDeliverySummary(bookingId: string) {
+  const logs = await listEmailLogsForBooking(bookingId);
+
+  return {
+    logs,
+    customerSent: logs.some((log) => log.email_type === "customer" && log.status === "sent"),
+    adminSent: logs.some((log) => log.email_type === "admin" && log.status === "sent")
+  };
 }
 
 export async function logEmailStatus(input: {

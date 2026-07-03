@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
+import { confirmPaidBooking } from "@/lib/booking-confirmation";
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
-import { isStripePaymentVerified, retrieveStripeCheckoutSession } from "@/lib/stripe";
+import {
+  bookingFromStripeMetadata,
+  directPaymentIdFromStripeMetadata,
+  isStripePaymentVerified,
+  retrieveStripeCheckoutSession
+} from "@/lib/stripe";
+import { getBookingRecordForConfirmation } from "@/lib/supabase-db";
 
 export const runtime = "nodejs";
 
@@ -55,6 +62,39 @@ export async function GET(request: Request) {
       paymentStatus: session.payment_status,
       message: verified ? undefined : "Checkout session was not paid and complete."
     });
+
+    if (verified) {
+      const directPaymentId = directPaymentIdFromStripeMetadata(session.metadata);
+      const bookingFromMetadata = bookingFromStripeMetadata(session.metadata);
+
+      if (bookingFromMetadata && !directPaymentId) {
+        try {
+          const recoveredBooking = await getBookingRecordForConfirmation(bookingFromMetadata.id).catch(() => bookingFromMetadata);
+
+          await confirmPaidBooking(
+            {
+              ...recoveredBooking,
+              paymentStatus: "Paid"
+            },
+            {
+              checkoutSessionId: session.id,
+              paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+              amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+            }
+          );
+          console.info("[EST Stripe] Verified success page recovered booking finalization", {
+            sessionId: session.id,
+            bookingId: bookingFromMetadata.id
+          });
+        } catch (recoveryError) {
+          console.error("[EST Stripe] Verified success page could not recover booking finalization", {
+            sessionId: session.id,
+            bookingId: bookingFromMetadata.id,
+            error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+          });
+        }
+      }
+    }
 
     return NextResponse.json({
       verified,
