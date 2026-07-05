@@ -156,6 +156,7 @@ type ContactFormState = {
 type AdminSection =
   | "dashboard"
   | "calendar"
+  | "players"
   | "sessions"
   | "bookings"
   | "passes"
@@ -248,9 +249,17 @@ type ManualBookingFormState = {
   sendConfirmationEmail: boolean;
 };
 
+type PlayerLookupGroup = {
+  key: string;
+  displayName: string;
+  bookings: AdminBookingRecord[];
+  parentRecordCount: number;
+};
+
 const adminSections: Array<{ id: AdminSection; label: string; note: string }> = [
   { id: "dashboard", label: "Overview", note: "Today and this week" },
   { id: "calendar", label: "Calendar", note: "Booked sessions by date" },
+  { id: "players", label: "Player Lookup", note: "Find player schedules" },
   { id: "sessions", label: "Sessions", note: "Create and manage openings" },
   { id: "bookings", label: "Bookings", note: "Players and waivers" },
   { id: "passes", label: "Training Packages / Credits", note: "Credit tracking" },
@@ -765,6 +774,102 @@ function downloadTextFile(filename: string, contents: string, mimeType: string) 
   window.URL.revokeObjectURL(url);
 }
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+function normalizeLookupValue(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function playerDisplayName(name: string) {
+  return name.trim().replace(/\s+/g, " ") || "Unknown Player";
+}
+
+function playerLookupKey(name: string) {
+  return normalizeLookupValue(name) || "unknown-player";
+}
+
+function playerFirstName(name: string) {
+  return playerDisplayName(name).split(" ")[0] || "Player";
+}
+
+function playerParentRecordKey(booking: AdminBookingRecord) {
+  return [booking.parent_name, booking.parent_email, booking.parent_phone].map(normalizeLookupValue).join("|");
+}
+
+function bookingLookupText(booking: AdminBookingRecord) {
+  return [booking.player_name, booking.parent_name, booking.parent_email, booking.parent_phone].map(normalizeLookupValue).join(" ");
+}
+
+function sessionPlayerSummary(session: AdminTrainingSession) {
+  const names = session.paidBookings.map((booking) => playerFirstName(booking.player_name)).filter(Boolean);
+
+  if (names.length <= 3) {
+    return names.join(", ");
+  }
+
+  return `${names.slice(0, 3).join(", ")} +${names.length - 3} more`;
+}
+
+function sessionBookedPlayersText(session: AdminTrainingSession) {
+  const playerLines = session.paidBookings.map((booking, index) =>
+    [
+      `${index + 1}. ${booking.player_name}`,
+      `Parent: ${booking.parent_name}`,
+      `Email: ${booking.parent_email}`,
+      `Phone: ${booking.parent_phone}`,
+      `Payment: ${paymentTypeLabel(booking)}`
+    ].join(" | ")
+  );
+
+  return [
+    `${sessionFocusLabel(session)} - ${formatDateTime(session.start_datetime, session.timezone)} to ${formatTime(
+      session.end_datetime,
+      session.timezone
+    )}`,
+    `Booked: ${session.paidPlayers}/${session.capacity}`,
+    `Location: ${session.location || business.location}`,
+    "",
+    playerLines.length > 0 ? playerLines.join("\n") : "No booked players yet."
+  ].join("\n");
+}
+
+function playerScheduleText(group: PlayerLookupGroup, sessionById: Map<string, AdminTrainingSession>) {
+  const lines = group.bookings.map((booking, index) => {
+    const session = sessionById.get(booking.session_id);
+    const sessionTime = session
+      ? `${formatDateTime(session.start_datetime, session.timezone)} to ${formatTime(session.end_datetime, session.timezone)}`
+      : "Session not loaded";
+    const focus = session ? sessionFocusLabel(session) : "Session not recorded";
+
+    return [
+      `${index + 1}. ${sessionTime}`,
+      `Focus: ${focus}`,
+      `Training group: ${bookingProgramLabel(booking)}`,
+      `Booking: ${bookingAdminStatusLabel(booking)}`,
+      `Payment: ${paymentTypeLabel(booking)} / ${formatMoney(booking.amount_paid)}`,
+      `Waiver: ${booking.waiver?.waiver_signed ? "Signed" : "Missing"}`,
+      `Parent on booking: ${booking.parent_name} (${booking.parent_email}, ${booking.parent_phone})`
+    ].join(" | ");
+  });
+
+  return [`EST CV schedule for ${group.displayName}`, "", lines.length > 0 ? lines.join("\n") : "No bookings found."].join("\n");
+}
+
 function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTrainingSession) {
   const waiver = booking.waiver;
 
@@ -1129,6 +1234,8 @@ export function AdminAvailability() {
   const [bookingDateFilter, setBookingDateFilter] = useState("");
   const [expandedBookingId, setExpandedBookingId] = useState("");
   const [updatingBookingId, setUpdatingBookingId] = useState("");
+  const [playerLookupSearch, setPlayerLookupSearch] = useState("");
+  const [activePlayerLookupKey, setActivePlayerLookupKey] = useState("");
   const [passFilter, setPassFilter] = useState<PassFilter>("active");
   const [manualCreditPassId, setManualCreditPassId] = useState("");
   const [manualCreditAmount, setManualCreditAmount] = useState("1");
@@ -1577,6 +1684,82 @@ export function AdminAvailability() {
       }),
     [bookingDateFilter, bookingFilter, bookingFocusFilter, bookings, sessionById]
   );
+  const playerLookupGroups = useMemo<PlayerLookupGroup[]>(() => {
+    const search = normalizeLookupValue(playerLookupSearch);
+    const groups = new Map<string, PlayerLookupGroup>();
+
+    for (const booking of bookings) {
+      if (search && !bookingLookupText(booking).includes(search)) {
+        continue;
+      }
+
+      const key = playerLookupKey(booking.player_name);
+      const existing = groups.get(key);
+
+      if (existing) {
+        existing.bookings.push(booking);
+      } else {
+        groups.set(key, {
+          key,
+          displayName: playerDisplayName(booking.player_name),
+          bookings: [booking],
+          parentRecordCount: 0
+        });
+      }
+    }
+
+    return Array.from(groups.values())
+      .map((group) => {
+        group.bookings.sort((a, b) => {
+          const sessionA = sessionById.get(a.session_id);
+          const sessionB = sessionById.get(b.session_id);
+          const timeA = sessionA?.start_datetime ?? a.created_at;
+          const timeB = sessionB?.start_datetime ?? b.created_at;
+
+          return new Date(timeB).getTime() - new Date(timeA).getTime();
+        });
+        group.parentRecordCount = new Set(group.bookings.map(playerParentRecordKey)).size;
+        return group;
+      })
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }, [bookings, playerLookupSearch, sessionById]);
+  const activePlayerLookupGroup = useMemo(
+    () => playerLookupGroups.find((group) => group.key === activePlayerLookupKey) ?? playerLookupGroups[0] ?? null,
+    [activePlayerLookupKey, playerLookupGroups]
+  );
+  const activePlayerBookingBuckets = useMemo(() => {
+    const buckets = {
+      upcoming: [] as AdminBookingRecord[],
+      pending: [] as AdminBookingRecord[],
+      cancelled: [] as AdminBookingRecord[],
+      past: [] as AdminBookingRecord[]
+    };
+
+    if (!activePlayerLookupGroup) {
+      return buckets;
+    }
+
+    for (const booking of activePlayerLookupGroup.bookings) {
+      const session = sessionById.get(booking.session_id);
+
+      if (booking.status === "cancelled" || session?.status === "cancelled") {
+        buckets.cancelled.push(booking);
+      } else if (!isBookingConfirmedForAdmin(booking)) {
+        buckets.pending.push(booking);
+      } else if (!session?.start_datetime || isFuture(session.start_datetime)) {
+        buckets.upcoming.push(booking);
+      } else {
+        buckets.past.push(booking);
+      }
+    }
+
+    return buckets;
+  }, [activePlayerLookupGroup, sessionById]);
+  useEffect(() => {
+    if (activePlayerLookupKey && !playerLookupGroups.some((group) => group.key === activePlayerLookupKey)) {
+      setActivePlayerLookupKey("");
+    }
+  }, [activePlayerLookupKey, playerLookupGroups]);
   const filteredPasses = useMemo(
     () =>
       passes.filter((pass) => {
@@ -2785,6 +2968,26 @@ export function AdminAvailability() {
     );
   }
 
+  async function copyBookedPlayers(session: AdminTrainingSession) {
+    try {
+      await copyTextToClipboard(sessionBookedPlayersText(session));
+      setNotice("Booked player list copied.");
+      setError("");
+    } catch {
+      setError("Booked player list could not be copied.");
+    }
+  }
+
+  async function copyPlayerSchedule(group: PlayerLookupGroup) {
+    try {
+      await copyTextToClipboard(playerScheduleText(group, sessionById));
+      setNotice(`${group.displayName}'s schedule copied.`);
+      setError("");
+    } catch {
+      setError("Player schedule could not be copied.");
+    }
+  }
+
   function moveCalendar(direction: "previous" | "next") {
     const multiplier = direction === "next" ? 1 : -1;
 
@@ -2818,7 +3021,7 @@ export function AdminAvailability() {
           </button>
         </div>
 
-        <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+        <div className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           {adminSections.map((section) => {
             const isActive = activeSection === section.id;
 
@@ -2992,6 +3195,175 @@ export function AdminAvailability() {
         </section>
       ) : null}
 
+      {activeSection === "players" ? (
+        <section className="grid gap-6 lg:grid-cols-[minmax(18rem,0.85fr)_minmax(0,1.15fr)]">
+          <div className="panel p-5 sm:p-6">
+            <p className="text-xs font-black uppercase text-electric">Player Lookup</p>
+            <h3 className="mt-2 text-2xl font-black text-navy">Find a player’s sessions.</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Search by player, parent, email, or phone. Results are grouped by player first so schedules are easier to answer.
+            </p>
+            <label className="mt-5 grid gap-2 text-xs font-black uppercase text-slate-500">
+              Search
+              <input
+                className={inputClass}
+                value={playerLookupSearch}
+                onChange={(event) => setPlayerLookupSearch(event.target.value)}
+                placeholder="Player, parent, email, phone..."
+              />
+            </label>
+
+            <div className="mt-5 grid gap-3">
+              {playerLookupGroups.length > 0 ? (
+                playerLookupGroups.map((group) => {
+                  const isActive = activePlayerLookupGroup?.key === group.key;
+                  const upcomingCount = group.bookings.filter((booking) => {
+                    const session = sessionById.get(booking.session_id);
+
+                    return isBookingConfirmedForAdmin(booking) && (!session?.start_datetime || isFuture(session.start_datetime));
+                  }).length;
+
+                  return (
+                    <button
+                      key={group.key}
+                      type="button"
+                      onClick={() => setActivePlayerLookupKey(group.key)}
+                      className={`rounded-lg border p-4 text-left transition ${
+                        isActive ? "border-electric bg-blue-50 shadow-sm" : "border-slate-200 bg-white hover:border-electric/50"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-navy">{group.displayName}</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-600">
+                            {group.bookings.length} booking{group.bookings.length === 1 ? "" : "s"} · {upcomingCount} upcoming
+                          </p>
+                        </div>
+                        {group.parentRecordCount > 1 ? (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-black uppercase text-amber-800">
+                            Multiple contacts
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                  No matching player bookings found.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="panel p-5 sm:p-6">
+            {activePlayerLookupGroup ? (
+              <div className="grid gap-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase text-electric">Player Schedule</p>
+                    <h3 className="mt-2 text-2xl font-black text-navy">{activePlayerLookupGroup.displayName}</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      {activePlayerLookupGroup.bookings.length} booking{activePlayerLookupGroup.bookings.length === 1 ? "" : "s"} found for this player name.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void copyPlayerSchedule(activePlayerLookupGroup)}
+                    className={secondaryButtonClass}
+                  >
+                    Copy Player Schedule
+                  </button>
+                </div>
+
+                {activePlayerLookupGroup.parentRecordCount > 1 ? (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm font-black leading-6 text-amber-900">
+                    This player may have bookings under multiple parent records.
+                  </p>
+                ) : null}
+
+                {[
+                  ["Upcoming Sessions", activePlayerBookingBuckets.upcoming],
+                  ["Pending / Incomplete Bookings", activePlayerBookingBuckets.pending],
+                  ["Cancelled Sessions", activePlayerBookingBuckets.cancelled],
+                  ["Past Sessions", activePlayerBookingBuckets.past]
+                ].map(([label, bucket]) => {
+                  const bucketBookings = bucket as AdminBookingRecord[];
+
+                  return (
+                    <div key={label as string} className="rounded-xl border border-slate-200 bg-mist p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="font-black text-navy">{label as string}</h4>
+                        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black uppercase text-slate-600">
+                          {bucketBookings.length}
+                        </span>
+                      </div>
+                      <div className="mt-4 grid gap-3">
+                        {bucketBookings.length > 0 ? (
+                          bucketBookings.map((booking) => {
+                            const session = sessionById.get(booking.session_id);
+
+                            return (
+                              <article key={booking.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                                <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
+                                  <div className="grid gap-3 md:grid-cols-2">
+                                    <div>
+                                      <p className="text-xs font-black uppercase text-slate-500">Session</p>
+                                      <p className="mt-1 font-black text-navy">
+                                        {session ? formatDateTime(session.start_datetime, session.timezone) : "Session not loaded"}
+                                      </p>
+                                      <p className="mt-1 text-sm font-semibold text-slate-600">
+                                        {session ? `${sessionFocusLabel(session)} · ${formatTime(session.end_datetime, session.timezone)}` : "Not recorded"}
+                                      </p>
+                                      <p className="mt-1 text-sm text-slate-600">{bookingProgramLabel(booking)}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-black uppercase text-slate-500">Parent record used</p>
+                                      <p className="mt-1 font-black text-navy">{booking.parent_name}</p>
+                                      <p className="mt-1 break-words text-sm text-slate-600">{booking.parent_email}</p>
+                                      <p className="mt-1 text-sm text-slate-600">{booking.parent_phone}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 xl:max-w-56 xl:justify-end">
+                                    <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${bookingAdminStatusBadgeClass(booking)}`}>
+                                      {bookingAdminStatusLabel(booking)}
+                                    </span>
+                                    <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(booking.status)}`}>
+                                      {booking.status}
+                                    </span>
+                                    <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-slate-600">
+                                      {booking.waiver?.waiver_signed ? "Waiver signed" : "Waiver missing"}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="mt-4 grid gap-2 text-sm leading-6 text-slate-600 md:grid-cols-2">
+                                  <p><span className="font-black text-navy">Payment type:</span> {paymentTypeLabel(booking)}</p>
+                                  <p><span className="font-black text-navy">Amount paid:</span> {formatMoney(booking.amount_paid)}</p>
+                                  <p><span className="font-black text-navy">Payment status:</span> {booking.admin_payment_status || booking.status}</p>
+                                  <p><span className="font-black text-navy">Booking source:</span> {booking.payment_type === "launch_pass_credit" ? "Training Package credit" : "Single Session"}</p>
+                                </div>
+                              </article>
+                            );
+                          })
+                        ) : (
+                          <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-bold text-slate-600">
+                            None in this group.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-mist p-5 text-sm font-bold text-slate-600">
+                Search for a player to see their full booking history.
+              </p>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       {activeSection === "calendar" ? (
         <section className="grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
           <div className="panel overflow-hidden">
@@ -3083,9 +3455,11 @@ export function AdminAvailability() {
                                     activeCalendarSessionId === session.id ? "ring-2 ring-electric/30" : ""
                                   }`}
                                 >
-                                  <span className="block">{formatTime(session.start_datetime, session.timezone)}</span>
+                                  <span className="block">{formatTime(session.start_datetime, session.timezone)} · {session.paidPlayers}/{session.capacity}</span>
                                   <span className="block truncate">{sessionFocusLabel(session)}</span>
-                                  <span className="block">{session.paidPlayers}/{session.capacity}</span>
+                                  {session.paidBookings.length > 0 ? (
+                                    <span className="mt-1 block truncate font-semibold">{sessionPlayerSummary(session)}</span>
+                                  ) : null}
                                 </button>
                               ))}
                             </div>
@@ -3148,6 +3522,9 @@ export function AdminAvailability() {
                                   <span className="block">{formatTimeRange(session)}</span>
                                   <span className="block truncate">{sessionFocusLabel(session)}</span>
                                   <span className="block">{session.paidPlayers}/{session.capacity} booked</span>
+                                  {session.paidBookings.length > 0 ? (
+                                    <span className="mt-1 block truncate font-semibold">{sessionPlayerSummary(session)}</span>
+                                  ) : null}
                                 </button>
                               );
                             })}
@@ -3202,6 +3579,13 @@ export function AdminAvailability() {
                     className={`${primaryButtonClass} mt-4 w-full`}
                   >
                     Add Player Manually
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void copyBookedPlayers(selectedCalendarSession)}
+                    className={`${secondaryButtonClass} mt-3 w-full`}
+                  >
+                    Copy Booked Players
                   </button>
                 </div>
 
