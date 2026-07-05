@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { adminSessionCookie, getAdminSessionValue } from "@/lib/admin-auth";
 import { getGoogleCalendarDiagnostics } from "@/lib/google-calendar";
+import { getPushoverDiagnostics } from "@/lib/pushover";
 import { getLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import { getStripeEnvironmentDiagnostics, getStripeKeyMode, hasStripeWebhookSecret } from "@/lib/stripe";
 import { getSupabaseDiagnostics } from "@/lib/supabase-db";
@@ -31,6 +32,7 @@ export async function GET() {
     lastPaymentVerificationResult: getLastPaymentVerificationResult(),
     supabase: getSupabaseDiagnostics(),
     googleCalendar: getGoogleCalendarDiagnostics(),
+    pushover: await getPushoverDiagnostics(),
     ...getEmailDiagnostics()
   });
 }

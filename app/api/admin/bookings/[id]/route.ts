@@ -90,6 +90,9 @@ export async function PATCH(request: Request, context: RouteContext) {
         {
           checkoutSessionId: adminBooking.stripe_checkout_session_id || undefined,
           amountPaid
+        },
+        {
+          sendAdminAlert: false
         }
       );
 
@@ -139,7 +142,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       const result = await finalizeConfirmedBooking(booking, {
         syncCalendar: false,
         sendEmails: true,
-        forceEmails: true
+        forceEmails: true,
+        sendAdminAlert: false
       });
 
       return NextResponse.json({
@@ -161,7 +165,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       const booking = await getBookingRecordForConfirmation(id);
       const result = await finalizeConfirmedBooking(booking, {
         syncCalendar: true,
-        sendEmails: false
+        sendEmails: false,
+        sendAdminAlert: false
       });
 
       return NextResponse.json({

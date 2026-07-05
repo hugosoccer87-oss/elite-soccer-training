@@ -20,6 +20,10 @@ import {
   sendBookingTransactionalEmails,
   sendLaunchPassTransactionalEmails
 } from "@/lib/transactional-email";
+import {
+  sendBookingAdminPushoverAlert,
+  sendLaunchPassAdminPushoverAlert
+} from "@/lib/pushover";
 
 export async function finalizeConfirmedBooking(
   booking: BookingRecord,
@@ -27,6 +31,8 @@ export async function finalizeConfirmedBooking(
     sendEmails?: boolean;
     forceEmails?: boolean;
     syncCalendar?: boolean;
+    sendAdminAlert?: boolean;
+    adminAlertSource?: string;
   } = {}
 ) {
   console.info("[EST Booking] Confirmed booking finalization started", {
@@ -159,6 +165,29 @@ export async function finalizeConfirmedBooking(
     });
   }
 
+  const shouldSendAdminAlert = options.sendAdminAlert !== false;
+  const pushoverResult = shouldSendAdminAlert
+    ? await sendBookingAdminPushoverAlert(confirmedBooking, {
+        source: options.adminAlertSource
+      }).catch((error) => {
+        console.error("[EST Pushover] Booking admin alert failed unexpectedly", {
+          bookingId: booking.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return {
+          sent: false,
+          skipped: false,
+          message: error instanceof Error ? error.message : "Pushover alert failed."
+        };
+      })
+    : null;
+
+  if (!shouldSendAdminAlert) {
+    console.info("[EST Pushover] Booking admin alert skipped by options", {
+      bookingId: booking.id
+    });
+  }
+
   return {
     booking: {
       ...confirmedBooking,
@@ -171,7 +200,8 @@ export async function finalizeConfirmedBooking(
           : confirmedBooking.notificationStatus
     },
     calendarResult,
-    emailResult
+    emailResult,
+    pushoverResult
   };
 }
 
@@ -181,6 +211,10 @@ export async function confirmPaidBooking(
     checkoutSessionId?: string;
     paymentIntentId?: string;
     amountPaid?: number;
+  } = {},
+  options: {
+    sendAdminAlert?: boolean;
+    adminAlertSource?: string;
   } = {}
 ) {
   console.info("[EST Booking] Paid booking confirmation started", {
@@ -199,6 +233,9 @@ export async function confirmPaidBooking(
     ...booking,
     paymentType: "single_session",
     paymentStatus: "Paid"
+  }, {
+    sendAdminAlert: options.sendAdminAlert,
+    adminAlertSource: options.adminAlertSource
   });
 }
 
@@ -353,10 +390,23 @@ export async function confirmLaunchPassPurchase(input: {
       message: result.message
     });
 
+    const pushoverResult = await sendLaunchPassAdminPushoverAlert(updatedPass).catch((error) => {
+      console.error("[EST Pushover] Training Package admin alert failed unexpectedly", {
+        passPurchaseId: updatedPass.id,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return {
+        sent: false,
+        skipped: false,
+        message: error instanceof Error ? error.message : "Pushover alert failed."
+      };
+    });
+
     return {
       pass: updatedPass,
       selectedSessionResults,
-      emailResult: result
+      emailResult: result,
+      pushoverResult
     };
   } catch (error) {
     console.error("[EST Email] Training Package email flow failed:", {
@@ -372,7 +422,12 @@ export async function confirmLaunchPassPurchase(input: {
         customerSent: false,
         adminSent: false,
         message: error instanceof Error ? error.message : "Training Package emails failed."
-      }
+      },
+      pushoverResult: await sendLaunchPassAdminPushoverAlert(updatedPass).catch((pushoverError) => ({
+        sent: false,
+        skipped: false,
+        message: pushoverError instanceof Error ? pushoverError.message : "Pushover alert failed."
+      }))
     };
   }
 }

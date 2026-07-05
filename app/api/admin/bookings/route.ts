@@ -39,6 +39,7 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as
     | (ManualBookingInput & {
         sendConfirmationEmail?: boolean;
+        sendAdminAlert?: boolean;
       })
     | null;
 
@@ -80,7 +81,9 @@ export async function POST(request: Request) {
 
     if (created.booking.paymentStatus === "Paid") {
       const finalized = await finalizeConfirmedBooking(created.booking, {
-        sendEmails: Boolean(payload.sendConfirmationEmail)
+        sendEmails: Boolean(payload.sendConfirmationEmail),
+        sendAdminAlert: Boolean(payload.sendAdminAlert),
+        adminAlertSource: "manual_admin_booking"
       });
       calendarStatus = finalized.calendarResult.status;
       emailSent = finalized.emailResult?.sent ?? false;

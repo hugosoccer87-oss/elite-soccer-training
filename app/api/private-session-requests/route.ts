@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { sendPrivateSessionRequestEmails } from "@/lib/private-session-request-email";
+import { sendPrivateSessionRequestAdminPushoverAlert } from "@/lib/pushover";
 import { createPrivateSessionRequest, type PrivateSessionRequestInput } from "@/lib/supabase-db";
 
 export const runtime = "nodejs";
@@ -70,6 +71,13 @@ export async function POST(request: Request) {
         error: emailError instanceof Error ? emailError.message : String(emailError)
       });
     }
+
+    await sendPrivateSessionRequestAdminPushoverAlert(saved).catch((alertError) => {
+      console.error("[EST Pushover] Private session request admin alert failed", {
+        requestId: saved.id,
+        error: alertError instanceof Error ? alertError.message : String(alertError)
+      });
+    });
 
     return NextResponse.json({
       status: "saved",

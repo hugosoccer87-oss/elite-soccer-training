@@ -211,6 +211,20 @@ export type EmailLogRow = {
   created_at: string;
 };
 
+export type AdminAlertLogRow = {
+  id: string;
+  booking_id?: string | null;
+  source: string;
+  source_id?: string | null;
+  dedupe_key: string;
+  recipient: string;
+  status: "sent" | "failed" | "skipped";
+  title: string;
+  message: string;
+  error_message?: string | null;
+  created_at: string;
+};
+
 export type EmailSubscriberRow = {
   id: string;
   parent_name?: string | null;
@@ -314,6 +328,7 @@ export type AdminBookingRecord = BookingRow & {
   waiver?: WaiverRow | null;
   calendarEvent?: CalendarEventRow | null;
   emailLogs: EmailLogRow[];
+  alertLogs: AdminAlertLogRow[];
   passPurchase?: PassPurchaseRow | null;
   creditRedemption?: CreditRedemptionRow | null;
   creditAdjustment?: CreditAdjustmentRow | null;
@@ -832,11 +847,12 @@ export async function deleteTrainingSession(id: string) {
 }
 
 export async function listAdminBookings() {
-  const [bookings, waivers, calendarEvents, emailLogs, passPurchases, redemptions, adjustments] = await Promise.all([
+  const [bookings, waivers, calendarEvents, emailLogs, alertLogs, passPurchases, redemptions, adjustments] = await Promise.all([
     supabaseRequest<BookingRow[]>("bookings?select=*&order=created_at.desc"),
     supabaseRequest<WaiverRow[]>("waivers?select=*"),
     supabaseRequest<CalendarEventRow[]>("calendar_events?select=*"),
     supabaseRequest<EmailLogRow[]>("email_logs?select=*&order=created_at.desc"),
+    supabaseRequest<AdminAlertLogRow[]>("admin_alert_logs?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<PassPurchaseRow[]>("pass_purchases?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<CreditRedemptionRow[]>("credit_redemptions?select=*&order=created_at.desc").catch(() => []),
     supabaseRequest<CreditAdjustmentRow[]>("credit_adjustments?select=*&order=created_at.desc").catch(() => [])
@@ -856,6 +872,7 @@ export async function listAdminBookings() {
     waiver: waiverMap.get(booking.id) ?? null,
     calendarEvent: calendarMap.get(booking.id) ?? null,
     emailLogs: emailLogs.filter((log) => log.booking_id === booking.id),
+    alertLogs: alertLogs.filter((log) => log.booking_id === booking.id),
     passPurchase: booking.pass_purchase_id ? passMap.get(booking.pass_purchase_id) ?? null : null,
     creditRedemption: redemptionMap.get(booking.id) ?? null,
     creditAdjustment: adjustmentMap.get(booking.id) ?? null
@@ -2271,4 +2288,66 @@ export async function logEmailStatus(input: {
       error_message: input.errorMessage || null
     })
   });
+}
+
+export async function listAdminAlertLogsForDedupeKey(dedupeKey: string) {
+  if (!dedupeKey) {
+    return [];
+  }
+
+  return supabaseRequest<AdminAlertLogRow[]>(
+    `admin_alert_logs?select=*&dedupe_key=eq.${encodeFilter(dedupeKey)}&order=created_at.desc`
+  ).catch(() => []);
+}
+
+export async function hasSentAdminAlert(dedupeKey: string) {
+  const logs = await listAdminAlertLogsForDedupeKey(dedupeKey);
+
+  return logs.some((log) => log.status === "sent");
+}
+
+export async function listRecentAdminAlertLogs(limit = 10) {
+  return supabaseRequest<AdminAlertLogRow[]>(
+    `admin_alert_logs?select=*&order=created_at.desc&limit=${Math.max(1, Math.min(50, limit))}`
+  ).catch(() => []);
+}
+
+export async function logAdminAlertStatus(input: {
+  bookingId?: string;
+  source: string;
+  sourceId?: string;
+  dedupeKey: string;
+  recipient?: string;
+  status: "sent" | "failed" | "skipped";
+  title: string;
+  message: string;
+  errorMessage?: string;
+}) {
+  try {
+    const rows = await supabaseRequest<AdminAlertLogRow[]>("admin_alert_logs", {
+      method: "POST",
+      body: JSON.stringify({
+        booking_id: input.bookingId || null,
+        source: input.source,
+        source_id: input.sourceId || null,
+        dedupe_key: input.dedupeKey,
+        recipient: input.recipient || "pushover",
+        status: input.status,
+        title: input.title,
+        message: input.message,
+        error_message: input.errorMessage || null
+      })
+    });
+
+    return rows[0] ?? null;
+  } catch (error) {
+    console.warn("[EST Pushover] Admin alert log could not be saved", {
+      source: input.source,
+      sourceId: input.sourceId,
+      bookingId: input.bookingId,
+      status: input.status,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
 }

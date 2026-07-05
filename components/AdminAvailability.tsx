@@ -5,6 +5,7 @@ import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGr
 import { getSessionFocusLabel, sessionFocusExamples, shootingFinishingTrainingFocusValue } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type {
+  AdminAlertLogRow,
   AdminBookingRecord,
   AdminPassPurchase,
   AdminTrainingSession,
@@ -65,6 +66,20 @@ type AdminDiagnostics = {
       eventId?: string;
       message?: string;
     } | null;
+  };
+  pushover?: {
+    configured: boolean;
+    userKeyConfigured: boolean;
+    appTokenConfigured: boolean;
+    lastAttempt: {
+      configured: boolean;
+      status: "sent" | "failed" | "skipped";
+      source?: string;
+      sourceId?: string;
+      message?: string;
+      checkedAt: string;
+    } | null;
+    recentLogs: AdminAlertLogRow[];
   };
   lastEmailAttempt: {
     checkedAt: string;
@@ -247,6 +262,7 @@ type ManualBookingFormState = {
   passPurchaseId: string;
   overrideCapacity: boolean;
   sendConfirmationEmail: boolean;
+  sendAdminAlert: boolean;
 };
 
 type PlayerLookupGroup = {
@@ -319,7 +335,8 @@ const defaultManualBookingForm: ManualBookingFormState = {
   internalNote: "",
   passPurchaseId: "",
   overrideCapacity: false,
-  sendConfirmationEmail: true
+  sendConfirmationEmail: true,
+  sendAdminAlert: true
 };
 const scheduleApprovalPaymentMethods: Array<{ value: ScheduleApprovalPaymentMethod; label: string }> = [
   { value: "cash", label: "Cash" },
@@ -1354,7 +1371,8 @@ export function AdminAvailability() {
       internalNote: booking.internal_note || booking.notes || "",
       passPurchaseId: booking.pass_purchase_id || "",
       overrideCapacity: Boolean(booking.admin_override_capacity),
-      sendConfirmationEmail: false
+      sendConfirmationEmail: false,
+      sendAdminAlert: false
     });
     setActiveManualBooking({ mode: "edit", booking, session });
   }
@@ -1366,8 +1384,10 @@ export function AdminAvailability() {
       if (field === "paymentStatus") {
         if (value === "pending_payment") {
           next.sendConfirmationEmail = false;
+          next.sendAdminAlert = false;
         } else if (activeManualBooking?.mode === "add") {
           next.sendConfirmationEmail = true;
+          next.sendAdminAlert = true;
         }
 
         if (value === "comped") {
@@ -2093,7 +2113,8 @@ export function AdminAvailability() {
             internalNote: manualBookingForm.internalNote,
             passPurchaseId: manualBookingForm.passPurchaseId,
             overrideCapacity: manualBookingForm.overrideCapacity,
-            sendConfirmationEmail: manualBookingForm.sendConfirmationEmail
+            sendConfirmationEmail: manualBookingForm.sendConfirmationEmail,
+            sendAdminAlert: manualBookingForm.sendAdminAlert
           })
         });
         const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
@@ -3165,6 +3186,17 @@ export function AdminAvailability() {
                   [
                     "Last calendar event",
                     diagnostics.googleCalendar?.lastCalendarEventCreationResult?.status || "none yet"
+                  ],
+                  ["Pushover alerts", diagnostics.pushover?.configured ? "yes" : "no"],
+                  ["Pushover user key", diagnostics.pushover?.userKeyConfigured ? "yes" : "no"],
+                  ["Pushover app token", diagnostics.pushover?.appTokenConfigured ? "yes" : "no"],
+                  [
+                    "Last push alert",
+                    diagnostics.pushover?.lastAttempt
+                      ? `${diagnostics.pushover.lastAttempt.status}${diagnostics.pushover.lastAttempt.message ? ` - ${diagnostics.pushover.lastAttempt.message}` : ""}`
+                      : diagnostics.pushover?.recentLogs?.[0]
+                        ? `${diagnostics.pushover.recentLogs[0].status} - ${diagnostics.pushover.recentLogs[0].source}`
+                        : "none yet"
                   ],
                   [
                     "Last email attempt",
@@ -4627,6 +4659,12 @@ export function AdminAvailability() {
                               ? booking.emailLogs.map((log) => `${log.email_type}: ${log.status}`).join(" / ")
                               : "No email logs yet"}
                           </p>
+                          <p>
+                            <span className="font-black text-navy">Phone alerts:</span>{" "}
+                            {booking.alertLogs.length > 0
+                              ? booking.alertLogs.map((log) => `${log.source}: ${log.status}`).join(" / ")
+                              : "No push alert logs yet"}
+                          </p>
                           <div className="mt-2 flex flex-wrap gap-2">
                             <button type="button" onClick={() => editBookingContact(booking)} className={secondaryButtonClass}>
                               Edit Contact Info
@@ -5779,9 +5817,19 @@ export function AdminAvailability() {
                       />
                       <span>Send confirmation email to parent</span>
                     </label>
+                    <label className="mt-3 flex items-start gap-3 text-sm font-bold leading-6 text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-electric"
+                        checked={manualBookingForm.sendAdminAlert}
+                        onChange={(event) => updateManualBookingField("sendAdminAlert", event.target.checked)}
+                        disabled={manualBookingForm.paymentStatus === "pending_payment"}
+                      />
+                      <span>Notify admin by urgent phone alert</span>
+                    </label>
                     {manualBookingForm.paymentStatus === "pending_payment" ? (
                       <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
-                        Pending bookings do not count as confirmed and will not send confirmation email or sync to Google Calendar.
+                        Pending bookings do not count as confirmed and will not send confirmation email, sync to Google Calendar, or send phone alerts.
                       </p>
                     ) : null}
                   </div>
