@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
-import { getSessionFocusLabel, sessionFocusExamples, shootingFinishingTrainingFocusValue } from "@/lib/session-focus";
+import {
+  getSessionFocusLabel,
+  privateSessionTrainingFocusValue,
+  sessionFocusExamples,
+  shootingFinishingTrainingFocusValue
+} from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type {
   AdminAlertLogRow,
@@ -17,6 +22,8 @@ import type {
   EmailSubscriberRow,
   PrivateSessionRequestRow,
   PrivateSessionRequestStatus,
+  PrivateSessionAvailabilityRow,
+  PrivateSessionAvailabilityStatus,
   ScheduleApprovalPaymentMethod
 } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
@@ -140,6 +147,13 @@ type EmailSubscribersResponse = {
 type PrivateSessionRequestsResponse = {
   status?: string;
   requests?: PrivateSessionRequestRow[];
+  error?: string;
+};
+
+type PrivateSessionAvailabilityResponse = {
+  status?: string;
+  privateSessions?: PrivateSessionAvailabilityRow[];
+  privateSession?: PrivateSessionAvailabilityRow;
   error?: string;
 };
 
@@ -296,7 +310,7 @@ const adminSections: Array<{ id: AdminSection; label: string; note: string }> = 
 ];
 
 const focusChoices = Array.from(
-  new Set(["General Training", ...sessionFocusExamples, shootingFinishingTrainingFocusValue])
+  new Set(["General Training", ...sessionFocusExamples, shootingFinishingTrainingFocusValue, privateSessionTrainingFocusValue])
 );
 const dayOptions = [
   { value: 1, label: "Monday" },
@@ -368,7 +382,8 @@ const customPaymentLinkPlanOptions: Array<{ value: CustomPaymentLinkPlanType; la
 const customPaymentLinkModeOptions: Array<{ value: CustomPaymentLinkMode; label: string }> = [
   { value: "payment_only", label: "Payment only" },
   { value: "payment_plus_choose_sessions", label: "Payment + choose sessions" },
-  { value: "payment_plus_confirm_proposed_schedule", label: "Payment + confirm proposed schedule" }
+  { value: "payment_plus_confirm_proposed_schedule", label: "Payment + confirm proposed schedule" },
+  { value: "payment_plus_choose_private_sessions", label: "Payment + choose private session times" }
 ];
 const calendarHourStart = 5;
 const calendarHourEnd = 21;
@@ -422,7 +437,7 @@ function formatTime(value: string, timeZone = "America/Los_Angeles") {
   }).format(new Date(value));
 }
 
-function formatTimeRange(session: Pick<AdminTrainingSession, "start_datetime" | "end_datetime" | "timezone">) {
+function formatTimeRange(session: Pick<AdminTrainingSession | PrivateSessionAvailabilityRow, "start_datetime" | "end_datetime" | "timezone">) {
   return `${formatTime(session.start_datetime, session.timezone)}-${formatTime(session.end_datetime, session.timezone)}`;
 }
 
@@ -691,6 +706,30 @@ function adminCalendarBlockClass(session: AdminTrainingSession) {
   }
 
   if (status === "cancelled") {
+    return "border-red-300 bg-red-50 text-red-900 hover:bg-red-100";
+  }
+
+  return "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200";
+}
+
+function privateCalendarStatusLabel(session: PrivateSessionAvailabilityRow) {
+  if (session.status === "booked") {
+    return "booked";
+  }
+
+  return session.status;
+}
+
+function privateCalendarBlockClass(session: PrivateSessionAvailabilityRow) {
+  if (session.status === "booked") {
+    return "border-blue-300 bg-blue-50 text-blue-950 hover:bg-blue-100";
+  }
+
+  if (session.status === "available") {
+    return "border-sky-300 bg-sky-50 text-sky-900 hover:bg-sky-100";
+  }
+
+  if (session.status === "cancelled") {
     return "border-red-300 bg-red-50 text-red-900 hover:bg-red-100";
   }
 
@@ -1246,6 +1285,22 @@ async function readAdminPrivateSessionRequests() {
   return result.requests ?? [];
 }
 
+async function readAdminPrivateSessionAvailability() {
+  const response = await fetch(`/api/admin/private-session-availability?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as PrivateSessionAvailabilityResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Private session availability could not be loaded.");
+  }
+
+  return result.privateSessions ?? [];
+}
+
 export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
   const [bookings, setBookings] = useState<AdminBookingRecord[]>([]);
@@ -1254,6 +1309,7 @@ export function AdminAvailability() {
   const [directPayments, setDirectPayments] = useState<DirectPaymentRow[]>([]);
   const [emailSubscribers, setEmailSubscribers] = useState<EmailSubscriberRow[]>([]);
   const [privateSessionRequests, setPrivateSessionRequests] = useState<PrivateSessionRequestRow[]>([]);
+  const [privateSessionAvailability, setPrivateSessionAvailability] = useState<PrivateSessionAvailabilityRow[]>([]);
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>("elite-performance");
   const [newDate, setNewDate] = useState("");
@@ -1284,6 +1340,7 @@ export function AdminAvailability() {
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [expandedSessionId, setExpandedSessionId] = useState("");
   const [activeCalendarSessionId, setActiveCalendarSessionId] = useState("");
+  const [activeCalendarPrivateSessionId, setActiveCalendarPrivateSessionId] = useState("");
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(todayDateInput());
   const [actionsSessionId, setActionsSessionId] = useState("");
@@ -1329,6 +1386,13 @@ export function AdminAvailability() {
   const [customLinkSuggestedAvailability, setCustomLinkSuggestedAvailability] = useState("");
   const [customLinkProposedSessionIds, setCustomLinkProposedSessionIds] = useState<string[]>([]);
   const [customLinkCreatedUrl, setCustomLinkCreatedUrl] = useState("");
+  const [privateAvailabilityDate, setPrivateAvailabilityDate] = useState("");
+  const [privateAvailabilityStartTime, setPrivateAvailabilityStartTime] = useState("17:00");
+  const [privateAvailabilityEndTime, setPrivateAvailabilityEndTime] = useState("18:00");
+  const [privateAvailabilityLocation, setPrivateAvailabilityLocation] = useState(business.location);
+  const [privateAvailabilityFocus, setPrivateAvailabilityFocus] = useState(privateSessionTrainingFocusValue);
+  const [privateAvailabilityNotes, setPrivateAvailabilityNotes] = useState("");
+  const [privateAvailabilityStatus, setPrivateAvailabilityStatus] = useState<PrivateSessionAvailabilityStatus>("available");
   const [privateRequestScheduleInputs, setPrivateRequestScheduleInputs] = useState<
     Record<string, { date: string; startTime: string; endTime: string; location: string }>
   >({});
@@ -1363,6 +1427,7 @@ export function AdminAvailability() {
         nextDirectPayments,
         nextEmailSubscribers,
         nextPrivateSessionRequests,
+        nextPrivateSessionAvailability,
         nextDiagnostics
       ] =
         await Promise.all([
@@ -1373,6 +1438,7 @@ export function AdminAvailability() {
           readAdminDirectPayments(),
           readAdminEmailSubscribers(),
           readAdminPrivateSessionRequests(),
+          readAdminPrivateSessionAvailability(),
           readAdminDiagnostics()
         ]);
 
@@ -1383,6 +1449,7 @@ export function AdminAvailability() {
       setDirectPayments(nextDirectPayments);
       setEmailSubscribers(nextEmailSubscribers);
       setPrivateSessionRequests(nextPrivateSessionRequests);
+      setPrivateSessionAvailability(nextPrivateSessionAvailability);
       setDiagnostics(nextDiagnostics);
 
       if (message) {
@@ -1667,6 +1734,29 @@ export function AdminAvailability() {
 
     return groups;
   }, [calendarVisibleDaySet, calendarVisibleDays, sessions]);
+  const calendarPrivateSessionsByDay = useMemo(() => {
+    const groups = new Map<string, PrivateSessionAvailabilityRow[]>();
+
+    for (const day of calendarVisibleDays) {
+      groups.set(day, []);
+    }
+
+    for (const session of privateSessionAvailability) {
+      const day = formatDateOnly(session.start_datetime, session.timezone);
+
+      if (calendarVisibleDaySet.has(day)) {
+        const daySessions = groups.get(day) ?? [];
+        daySessions.push(session);
+        groups.set(day, daySessions);
+      }
+    }
+
+    for (const daySessions of groups.values()) {
+      daySessions.sort((a, b) => new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime());
+    }
+
+    return groups;
+  }, [calendarVisibleDaySet, calendarVisibleDays, privateSessionAvailability]);
   const calendarHours = useMemo(
     () => Array.from({ length: calendarHourEnd - calendarHourStart + 1 }, (_, index) => calendarHourStart + index),
     []
@@ -1687,6 +1777,10 @@ export function AdminAvailability() {
   const selectedCalendarSession = useMemo(
     () => sessions.find((session) => session.id === activeCalendarSessionId) ?? null,
     [activeCalendarSessionId, sessions]
+  );
+  const selectedCalendarPrivateSession = useMemo(
+    () => privateSessionAvailability.find((session) => session.id === activeCalendarPrivateSessionId) ?? null,
+    [activeCalendarPrivateSessionId, privateSessionAvailability]
   );
   const bulkPreviewSessions = useMemo<BulkPreviewSession[]>(() => {
     if (!bulkStartDate || !bulkEndDate || bulkPatterns.length === 0) {
@@ -1945,7 +2039,12 @@ export function AdminAvailability() {
       setCustomLinkAmount(option.defaultAmount);
     }
 
-    if (planType === "private_1_on_1" || planType === "custom_amount") {
+    if (planType === "private_1_on_1") {
+      setCustomLinkMode("payment_plus_choose_private_sessions");
+      setCustomLinkProposedSessionIds([]);
+    }
+
+    if (planType === "custom_amount") {
       setCustomLinkMode("payment_only");
       setCustomLinkProposedSessionIds([]);
     }
@@ -1955,6 +2054,116 @@ export function AdminAvailability() {
     setCustomLinkProposedSessionIds((current) =>
       current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]
     );
+  }
+
+  async function createPrivateAvailability() {
+    if (!privateAvailabilityDate || !privateAvailabilityStartTime) {
+      setError("Choose a private session date and start time.");
+      return;
+    }
+
+    if (privateAvailabilityEndTime && privateAvailabilityEndTime <= privateAvailabilityStartTime) {
+      setError("Private session end time must be after the start time.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch("/api/admin/private-session-availability", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          date: privateAvailabilityDate,
+          startTime: privateAvailabilityStartTime,
+          endTime: privateAvailabilityEndTime,
+          location: privateAvailabilityLocation,
+          sessionFocus: privateAvailabilityFocus || privateSessionTrainingFocusValue,
+          notes: privateAvailabilityNotes,
+          status: privateAvailabilityStatus
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as PrivateSessionAvailabilityResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private session availability could not be created.");
+      }
+
+      setPrivateAvailabilityDate("");
+      setPrivateAvailabilityNotes("");
+      setPrivateAvailabilityStatus("available");
+      await refreshAdminData("Private session availability created.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Private session availability could not be created.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function updatePrivateAvailability(
+    id: string,
+    updates: Partial<{
+      status: PrivateSessionAvailabilityStatus;
+      location: string;
+      sessionFocus: string;
+      notes: string | null;
+    }>
+  ) {
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/private-session-availability/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(updates)
+      });
+      const result = (await response.json().catch(() => ({}))) as PrivateSessionAvailabilityResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private session availability could not be updated.");
+      }
+
+      await refreshAdminData("Private session availability updated.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Private session availability could not be updated.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deletePrivateAvailability(id: string) {
+    if (!window.confirm("Delete this private session availability?")) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/private-session-availability/${encodeURIComponent(id)}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json().catch(() => ({}))) as PrivateSessionAvailabilityResponse;
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private session availability could not be deleted.");
+      }
+
+      await refreshAdminData("Private session availability deleted.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Private session availability could not be deleted.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function addSession() {
@@ -3678,7 +3887,7 @@ export function AdminAvailability() {
               </div>
             </div>
 
-            {sessions.length > 0 ? (
+            {sessions.length > 0 || privateSessionAvailability.length > 0 ? (
               <div className="bg-mist p-4 sm:p-6">
                 {calendarView === "month" ? (
                   <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -3692,6 +3901,7 @@ export function AdminAvailability() {
                     <div className="grid min-w-[760px] grid-cols-7">
                       {calendarVisibleDays.map((day) => {
                         const daySessions = calendarSessionsByDay.get(day) ?? [];
+                        const privateDaySessions = calendarPrivateSessionsByDay.get(day) ?? [];
                         const isCurrentMonth = day.slice(0, 7) === calendarAnchorDate.slice(0, 7);
 
                         return (
@@ -3704,7 +3914,10 @@ export function AdminAvailability() {
                                 <button
                                   key={session.id}
                                   type="button"
-                                  onClick={() => setActiveCalendarSessionId(session.id)}
+                                  onClick={() => {
+                                    setActiveCalendarSessionId(session.id);
+                                    setActiveCalendarPrivateSessionId("");
+                                  }}
                                   className={`rounded-md border px-2 py-2 text-left text-[11px] font-black leading-4 transition ${adminCalendarBlockClass(session)} ${
                                     activeCalendarSessionId === session.id ? "ring-2 ring-electric/30" : ""
                                   }`}
@@ -3714,6 +3927,25 @@ export function AdminAvailability() {
                                   {session.paidBookings.length > 0 ? (
                                     <span className="mt-1 block truncate font-semibold">{sessionPlayerSummary(session)}</span>
                                   ) : null}
+                                </button>
+                              ))}
+                              {privateDaySessions.map((session) => (
+                                <button
+                                  key={session.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveCalendarPrivateSessionId(session.id);
+                                    setActiveCalendarSessionId("");
+                                  }}
+                                  className={`rounded-md border px-2 py-2 text-left text-[11px] font-black leading-4 transition ${privateCalendarBlockClass(session)} ${
+                                    activeCalendarPrivateSessionId === session.id ? "ring-2 ring-electric/30" : ""
+                                  }`}
+                                >
+                                  <span className="block">{formatTime(session.start_datetime, session.timezone)} · {privateCalendarStatusLabel(session)}</span>
+                                  <span className="block truncate">Private Session</span>
+                                  <span className="mt-1 block truncate font-semibold">
+                                    {session.status === "booked" ? session.player_name || "Booked" : "Private Session Available"}
+                                  </span>
                                 </button>
                               ))}
                             </div>
@@ -3751,6 +3983,7 @@ export function AdminAvailability() {
                       </div>
                       {calendarVisibleDays.map((day) => {
                         const daySessions = calendarSessionsByDay.get(day) ?? [];
+                        const privateDaySessions = calendarPrivateSessionsByDay.get(day) ?? [];
 
                         return (
                           <div key={day} className="relative border-r border-slate-200 last:border-r-0">
@@ -3767,7 +4000,10 @@ export function AdminAvailability() {
                                 <button
                                   key={session.id}
                                   type="button"
-                                  onClick={() => setActiveCalendarSessionId(session.id)}
+                                  onClick={() => {
+                                    setActiveCalendarSessionId(session.id);
+                                    setActiveCalendarPrivateSessionId("");
+                                  }}
                                   className={`absolute left-1 right-1 overflow-hidden rounded-lg border px-2 py-2 text-left text-xs font-black leading-4 shadow-sm transition ${adminCalendarBlockClass(session)} ${
                                     activeCalendarSessionId === session.id ? "ring-2 ring-electric/40" : ""
                                   }`}
@@ -3779,6 +4015,33 @@ export function AdminAvailability() {
                                   {session.paidBookings.length > 0 ? (
                                     <span className="mt-1 block truncate font-semibold">{sessionPlayerSummary(session)}</span>
                                   ) : null}
+                                </button>
+                              );
+                            })}
+                            {privateDaySessions.map((session) => {
+                              const startMinutes = minutesFromDateTime(session.start_datetime, session.timezone);
+                              const endMinutes = minutesFromDateTime(session.end_datetime, session.timezone);
+                              const top = Math.max(0, ((startMinutes - calendarHourStart * 60) / 60) * 72);
+                              const height = Math.max(42, ((Math.max(endMinutes, startMinutes + 30) - startMinutes) / 60) * 72 - 4);
+
+                              return (
+                                <button
+                                  key={session.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveCalendarPrivateSessionId(session.id);
+                                    setActiveCalendarSessionId("");
+                                  }}
+                                  className={`absolute left-1 right-1 overflow-hidden rounded-lg border px-2 py-2 text-left text-xs font-black leading-4 shadow-sm transition ${privateCalendarBlockClass(session)} ${
+                                    activeCalendarPrivateSessionId === session.id ? "ring-2 ring-electric/40" : ""
+                                  }`}
+                                  style={{ top, height }}
+                                >
+                                  <span className="block">{formatTimeRange(session)}</span>
+                                  <span className="block truncate">Private Session</span>
+                                  <span className="block truncate">
+                                    {session.status === "booked" ? session.player_name || "Booked" : "Available"}
+                                  </span>
                                 </button>
                               );
                             })}
@@ -3917,6 +4180,91 @@ export function AdminAvailability() {
                     )}
                   </div>
                 </div>
+              </div>
+            ) : selectedCalendarPrivateSession ? (
+              <div className="grid gap-5">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Private Session Details</p>
+                  <h3 className="mt-2 text-2xl font-black text-navy">
+                    {selectedCalendarPrivateSession.status === "booked"
+                      ? selectedCalendarPrivateSession.player_name || "Booked Private Session"
+                      : "Private Session Available"}
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {formatDateTime(selectedCalendarPrivateSession.start_datetime, selectedCalendarPrivateSession.timezone)} ·{" "}
+                    {formatTime(selectedCalendarPrivateSession.end_datetime, selectedCalendarPrivateSession.timezone)}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(selectedCalendarPrivateSession.status === "available" ? "open" : selectedCalendarPrivateSession.status)}`}>
+                      {privateCalendarStatusLabel(selectedCalendarPrivateSession)}
+                    </span>
+                    <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-black uppercase text-electric">
+                      Private Session
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-600">
+                  <p><span className="font-black text-navy">Session focus:</span> {selectedCalendarPrivateSession.session_focus || "Private Session"}</p>
+                  <p><span className="font-black text-navy">Location:</span> {selectedCalendarPrivateSession.location || business.location}</p>
+                  <p><span className="font-black text-navy">Notes:</span> {selectedCalendarPrivateSession.notes || "None"}</p>
+                  <p>
+                    <span className="font-black text-navy">Google sync:</span>{" "}
+                    {selectedCalendarPrivateSession.google_calendar_event_id
+                      ? "Synced"
+                      : selectedCalendarPrivateSession.calendar_status || "Not synced"}
+                    {selectedCalendarPrivateSession.calendar_message ? ` · ${selectedCalendarPrivateSession.calendar_message}` : ""}
+                  </p>
+                  <p>
+                    <span className="font-black text-navy">Email:</span>{" "}
+                    {selectedCalendarPrivateSession.email_status || "Not sent"}
+                    {selectedCalendarPrivateSession.email_message ? ` · ${selectedCalendarPrivateSession.email_message}` : ""}
+                  </p>
+                  <p>
+                    <span className="font-black text-navy">Pushover:</span>{" "}
+                    {selectedCalendarPrivateSession.pushover_status || "Not sent"}
+                    {selectedCalendarPrivateSession.pushover_message ? ` · ${selectedCalendarPrivateSession.pushover_message}` : ""}
+                  </p>
+                </div>
+
+                {selectedCalendarPrivateSession.status === "booked" ? (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
+                    <p className="text-xs font-black uppercase text-electric">Booked Player</p>
+                    <h4 className="mt-2 text-lg font-black text-navy">{selectedCalendarPrivateSession.player_name || "Player not recorded"}</h4>
+                    <p><span className="font-black text-navy">Player age:</span> {selectedCalendarPrivateSession.player_age || "Not recorded"}</p>
+                    <p><span className="font-black text-navy">Parent:</span> {selectedCalendarPrivateSession.parent_name || "Not recorded"}</p>
+                    <p><span className="font-black text-navy">Email:</span> {selectedCalendarPrivateSession.parent_email || "Not recorded"}</p>
+                    <p><span className="font-black text-navy">Phone:</span> {selectedCalendarPrivateSession.parent_phone || "Not recorded"}</p>
+                    <p><span className="font-black text-navy">Amount paid:</span> {formatMoney(selectedCalendarPrivateSession.amount_paid || 0)}</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { status: "closed" })}
+                      className={secondaryButtonClass}
+                    >
+                      Close Private Time
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { status: "cancelled" })}
+                      className={secondaryButtonClass}
+                    >
+                      Cancel Private Time
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => void deletePrivateAvailability(selectedCalendarPrivateSession.id)}
+                      className={dangerButtonClass}
+                    >
+                      Delete Private Time
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="rounded-lg border border-slate-200 bg-mist p-5 text-sm leading-6 text-slate-600">
@@ -5479,7 +5827,7 @@ export function AdminAvailability() {
                   <select
                     className={inputClass}
                     value={customLinkMode}
-                    disabled={customLinkPlanType === "private_1_on_1" || customLinkPlanType === "custom_amount"}
+                    disabled={customLinkPlanType === "custom_amount"}
                     onChange={(event) => {
                       setCustomLinkMode(event.target.value as CustomPaymentLinkMode);
                       setCustomLinkProposedSessionIds([]);
@@ -5590,11 +5938,127 @@ export function AdminAvailability() {
 
               <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm font-semibold leading-6 text-slate-600">
-                  The parent pays by card through Stripe. If sessions are selected, the system books only the paid number of sessions.
+                  The parent pays by card through Stripe. Private session links only show private openings created below.
                 </p>
                 <button type="button" disabled={isSaving} onClick={() => void createCustomPaymentLink()} className={primaryButtonClass}>
                   Create Payment Link
                 </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                <div>
+                  <p className="text-xs font-black uppercase text-electric">Private Session Availability</p>
+                  <h4 className="mt-2 text-xl font-black text-navy">Create private times parents can choose from.</h4>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    These openings are separate from small group sessions and do not count toward small group capacity.
+                  </p>
+                </div>
+                <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-electric">
+                  {privateSessionAvailability.filter((session) => session.status === "available").length} available
+                </span>
+              </div>
+              <div className="mt-5 grid gap-4 lg:grid-cols-4">
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Date
+                  <input className={inputClass} type="date" value={privateAvailabilityDate} onChange={(event) => setPrivateAvailabilityDate(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Start Time
+                  <input className={inputClass} type="time" value={privateAvailabilityStartTime} onChange={(event) => {
+                    setPrivateAvailabilityStartTime(event.target.value);
+                    setPrivateAvailabilityEndTime(endTimeFromStartInput(event.target.value));
+                  }} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  End Time
+                  <input className={inputClass} type="time" value={privateAvailabilityEndTime} onChange={(event) => setPrivateAvailabilityEndTime(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Status
+                  <select className={inputClass} value={privateAvailabilityStatus} onChange={(event) => setPrivateAvailabilityStatus(event.target.value as PrivateSessionAvailabilityStatus)}>
+                    {["available", "booked", "closed", "cancelled"].map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
+                  Session Focus
+                  <select className={inputClass} value={privateAvailabilityFocus} onChange={(event) => setPrivateAvailabilityFocus(event.target.value)}>
+                    {focusChoices.map((focus) => (
+                      <option key={focus} value={focus}>
+                        {focus}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
+                  Location
+                  <input className={inputClass} value={privateAvailabilityLocation} onChange={(event) => setPrivateAvailabilityLocation(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-4">
+                  Notes
+                  <textarea
+                    className={`${inputClass} min-h-20`}
+                    value={privateAvailabilityNotes}
+                    onChange={(event) => setPrivateAvailabilityNotes(event.target.value)}
+                    placeholder="Example: Finishing, confidence, first touch, winger work"
+                  />
+                </label>
+              </div>
+              <div className="mt-5 flex justify-end">
+                <button type="button" disabled={isSaving} onClick={() => void createPrivateAvailability()} className={primaryButtonClass}>
+                  Create Private Time
+                </button>
+              </div>
+
+              <div className="mt-6 grid gap-3">
+                {privateSessionAvailability.length > 0 ? (
+                  privateSessionAvailability.slice(0, 12).map((session) => (
+                    <article key={session.id} className="rounded-lg border border-slate-200 bg-mist p-4">
+                      <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
+                        <div>
+                          <div className="flex flex-wrap gap-2">
+                            <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-black uppercase text-electric">
+                              Private Session
+                            </span>
+                            <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(session.status === "available" ? "open" : session.status)}`}>
+                              {session.status}
+                            </span>
+                          </div>
+                          <p className="mt-3 text-base font-black text-navy">{formatDateTime(session.start_datetime, session.timezone)} - {formatTime(session.end_datetime, session.timezone)}</p>
+                          <p className="mt-1 text-sm font-bold text-slate-600">{session.session_focus || "Private Session"}</p>
+                          <p className="mt-1 text-sm text-slate-600">{session.location || business.location}</p>
+                          {session.status === "booked" ? (
+                            <p className="mt-2 text-sm font-black text-electric">Booked: {session.player_name || "Player not recorded"}</p>
+                          ) : null}
+                          {session.notes ? <p className="mt-2 text-sm text-slate-500">Notes: {session.notes}</p> : null}
+                        </div>
+                        <div className="flex flex-wrap gap-2 lg:justify-end">
+                          <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { status: "available" })} className={secondaryButtonClass}>
+                            Available
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { status: "closed" })} className={secondaryButtonClass}>
+                            Close
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { status: "cancelled" })} className={secondaryButtonClass}>
+                            Cancel
+                          </button>
+                          <button type="button" disabled={isSaving || session.status === "booked"} onClick={() => void deletePrivateAvailability(session.id)} className={dangerButtonClass}>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                    No private session availability has been created yet.
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -5633,11 +6097,13 @@ export function AdminAvailability() {
                           Credits: {link.credits_used}/{link.total_credits || "0"} used
                         </p>
                         <p className="mt-1 text-slate-600">Remaining: {link.credits_remaining}</p>
-                        <p className="mt-1 text-slate-600">Selected sessions: {link.selected_session_ids.length}</p>
+                        <p className="mt-1 text-slate-600">
+                          Selected sessions: {link.selected_session_ids.length + link.selected_private_session_ids.length}
+                        </p>
                         <p className="mt-1 text-slate-600">Created: {formatWaiverTimestamp(link.created_at)}</p>
                       </div>
                     </div>
-                    {link.proposedSessions.length > 0 || link.selectedSessions.length > 0 ? (
+                    {link.proposedSessions.length > 0 || link.selectedSessions.length > 0 || link.selectedPrivateSessions.length > 0 ? (
                       <div className="mt-4 grid gap-3 lg:grid-cols-2">
                         {link.proposedSessions.length > 0 ? (
                           <div className="rounded-lg border border-slate-200 bg-mist p-4">
@@ -5655,6 +6121,19 @@ export function AdminAvailability() {
                             <div className="mt-2 grid gap-1 text-sm text-emerald-900">
                               {link.selectedSessions.map((session) => (
                                 <p key={session.id}>{formatDateTime(session.start_datetime, session.timezone)} - {sessionFocusLabel(session)}</p>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {link.selectedPrivateSessions.length > 0 ? (
+                          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                            <p className="text-xs font-black uppercase text-electric">Selected Private Sessions</p>
+                            <div className="mt-2 grid gap-1 text-sm text-blue-950">
+                              {link.selectedPrivateSessions.map((session) => (
+                                <p key={session.id}>
+                                  {formatDateTime(session.start_datetime, session.timezone)} - {session.session_focus || "Private Session"}
+                                  {session.status === "booked" ? ` - ${session.player_name || "Booked"}` : ""}
+                                </p>
                               ))}
                             </div>
                           </div>

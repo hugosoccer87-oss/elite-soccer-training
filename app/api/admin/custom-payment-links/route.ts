@@ -23,7 +23,8 @@ const planTypes = new Set<CustomPaymentLinkPlanType>([
 const linkModes = new Set<CustomPaymentLinkMode>([
   "payment_only",
   "payment_plus_choose_sessions",
-  "payment_plus_confirm_proposed_schedule"
+  "payment_plus_confirm_proposed_schedule",
+  "payment_plus_choose_private_sessions"
 ]);
 
 function isTrainingGroupId(value: string): value is TrainingGroupId {

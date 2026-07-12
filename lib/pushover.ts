@@ -4,6 +4,7 @@ import {
   customPaymentLinkPlanLabel,
   type CustomPaymentLinkRow,
   type PassPurchaseRow,
+  type PrivateSessionAvailabilityRow,
   type PrivateSessionRequestRow
 } from "@/lib/supabase-db";
 import {
@@ -325,5 +326,38 @@ export async function sendCustomPaymentLinkAdminPushoverAlert(link: CustomPaymen
     source: "custom_payment_link",
     sourceId: link.id,
     dedupeKey: `custom_payment_link:${link.id}:admin_push`
+  });
+}
+
+export async function sendPrivateSessionAvailabilityAdminPushoverAlert(session: PrivateSessionAvailabilityRow) {
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: session.timezone || "America/Los_Angeles",
+    weekday: "short",
+    month: "short",
+    day: "numeric"
+  }).format(new Date(session.start_datetime));
+  const timeLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: session.timezone || "America/Los_Angeles",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(session.start_datetime));
+  const message = [
+    `Player: ${session.player_name || "Not recorded"}`,
+    `Session date: ${dateLabel}`,
+    `Session time: ${timeLabel}`,
+    `Session focus/title: ${session.session_focus || "Private Session"}`,
+    "Payment status: Paid",
+    `Amount paid: ${formatMoney(session.amount_paid || 0)}`,
+    `Parent: ${session.parent_name || "Not recorded"}`,
+    `Parent phone: ${session.parent_phone || "Not recorded"}`,
+    "Waiver status: Not submitted through small-group booking flow"
+  ].join("\n");
+
+  return sendPushoverAlert({
+    title: "EST CV Private Session Booked",
+    message,
+    source: "private_session_availability",
+    sourceId: session.id,
+    dedupeKey: `private_session:${session.id}:admin_push`
   });
 }

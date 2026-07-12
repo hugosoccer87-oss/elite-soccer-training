@@ -10,6 +10,7 @@ import {
   createPendingPassPurchase,
   customPaymentLinkPassType,
   getCustomPaymentLinkByToken,
+  listPublicPrivateSessionAvailability,
   getSupabaseAvailability,
   updateCustomPaymentLink
 } from "@/lib/supabase-db";
@@ -44,6 +45,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
   const { token } = await context.params;
   const payload = (await request.json().catch(() => null)) as {
     selectedSessionIds?: unknown;
+    selectedPrivateSessionIds?: unknown;
     notes?: string;
     medicalNotes?: string;
     emergencyName?: string;
@@ -74,18 +76,45 @@ export async function POST(request: Request, context: { params: Promise<{ token:
 
   try {
     const requestedSessionIds = selectedIds(payload?.selectedSessionIds);
+    const requestedPrivateSessionIds = selectedIds(payload?.selectedPrivateSessionIds);
     const passType = customPaymentLinkPassType(link.plan_type);
     const maxSessionCount =
       link.plan_type === "single_session" ? 1 : passType ? Number(link.total_credits) || 0 : 0;
+    const isPrivateSessionLink = link.link_mode === "payment_plus_choose_private_sessions";
 
-    if (link.link_mode === "payment_only" || link.plan_type === "private_1_on_1" || link.plan_type === "custom_amount") {
+    if (link.link_mode === "payment_only" || link.plan_type === "custom_amount") {
+      if (requestedSessionIds.length > 0 || requestedPrivateSessionIds.length > 0) {
+        return NextResponse.json(
+          { error: "This private link is payment-only and does not book sessions." },
+          { status: 400 }
+        );
+      }
+    } else if (isPrivateSessionLink) {
       if (requestedSessionIds.length > 0) {
         return NextResponse.json(
-          { error: "This private link is payment-only and does not book public small-group sessions." },
+          { error: "This private link can only book private session openings created by Coach Hugo." },
+          { status: 400 }
+        );
+      }
+
+      if (requestedPrivateSessionIds.length < 1) {
+        return NextResponse.json({ error: "Choose at least one private session time before continuing to payment." }, { status: 400 });
+      }
+
+      if (maxSessionCount > 0 && requestedPrivateSessionIds.length > maxSessionCount) {
+        return NextResponse.json(
+          { error: "You have used all available training credits. Please purchase another session or package to continue booking." },
           { status: 400 }
         );
       }
     } else {
+      if (requestedPrivateSessionIds.length > 0) {
+        return NextResponse.json(
+          { error: "This private link is not set up for private session openings." },
+          { status: 400 }
+        );
+      }
+
       if (requestedSessionIds.length < 1) {
         return NextResponse.json({ error: "Choose at least one session before continuing to payment." }, { status: 400 });
       }
@@ -124,6 +153,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     let bookingId: string | undefined;
     let bookingIds: string[] = [];
     const availability = await getSupabaseAvailability();
+    const privateAvailability = isPrivateSessionLink ? await listPublicPrivateSessionAvailability() : [];
 
     if (requestedSessionIds.length > 0) {
       const availableById = new Map(availability.sessions.map((session) => [session.id, session]));
@@ -136,6 +166,18 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       if (invalidSession) {
         return NextResponse.json(
           { error: "One or more selected sessions are no longer available. Please refresh this link and choose again." },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (requestedPrivateSessionIds.length > 0) {
+      const availablePrivateById = new Map(privateAvailability.map((session) => [session.id, session]));
+      const invalidPrivateSession = requestedPrivateSessionIds.find((sessionId) => !availablePrivateById.has(sessionId));
+
+      if (invalidPrivateSession) {
+        return NextResponse.json(
+          { error: "One or more private session times are no longer available. Please refresh this link and choose again." },
           { status: 400 }
         );
       }
@@ -227,7 +269,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     const checkout = await createStripeCustomPaymentLinkCheckoutSession(link, {
       passPurchaseId,
       bookingId,
-      selectedSessionCount: requestedSessionIds.length
+      selectedSessionCount: requestedSessionIds.length + requestedPrivateSessionIds.length
     });
 
     if (passPurchaseId) {
@@ -241,11 +283,12 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     await updateCustomPaymentLink({
       id: link.id,
       selectedSessionIds: requestedSessionIds,
+      selectedPrivateSessionIds: requestedPrivateSessionIds,
       passPurchaseId: passPurchaseId ?? null,
       bookingIds,
       checkoutSessionId: checkout.id,
-      creditsUsed: requestedSessionIds.length,
-      creditsRemaining: Math.max(0, (Number(link.total_credits) || 0) - requestedSessionIds.length)
+      creditsUsed: requestedSessionIds.length + requestedPrivateSessionIds.length,
+      creditsRemaining: Math.max(0, (Number(link.total_credits) || 0) - requestedSessionIds.length - requestedPrivateSessionIds.length)
     });
 
     console.info("[EST Stripe] Redirecting to Stripe Checkout", {

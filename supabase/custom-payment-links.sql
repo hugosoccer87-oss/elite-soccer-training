@@ -23,7 +23,8 @@ create table if not exists public.custom_payment_links (
     link_mode in (
       'payment_only',
       'payment_plus_choose_sessions',
-      'payment_plus_confirm_proposed_schedule'
+      'payment_plus_confirm_proposed_schedule',
+      'payment_plus_choose_private_sessions'
     )
   ),
   amount_cents integer not null default 0 check (amount_cents >= 0),
@@ -32,6 +33,7 @@ create table if not exists public.custom_payment_links (
   suggested_availability text,
   proposed_session_ids text[] not null default '{}',
   selected_session_ids text[] not null default '{}',
+  selected_private_session_ids text[] not null default '{}',
   status text not null default 'draft' check (
     status in (
       'draft',
@@ -68,6 +70,22 @@ create index if not exists idx_custom_payment_links_parent_email
 
 create index if not exists idx_custom_payment_links_stripe_checkout
   on public.custom_payment_links (stripe_checkout_session_id);
+
+alter table public.custom_payment_links
+  add column if not exists selected_private_session_ids text[] not null default '{}';
+
+alter table public.custom_payment_links
+  drop constraint if exists custom_payment_links_link_mode_check;
+
+alter table public.custom_payment_links
+  add constraint custom_payment_links_link_mode_check check (
+    link_mode in (
+      'payment_only',
+      'payment_plus_choose_sessions',
+      'payment_plus_confirm_proposed_schedule',
+      'payment_plus_choose_private_sessions'
+    )
+  );
 
 create or replace function public.est_touch_updated_at()
 returns trigger

@@ -11,16 +11,20 @@ import {
   verifyStripeWebhookSignature
 } from "@/lib/stripe";
 import {
+  bookPrivateSessionAvailability,
   confirmCustomPaymentLinkPaid,
   getBookingRecordForConfirmation,
   getCustomPaymentLinkById,
-  markDirectPaymentPaid
+  markDirectPaymentPaid,
+  updatePrivateSessionAvailability
 } from "@/lib/supabase-db";
 import {
   sendCustomPaymentLinkTransactionalEmails,
-  sendDirectPaymentTransactionalEmails
+  sendDirectPaymentTransactionalEmails,
+  sendPrivateSessionAvailabilityTransactionalEmails
 } from "@/lib/transactional-email";
-import { sendCustomPaymentLinkAdminPushoverAlert } from "@/lib/pushover";
+import { sendCustomPaymentLinkAdminPushoverAlert, sendPrivateSessionAvailabilityAdminPushoverAlert } from "@/lib/pushover";
+import { syncBookedPrivateSessionCalendarEvent } from "@/lib/google-calendar";
 
 export const runtime = "nodejs";
 
@@ -146,6 +150,71 @@ export async function POST(request: Request) {
 
         if (!customDetails) {
           throw new Error(`Custom payment link ${customPaymentLinkId} was not found.`);
+        }
+
+        if (
+          customDetails.link.link_mode === "payment_plus_choose_private_sessions" &&
+          customDetails.link.selected_private_session_ids.length > 0
+        ) {
+          const bookedPrivateSessions = [];
+          const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : undefined;
+          const amountPerPrivateSession = Math.round(
+            (typeof session.amount_total === "number" ? session.amount_total : customDetails.link.amount_cents) /
+              Math.max(1, customDetails.link.selected_private_session_ids.length)
+          );
+
+          for (const privateSessionId of customDetails.link.selected_private_session_ids) {
+            const bookedPrivateSession = await bookPrivateSessionAvailability({
+              privateSessionId,
+              customPaymentLinkId,
+              playerName: customDetails.link.player_name,
+              playerAge: customDetails.link.player_age,
+              parentName: customDetails.link.parent_name,
+              parentEmail: customDetails.link.parent_email,
+              parentPhone: customDetails.link.parent_phone,
+              checkoutSessionId: session.id,
+              paymentIntentId,
+              amountPaid: amountPerPrivateSession
+            });
+
+            const calendarResult = await syncBookedPrivateSessionCalendarEvent(bookedPrivateSession);
+            const withCalendarStatus = await updatePrivateSessionAvailability(bookedPrivateSession.id, {
+              google_calendar_event_id: calendarResult.eventId || bookedPrivateSession.google_calendar_event_id || null,
+              calendar_status: calendarResult.status,
+              calendar_message: calendarResult.message || null
+            }) ?? bookedPrivateSession;
+            const emailResult = await sendPrivateSessionAvailabilityTransactionalEmails(withCalendarStatus);
+            const withEmailStatus = await updatePrivateSessionAvailability(withCalendarStatus.id, {
+              email_status: emailResult.sent ? "sent" : "failed",
+              email_message: emailResult.message || null
+            }) ?? withCalendarStatus;
+            const pushoverResult = await sendPrivateSessionAvailabilityAdminPushoverAlert(withEmailStatus);
+            const finalPrivateSession = await updatePrivateSessionAvailability(withEmailStatus.id, {
+              pushover_status: pushoverResult.sent ? "sent" : pushoverResult.skipped ? "skipped" : "failed",
+              pushover_message: pushoverResult.message || null
+            }) ?? withEmailStatus;
+
+            bookedPrivateSessions.push(finalPrivateSession);
+          }
+
+          await confirmCustomPaymentLinkPaid({
+            customPaymentLinkId,
+            checkoutSessionId: session.id,
+            paymentIntentId,
+            paymentStatus: "paid",
+            selectedPrivateSessionIds: bookedPrivateSessions.map((item) => item.id),
+            creditsUsed: bookedPrivateSessions.length,
+            creditsRemaining: Math.max(0, Number(customDetails.link.total_credits || 0) - bookedPrivateSessions.length)
+          });
+
+          console.info("[EST Stripe] Custom private session payment notifications complete", {
+            eventId: event.id,
+            sessionId: session.id,
+            customPaymentLinkId,
+            privateSessionsBooked: bookedPrivateSessions.length
+          });
+
+          return NextResponse.json({ received: true });
         }
 
         const customPassPurchaseId = metadata.passPurchaseId;

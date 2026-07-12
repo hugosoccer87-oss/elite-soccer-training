@@ -4,6 +4,7 @@ import { business } from "@/lib/site-data";
 import {
   getCustomPaymentLinkByToken,
   getSupabaseAvailability,
+  listPublicPrivateSessionAvailability,
   markCustomPaymentLinkViewed
 } from "@/lib/supabase-db";
 
@@ -30,7 +31,10 @@ export default async function CustomPaymentLinkPage({ params }: { params: Promis
 
   await markCustomPaymentLinkViewed(token);
 
-  const availability = await getSupabaseAvailability();
+  const [availability, privateAvailability] = await Promise.all([
+    getSupabaseAvailability(),
+    listPublicPrivateSessionAvailability()
+  ]);
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -62,6 +66,7 @@ export default async function CustomPaymentLinkPage({ params }: { params: Promis
           totalCredits: details.link.total_credits
         }}
         sessions={availability.sessions}
+        privateSessions={privateAvailability}
       />
     </main>
   );

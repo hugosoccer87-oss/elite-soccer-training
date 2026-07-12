@@ -1,6 +1,12 @@
 export const shootingFinishingTrainingFocusValue = "Shooting & Finishing";
+export const privateSessionTrainingFocusValue = "Private Session";
 
-export type TrainingFocusValue = "regular" | "general_training" | "shooting_finishing" | typeof shootingFinishingTrainingFocusValue;
+export type TrainingFocusValue =
+  | "regular"
+  | "general_training"
+  | "shooting_finishing"
+  | typeof shootingFinishingTrainingFocusValue
+  | typeof privateSessionTrainingFocusValue;
 
 export type TrainingFocusDisplay = {
   value: string;
@@ -14,7 +20,8 @@ export const trainingFocusOptions: Array<{
 }> = [
   { value: "regular", label: "Regular Training" },
   { value: "general_training", label: "General Training" },
-  { value: shootingFinishingTrainingFocusValue, label: "Shooting & Finishing" }
+  { value: shootingFinishingTrainingFocusValue, label: "Shooting & Finishing" },
+  { value: privateSessionTrainingFocusValue, label: "Private Session" }
 ];
 
 export const sessionFocusExamples = [
@@ -23,7 +30,8 @@ export const sessionFocusExamples = [
   "First Touch & Passing",
   "Defending Session",
   "Shooting / Attacking Session",
-  "Speed of Play & Decision Making"
+  "Speed of Play & Decision Making",
+  privateSessionTrainingFocusValue
 ];
 
 function normalizedFocus(value: string | null | undefined) {
@@ -52,6 +60,12 @@ export function isRegularTrainingFocus(value: string | null | undefined) {
   );
 }
 
+export function isPrivateSessionFocus(value: string | null | undefined) {
+  const normalized = normalizedFocus(value);
+
+  return normalized === "private_session" || normalized === "private";
+}
+
 export function normalizeTrainingFocusForStorage(value: string | null | undefined) {
   const trimmed = value?.trim();
 
@@ -63,6 +77,10 @@ export function normalizeTrainingFocusForStorage(value: string | null | undefine
     return shootingFinishingTrainingFocusValue;
   }
 
+  if (isPrivateSessionFocus(trimmed)) {
+    return privateSessionTrainingFocusValue;
+  }
+
   return trimmed;
 }
 
@@ -71,6 +89,10 @@ export function getTrainingFocusLabel(value: string | null | undefined) {
 
   if (isShootingFinishingFocus(normalized)) {
     return "Shooting & Finishing";
+  }
+
+  if (isPrivateSessionFocus(normalized)) {
+    return "Private Session";
   }
 
   if (isRegularTrainingFocus(normalized)) {
@@ -102,6 +124,14 @@ export function getTrainingFocusDisplay(value: string | null | undefined): Train
       value: normalized,
       label: "Shooting & Finishing",
       description: "Focused attacking reps, ball striking, and finishing confidence."
+    };
+  }
+
+  if (isPrivateSessionFocus(normalized)) {
+    return {
+      value: normalized,
+      label: "Private Session",
+      description: "Private 1-on-1 session time controlled by Coach Hugo."
     };
   }
 

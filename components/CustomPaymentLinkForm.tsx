@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PublicAvailableSession } from "@/lib/public-availability";
 import { formatCurrencyFromCents } from "@/lib/pricing";
-import type { CustomPaymentLinkMode, CustomPaymentLinkPlanType } from "@/lib/supabase-db";
+import type { CustomPaymentLinkMode, CustomPaymentLinkPlanType, PrivateSessionAvailabilityRow } from "@/lib/supabase-db";
 
 type CustomPaymentLinkClient = {
   token: string;
@@ -26,6 +26,7 @@ type CustomPaymentLinkClient = {
 type Props = {
   link: CustomPaymentLinkClient;
   sessions: PublicAvailableSession[];
+  privateSessions: PrivateSessionAvailabilityRow[];
 };
 
 const planLabels: Record<CustomPaymentLinkPlanType, string> = {
@@ -44,12 +45,33 @@ function maxSelectable(link: CustomPaymentLinkClient) {
 }
 
 function isPaymentOnly(link: CustomPaymentLinkClient) {
-  return link.linkMode === "payment_only" || link.planType === "private_1_on_1" || link.planType === "custom_amount";
+  return link.linkMode === "payment_only" || link.planType === "custom_amount";
 }
 
-export function CustomPaymentLinkForm({ link, sessions }: Props) {
+function formatPrivateDateTime(value: string, timeZone = "America/Los_Angeles") {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatPrivateTime(value: string, timeZone = "America/Los_Angeles") {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props) {
   const selectableLimit = maxSelectable(link);
   const paymentOnly = isPaymentOnly(link);
+  const privateSelectionMode = link.linkMode === "payment_plus_choose_private_sessions";
   const proposedSet = useMemo(() => new Set(link.proposedSessionIds), [link.proposedSessionIds]);
   const availableSessions = useMemo(() => {
     const groupSessions = sessions.filter((session) => session.trainingGroupId === link.trainingGroup);
@@ -58,17 +80,25 @@ export function CustomPaymentLinkForm({ link, sessions }: Props) {
       return groupSessions.filter((session) => proposedSet.has(session.id));
     }
 
-    if (paymentOnly) {
+    if (paymentOnly || privateSelectionMode) {
       return [];
     }
 
     return groupSessions;
-  }, [link.linkMode, link.trainingGroup, paymentOnly, proposedSet, sessions]);
+  }, [link.linkMode, link.trainingGroup, paymentOnly, privateSelectionMode, proposedSet, sessions]);
+  const availablePrivateSessions = useMemo(() => {
+    if (!privateSelectionMode) {
+      return [];
+    }
+
+    return privateSessions.filter((session) => session.status === "available");
+  }, [privateSelectionMode, privateSessions]);
   const initialSelected =
     link.linkMode === "payment_plus_confirm_proposed_schedule"
       ? availableSessions.slice(0, selectableLimit || availableSessions.length).map((session) => session.id)
       : [];
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>(initialSelected);
+  const [selectedPrivateSessionIds, setSelectedPrivateSessionIds] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [emergencyName, setEmergencyName] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
@@ -78,6 +108,7 @@ export function CustomPaymentLinkForm({ link, sessions }: Props) {
   const [waiverAccepted, setWaiverAccepted] = useState(false);
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const selectedCount = selectedSessionIds.length + selectedPrivateSessionIds.length;
   const needsWaiver = selectedSessionIds.length > 0;
   const planLabel = planLabels[link.planType];
   const isClosed = ["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(link.status);
@@ -85,6 +116,22 @@ export function CustomPaymentLinkForm({ link, sessions }: Props) {
   function toggleSession(sessionId: string) {
     setError("");
     setSelectedSessionIds((current) => {
+      if (current.includes(sessionId)) {
+        return current.filter((id) => id !== sessionId);
+      }
+
+      if (selectableLimit > 0 && current.length >= selectableLimit) {
+        setError("You have used all available training credits. Please purchase another session or package to continue booking.");
+        return current;
+      }
+
+      return [...current, sessionId];
+    });
+  }
+
+  function togglePrivateSession(sessionId: string) {
+    setError("");
+    setSelectedPrivateSessionIds((current) => {
       if (current.includes(sessionId)) {
         return current.filter((id) => id !== sessionId);
       }
@@ -106,8 +153,8 @@ export function CustomPaymentLinkForm({ link, sessions }: Props) {
       return;
     }
 
-    if (!paymentOnly && selectedSessionIds.length < 1) {
-      setError("Choose at least one session before continuing to payment.");
+    if (!paymentOnly && selectedCount < 1) {
+      setError(privateSelectionMode ? "Choose at least one private session time before continuing to payment." : "Choose at least one session before continuing to payment.");
       return;
     }
 
@@ -128,6 +175,7 @@ export function CustomPaymentLinkForm({ link, sessions }: Props) {
         },
         body: JSON.stringify({
           selectedSessionIds,
+          selectedPrivateSessionIds,
           notes,
           emergencyName,
           emergencyPhone,
@@ -215,19 +263,65 @@ export function CustomPaymentLinkForm({ link, sessions }: Props) {
                 <div>
                   <p className="text-xs font-black uppercase text-electric">Choose Sessions</p>
                   <h2 className="mt-1 text-2xl font-black text-slate-950">
-                    {link.linkMode === "payment_plus_confirm_proposed_schedule" ? "Confirm Proposed Schedule" : "Select Training Sessions"}
+                    {link.linkMode === "payment_plus_confirm_proposed_schedule"
+                      ? "Confirm Proposed Schedule"
+                      : privateSelectionMode
+                        ? "Select Private Session Times"
+                        : "Select Training Sessions"}
                   </h2>
                 </div>
                 <p className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-700">
-                  {selectedSessionIds.length}/{selectableLimit} selected
+                  {selectedCount}/{selectableLimit} selected
                 </p>
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Parents can only book the number of sessions included with this private link.
+                {privateSelectionMode
+                  ? "Choose from the private session openings Coach Hugo made available for this link."
+                  : "Parents can only book the number of sessions included with this private link."}
               </p>
 
               <div className="mt-5 grid gap-3">
-                {availableSessions.length > 0 ? (
+                {privateSelectionMode ? (
+                  availablePrivateSessions.length > 0 ? (
+                    availablePrivateSessions.map((session) => {
+                      const selected = selectedPrivateSessionIds.includes(session.id);
+
+                      return (
+                        <button
+                          key={session.id}
+                          type="button"
+                          onClick={() => togglePrivateSession(session.id)}
+                          className={`rounded-[8px] border p-4 text-left transition ${
+                            selected ? "border-electric bg-blue-50 ring-2 ring-electric/20" : "border-slate-200 bg-white hover:border-electric"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-lg font-black text-slate-950">
+                                {formatPrivateDateTime(session.start_datetime, session.timezone)}
+                              </p>
+                              <p className="mt-1 font-black text-electric">
+                                {formatPrivateTime(session.start_datetime, session.timezone)} - {formatPrivateTime(session.end_datetime, session.timezone)}
+                              </p>
+                              <p className="mt-2 text-sm font-bold text-slate-700">
+                                {session.session_focus || "Private Session"}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-600">{session.location}</p>
+                              {session.notes ? <p className="mt-2 text-sm text-slate-500">{session.notes}</p> : null}
+                            </div>
+                            <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black uppercase text-white">
+                              Private
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="rounded-[8px] border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-700">
+                      No private session times are currently available for this link. Please contact Coach Hugo.
+                    </div>
+                  )
+                ) : availableSessions.length > 0 ? (
                   availableSessions.map((session) => {
                     const selected = selectedSessionIds.includes(session.id);
 

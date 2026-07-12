@@ -190,7 +190,8 @@ export type CustomPaymentLinkPlanType =
 export type CustomPaymentLinkMode =
   | "payment_only"
   | "payment_plus_choose_sessions"
-  | "payment_plus_confirm_proposed_schedule";
+  | "payment_plus_confirm_proposed_schedule"
+  | "payment_plus_choose_private_sessions";
 
 export type CustomPaymentLinkStatus =
   | "draft"
@@ -218,6 +219,7 @@ export type CustomPaymentLinkRow = {
   suggested_availability?: string | null;
   proposed_session_ids: string[];
   selected_session_ids: string[];
+  selected_private_session_ids: string[];
   status: CustomPaymentLinkStatus;
   total_credits: number;
   credits_used: number;
@@ -238,6 +240,7 @@ export type AdminCustomPaymentLink = CustomPaymentLinkRow & {
   bookings: BookingRow[];
   selectedSessions: TrainingSessionRow[];
   proposedSessions: TrainingSessionRow[];
+  selectedPrivateSessions: PrivateSessionAvailabilityRow[];
 };
 
 export type CustomPaymentLinkDetails = {
@@ -246,6 +249,7 @@ export type CustomPaymentLinkDetails = {
   bookings: BookingRow[];
   selectedSessions: TrainingSessionRow[];
   proposedSessions: TrainingSessionRow[];
+  selectedPrivateSessions: PrivateSessionAvailabilityRow[];
 };
 
 export type WaiverRow = {
@@ -379,6 +383,48 @@ export type PrivateSessionRequestRow = {
   calendar_message?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type PrivateSessionAvailabilityStatus = "available" | "booked" | "closed" | "cancelled";
+
+export type PrivateSessionAvailabilityRow = {
+  id: string;
+  start_datetime: string;
+  end_datetime: string;
+  timezone: string;
+  location: string;
+  session_focus: string;
+  notes?: string | null;
+  status: PrivateSessionAvailabilityStatus;
+  player_name?: string | null;
+  player_age?: string | null;
+  parent_name?: string | null;
+  parent_email?: string | null;
+  parent_phone?: string | null;
+  custom_payment_link_id?: string | null;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  amount_paid: number;
+  booked_at?: string | null;
+  google_calendar_event_id?: string | null;
+  calendar_status?: string | null;
+  calendar_message?: string | null;
+  email_status?: string | null;
+  email_message?: string | null;
+  pushover_status?: string | null;
+  pushover_message?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PrivateSessionAvailabilityInput = {
+  date: string;
+  startTime: string;
+  endTime?: string;
+  location?: string;
+  sessionFocus?: string;
+  notes?: string;
+  status?: PrivateSessionAvailabilityStatus;
 };
 
 export type PrivateSessionRequestInput = {
@@ -1049,6 +1095,8 @@ export function customPaymentLinkModeLabel(mode: CustomPaymentLinkMode) {
       return "Payment only";
     case "payment_plus_confirm_proposed_schedule":
       return "Payment + confirm proposed schedule";
+    case "payment_plus_choose_private_sessions":
+      return "Payment + choose private session times";
     case "payment_plus_choose_sessions":
     default:
       return "Payment + choose sessions";
@@ -1071,7 +1119,8 @@ async function loadCustomPaymentLinkDetails(link: CustomPaymentLinkRow): Promise
   const sessionIds = Array.from(
     new Set([...(link.proposed_session_ids ?? []), ...(link.selected_session_ids ?? [])].filter(Boolean))
   );
-  const [passPurchase, bookings, sessions] = await Promise.all([
+  const privateSessionIds = Array.from(new Set(link.selected_private_session_ids ?? []));
+  const [passPurchase, bookings, sessions, privateSessions] = await Promise.all([
     link.pass_purchase_id ? getPassPurchaseById(link.pass_purchase_id) : Promise.resolve(null),
     link.booking_ids.length > 0
       ? supabaseRequest<BookingRow[]>(
@@ -1082,9 +1131,15 @@ async function loadCustomPaymentLinkDetails(link: CustomPaymentLinkRow): Promise
       ? supabaseRequest<TrainingSessionRow[]>(
           `training_sessions?select=*&id=in.(${sessionIds.map(encodeFilter).join(",")})&order=start_datetime.asc`
         ).catch(() => [])
+      : Promise.resolve([]),
+    privateSessionIds.length > 0
+      ? supabaseRequest<PrivateSessionAvailabilityRow[]>(
+          `private_session_availability?select=*&id=in.(${privateSessionIds.map(encodeFilter).join(",")})&order=start_datetime.asc`
+        ).catch(() => [])
       : Promise.resolve([])
   ]);
   const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+  const privateSessionMap = new Map(privateSessions.map((session) => [session.id, session]));
 
   return {
     link,
@@ -1095,7 +1150,10 @@ async function loadCustomPaymentLinkDetails(link: CustomPaymentLinkRow): Promise
       .filter((session): session is TrainingSessionRow => Boolean(session)),
     selectedSessions: (link.selected_session_ids ?? [])
       .map((sessionId) => sessionMap.get(sessionId))
-      .filter((session): session is TrainingSessionRow => Boolean(session))
+      .filter((session): session is TrainingSessionRow => Boolean(session)),
+    selectedPrivateSessions: (link.selected_private_session_ids ?? [])
+      .map((sessionId) => privateSessionMap.get(sessionId))
+      .filter((session): session is PrivateSessionAvailabilityRow => Boolean(session))
   };
 }
 
@@ -1110,7 +1168,8 @@ export async function listAdminCustomPaymentLinks(): Promise<AdminCustomPaymentL
     passPurchase: detail.passPurchase,
     bookings: detail.bookings,
     proposedSessions: detail.proposedSessions,
-    selectedSessions: detail.selectedSessions
+    selectedSessions: detail.selectedSessions,
+    selectedPrivateSessions: detail.selectedPrivateSessions
   }));
 }
 
@@ -1149,6 +1208,7 @@ export async function createCustomPaymentLink(input: {
       suggested_availability: input.suggestedAvailability?.trim() || null,
       proposed_session_ids: Array.from(new Set(input.proposedSessionIds ?? [])),
       selected_session_ids: [],
+      selected_private_session_ids: [],
       total_credits: credits,
       credits_used: 0,
       credits_remaining: credits,
@@ -1207,6 +1267,7 @@ export async function updateCustomPaymentLink(input: {
   id: string;
   status?: CustomPaymentLinkStatus;
   selectedSessionIds?: string[];
+  selectedPrivateSessionIds?: string[];
   passPurchaseId?: string | null;
   bookingIds?: string[];
   checkoutSessionId?: string | null;
@@ -1220,6 +1281,7 @@ export async function updateCustomPaymentLink(input: {
 
   if (input.status) patch.status = input.status;
   if (input.selectedSessionIds) patch.selected_session_ids = input.selectedSessionIds;
+  if (input.selectedPrivateSessionIds) patch.selected_private_session_ids = input.selectedPrivateSessionIds;
   if (input.passPurchaseId !== undefined) patch.pass_purchase_id = input.passPurchaseId;
   if (input.bookingIds) patch.booking_ids = input.bookingIds;
   if (input.checkoutSessionId !== undefined) patch.stripe_checkout_session_id = input.checkoutSessionId;
@@ -1246,6 +1308,7 @@ export async function confirmCustomPaymentLinkPaid(input: {
   paymentIntentId?: string;
   paymentStatus?: string;
   selectedSessionIds?: string[];
+  selectedPrivateSessionIds?: string[];
   passPurchaseId?: string | null;
   bookingIds?: string[];
   creditsUsed?: number;
@@ -1265,7 +1328,10 @@ export async function confirmCustomPaymentLinkPaid(input: {
       : totalCredits > 0
         ? Math.max(0, totalCredits - creditsUsed)
         : 0;
-  const selectedCount = input.selectedSessionIds?.length ?? details.link.selected_session_ids.length;
+  const selectedCount =
+    input.selectedSessionIds?.length ??
+    input.selectedPrivateSessionIds?.length ??
+    details.link.selected_session_ids.length + details.link.selected_private_session_ids.length;
   const nextStatus: CustomPaymentLinkStatus =
     totalCredits > 0 && creditsRemaining === 0
       ? "fully_scheduled"
@@ -1277,6 +1343,7 @@ export async function confirmCustomPaymentLinkPaid(input: {
     id: input.customPaymentLinkId,
     status: nextStatus,
     selectedSessionIds: input.selectedSessionIds,
+    selectedPrivateSessionIds: input.selectedPrivateSessionIds,
     passPurchaseId: input.passPurchaseId,
     bookingIds: input.bookingIds,
     checkoutSessionId: input.checkoutSessionId,
@@ -1495,6 +1562,151 @@ export async function updatePrivateSessionRequest(
   });
 
   return rows[0] ?? null;
+}
+
+export async function listAdminPrivateSessionAvailability() {
+  return supabaseRequest<PrivateSessionAvailabilityRow[]>(
+    "private_session_availability?select=*&order=start_datetime.asc"
+  ).catch(() => []);
+}
+
+export async function listPublicPrivateSessionAvailability() {
+  const now = new Date().toISOString();
+
+  return supabaseRequest<PrivateSessionAvailabilityRow[]>(
+    [
+      "private_session_availability?select=*",
+      "status=eq.available",
+      `start_datetime=gt.${encodeFilter(now)}`,
+      "order=start_datetime.asc"
+    ].join("&")
+  ).catch(() => []);
+}
+
+export async function createPrivateSessionAvailability(input: PrivateSessionAvailabilityInput) {
+  const start = zonedDateTimeToUtc(input.date, input.startTime, defaultTimeZone);
+  const explicitEnd = input.endTime ? zonedDateTimeToUtc(input.date, input.endTime, defaultTimeZone) : null;
+  const end = explicitEnd && explicitEnd.getTime() > start.getTime() ? explicitEnd : new Date(start.getTime() + 60 * 60_000);
+  const rows = await supabaseRequest<PrivateSessionAvailabilityRow[]>("private_session_availability", {
+    method: "POST",
+    body: JSON.stringify({
+      start_datetime: start.toISOString(),
+      end_datetime: end.toISOString(),
+      timezone: defaultTimeZone,
+      location: input.location?.trim() || business.location,
+      session_focus: input.sessionFocus?.trim() || "Private Session",
+      notes: input.notes?.trim() || null,
+      status: input.status || "available"
+    })
+  });
+
+  return rows[0] ?? null;
+}
+
+export async function updatePrivateSessionAvailability(
+  id: string,
+  updates: Partial<
+    Pick<
+      PrivateSessionAvailabilityRow,
+      | "location"
+      | "session_focus"
+      | "notes"
+      | "status"
+      | "google_calendar_event_id"
+      | "calendar_status"
+      | "calendar_message"
+      | "email_status"
+      | "email_message"
+      | "pushover_status"
+      | "pushover_message"
+    >
+  > & {
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+  }
+) {
+  const payload: Record<string, unknown> = {};
+
+  if (updates.date && updates.startTime) {
+    const start = zonedDateTimeToUtc(updates.date, updates.startTime, defaultTimeZone);
+    const explicitEnd = updates.endTime ? zonedDateTimeToUtc(updates.date, updates.endTime, defaultTimeZone) : null;
+    const end = explicitEnd && explicitEnd.getTime() > start.getTime() ? explicitEnd : new Date(start.getTime() + 60 * 60_000);
+    payload.start_datetime = start.toISOString();
+    payload.end_datetime = end.toISOString();
+    payload.timezone = defaultTimeZone;
+  }
+
+  if (typeof updates.location === "string") payload.location = updates.location.trim() || business.location;
+  if (typeof updates.session_focus === "string") payload.session_focus = updates.session_focus.trim() || "Private Session";
+  if (typeof updates.notes === "string" || updates.notes === null) payload.notes = updates.notes?.trim() || null;
+  if (updates.status) payload.status = updates.status;
+  if (updates.google_calendar_event_id !== undefined) payload.google_calendar_event_id = updates.google_calendar_event_id;
+  if (updates.calendar_status !== undefined) payload.calendar_status = updates.calendar_status;
+  if (updates.calendar_message !== undefined) payload.calendar_message = updates.calendar_message;
+  if (updates.email_status !== undefined) payload.email_status = updates.email_status;
+  if (updates.email_message !== undefined) payload.email_message = updates.email_message;
+  if (updates.pushover_status !== undefined) payload.pushover_status = updates.pushover_status;
+  if (updates.pushover_message !== undefined) payload.pushover_message = updates.pushover_message;
+
+  const rows = await supabaseRequest<PrivateSessionAvailabilityRow[]>(
+    `private_session_availability?id=eq.${encodeFilter(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function deletePrivateSessionAvailability(id: string) {
+  return supabaseRequest<null>(`private_session_availability?id=eq.${encodeFilter(id)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function bookPrivateSessionAvailability(input: {
+  privateSessionId: string;
+  customPaymentLinkId: string;
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  checkoutSessionId?: string;
+  paymentIntentId?: string;
+  amountPaid?: number;
+}) {
+  const rows = await supabaseRequest<PrivateSessionAvailabilityRow[]>(
+    [
+      `private_session_availability?id=eq.${encodeFilter(input.privateSessionId)}`,
+      "status=eq.available"
+    ].join("&"),
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: "booked",
+        player_name: input.playerName,
+        player_age: input.playerAge,
+        parent_name: input.parentName,
+        parent_email: input.parentEmail,
+        parent_phone: input.parentPhone,
+        custom_payment_link_id: input.customPaymentLinkId,
+        stripe_checkout_session_id: input.checkoutSessionId || null,
+        stripe_payment_intent_id: input.paymentIntentId || null,
+        amount_paid: input.amountPaid ?? 0,
+        booked_at: new Date().toISOString()
+      })
+    }
+  );
+  const booked = rows[0];
+
+  if (!booked) {
+    throw new Error("That private session time is no longer available.");
+  }
+
+  return booked;
 }
 
 export async function schedulePrivateSessionRequest(input: {

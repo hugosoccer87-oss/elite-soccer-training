@@ -24,6 +24,8 @@ import {
   type
   DirectPaymentRow,
   type
+  PrivateSessionAvailabilityRow,
+  type
   PassPurchaseRow,
   type
   ScheduleApprovalRow,
@@ -675,6 +677,95 @@ function customPaymentLinkAdminEmail(link: CustomPaymentLinkRow): EmailMessage {
     html: brandedEmailShell({
       title: "Custom Payment Link Paid",
       intro: "A parent completed payment through a private EST CV link.",
+      body: `
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+          ${detailsRows(rows)}
+        </table>
+      `
+    })
+  };
+}
+
+function privateSessionCustomerEmail(session: PrivateSessionAvailabilityRow): EmailMessage {
+  const sessionDate = formatSessionDate(session.start_datetime, session.timezone);
+  const sessionTime = `${formatSessionTime(session.start_datetime, session.timezone)} - ${formatSessionTime(session.end_datetime, session.timezone)}`;
+  const rows: Array<[string, string]> = [
+    ["Player", session.player_name || "Not recorded"],
+    ["Session Type", "Private Session"],
+    ["Session Focus", session.session_focus || "Private Session"],
+    ["Date / Time", `${sessionDate} at ${sessionTime}`],
+    ["Location", session.location || business.location],
+    ["Payment Status", "Payment confirmed"],
+    ["Amount Paid", formatCurrencyFromCents(session.amount_paid || 0)]
+  ];
+  const text = [
+    "Elite Soccer Training CV private session confirmed",
+    "",
+    `Hi ${session.parent_name || "Parent"},`,
+    "",
+    `Your private session for ${session.player_name || "your player"} is confirmed.`,
+    "",
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    "Please arrive a few minutes early and bring plenty of water.",
+    "",
+    `Questions? Email ${business.email} or call ${business.phone}.`
+  ].join("\n");
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: session.parent_email || bookingNotificationEmail,
+    replyTo: business.email,
+    subject: "EST CV Private Session Confirmation",
+    text,
+    html: brandedEmailShell({
+      title: "Private Session Confirmed",
+      intro: "Your EST CV private session is confirmed.",
+      body: `
+        <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(session.parent_name || "Parent")}, your private session for <strong style="color:#06152b">${escapeHtml(session.player_name || "your player")}</strong> is confirmed.</p>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
+          ${detailsRows(rows)}
+        </table>
+        <div style="margin-top:22px;border-left:4px solid #1783ff;background:#f5f8fc;padding:16px;color:#334155;line-height:1.6">
+          <strong style="color:#06152b">Contact</strong><br />
+          Email: ${escapeHtml(business.email)}<br />
+          Phone: ${escapeHtml(business.phone)}
+        </div>
+      `
+    })
+  };
+}
+
+function privateSessionAdminEmail(session: PrivateSessionAvailabilityRow): EmailMessage {
+  const sessionDate = formatSessionDate(session.start_datetime, session.timezone);
+  const sessionTime = `${formatSessionTime(session.start_datetime, session.timezone)} - ${formatSessionTime(session.end_datetime, session.timezone)}`;
+  const rows: Array<[string, string]> = [
+    ["Private Session ID", session.id],
+    ["Player", session.player_name || "Not recorded"],
+    ["Player Age", session.player_age || "Not recorded"],
+    ["Parent/Guardian", session.parent_name || "Not recorded"],
+    ["Parent Email", session.parent_email || "Not recorded"],
+    ["Parent Phone", session.parent_phone || "Not recorded"],
+    ["Session Focus", session.session_focus || "Private Session"],
+    ["Date / Time", `${sessionDate} at ${sessionTime}`],
+    ["Location", session.location || business.location],
+    ["Payment Status", "Paid"],
+    ["Amount Paid", formatCurrencyFromCents(session.amount_paid || 0)],
+    ["Stripe Checkout Session", session.stripe_checkout_session_id || "Not recorded"],
+    ["Stripe Payment Intent", session.stripe_payment_intent_id || "Not recorded"],
+    ["Custom Payment Link", session.custom_payment_link_id || "Not recorded"],
+    ["Notes", session.notes || "None"]
+  ];
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: bookingNotificationEmail,
+    replyTo: session.parent_email || business.email,
+    subject: `New EST CV Private Session: ${session.player_name || "Player"}`,
+    text: rows.map(([label, value]) => `${label}: ${value}`).join("\n"),
+    html: brandedEmailShell({
+      title: "New Private Session Booking",
+      intro: "A parent paid for a private EST CV session.",
       body: `
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
           ${detailsRows(rows)}
@@ -1562,6 +1653,137 @@ export async function sendCustomPaymentLinkTransactionalEmails(link: CustomPayme
       customerSent: false,
       adminSent: false,
       message: error instanceof Error ? error.message : "Custom payment link email failed to send."
+    };
+  }
+}
+
+export async function sendPrivateSessionAvailabilityTransactionalEmails(
+  session: PrivateSessionAvailabilityRow
+): Promise<EmailResult> {
+  const customer = privateSessionCustomerEmail(session);
+  const admin = privateSessionAdminEmail(session);
+  const baseAttempt = {
+    bookingId: session.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Private session was booked, but emails were not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      privateSessionId: session.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message
+    };
+  }
+
+  console.info("[EST Email] Preparing customer confirmation email", {
+    privateSessionId: session.id,
+    type: "private_session"
+  });
+  console.info("[EST Email] Customer recipient:", {
+    privateSessionId: session.id,
+    to: customer.to
+  });
+  console.info("[EST Email] Preparing admin notification email", {
+    privateSessionId: session.id,
+    type: "private_session"
+  });
+  console.info("[EST Email] Admin recipient:", {
+    privateSessionId: session.id,
+    to: admin.to
+  });
+
+  try {
+    const transport = await createTransport();
+    const [customerResult, adminResult] = await Promise.allSettled([
+      transport.sendMail(customer),
+      transport.sendMail(admin)
+    ]);
+    const customerSent = customerResult.status === "fulfilled";
+    const adminSent = adminResult.status === "fulfilled";
+
+    if (customerSent) {
+      console.info("[EST Email] Customer email sent successfully", {
+        to: customer.to,
+        privateSessionId: session.id,
+        messageId: customerResult.value.messageId
+      });
+    } else {
+      console.error("[EST Email] Customer email failed:", {
+        to: customer.to,
+        privateSessionId: session.id,
+        error: customerResult.reason instanceof Error ? customerResult.reason.message : String(customerResult.reason)
+      });
+    }
+
+    if (adminSent) {
+      console.info("[EST Email] Admin email sent successfully", {
+        to: admin.to,
+        privateSessionId: session.id,
+        messageId: adminResult.value.messageId
+      });
+    } else {
+      console.error("[EST Email] Admin email failed:", {
+        to: admin.to,
+        privateSessionId: session.id,
+        error: adminResult.reason instanceof Error ? adminResult.reason.message : String(adminResult.reason)
+      });
+    }
+
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: customerSent ? "sent" : "failed",
+      adminStatus: adminSent ? "sent" : "failed",
+      message: customerSent && adminSent ? undefined : "One or more private session emails failed to send."
+    });
+
+    return {
+      sent: customerSent && adminSent,
+      customerSent,
+      adminSent,
+      message: customerSent && adminSent ? undefined : "One or more private session emails failed to send."
+    };
+  } catch (error) {
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message: error instanceof Error ? error.message : "Private session email failed to send."
+    });
+
+    console.error("[EST Email] Customer email failed:", {
+      to: customer.to,
+      privateSessionId: session.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    console.error("[EST Email] Admin email failed:", {
+      to: admin.to,
+      privateSessionId: session.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message: error instanceof Error ? error.message : "Private session email failed to send."
     };
   }
 }
