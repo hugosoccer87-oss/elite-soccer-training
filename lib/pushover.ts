@@ -307,14 +307,14 @@ export async function sendScheduleApprovalAdminPushoverAlert(input: {
 }
 
 export async function sendCustomPaymentLinkAdminPushoverAlert(link: CustomPaymentLinkRow) {
-  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const planLabel = customPaymentLinkPlanLabel(link.selected_plan_type || link.plan_type);
   const message = [
     `Player: ${link.player_name}`,
     link.selected_session_ids.length > 0 ? "Session date: Selected in private link" : "Session date: Not selected yet",
     link.selected_session_ids.length > 0 ? "Session time: Selected in private link" : "Session time: Not selected yet",
     `Session focus/title: ${planLabel}`,
     `Payment status: ${link.payment_status || (link.status === "paid" ? "Paid" : link.status)}`,
-    `Amount paid: ${formatMoney(link.amount_cents)}`,
+    `Amount paid: ${formatMoney(link.selected_amount_cents ?? link.amount_cents)}`,
     `Parent: ${link.parent_name}`,
     `Parent phone: ${link.parent_phone}`,
     "Waiver status: Recorded if sessions were selected"

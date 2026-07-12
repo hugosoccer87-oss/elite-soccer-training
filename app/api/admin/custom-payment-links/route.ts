@@ -73,6 +73,8 @@ export async function POST(request: Request) {
     parentPhone?: string;
     trainingGroup?: string;
     planType?: CustomPaymentLinkPlanType;
+    allowedPurchaseOptions?: unknown;
+    privateSessionAmount?: number;
     linkMode?: CustomPaymentLinkMode;
     amount?: number;
     notesToParent?: string;
@@ -83,7 +85,11 @@ export async function POST(request: Request) {
   const proposedSessionIds = Array.isArray(payload?.proposedSessionIds)
     ? Array.from(new Set(payload.proposedSessionIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))))
     : [];
+  const allowedPurchaseOptions = Array.isArray(payload?.allowedPurchaseOptions)
+    ? Array.from(new Set(payload.allowedPurchaseOptions.filter((item): item is CustomPaymentLinkPlanType => typeof item === "string" && planTypes.has(item as CustomPaymentLinkPlanType))))
+    : [];
   const amountCents = Math.max(0, Math.round(Number(payload?.amount) * 100 || 0));
+  const privateSessionAmountCents = Math.max(0, Math.round(Number(payload?.privateSessionAmount ?? payload?.amount) * 100 || 0));
   const parentCompletesPrivateDetails = payload?.linkMode === "payment_plus_choose_private_sessions";
 
   if (
@@ -96,6 +102,7 @@ export async function POST(request: Request) {
     !isTrainingGroupId(payload.trainingGroup) ||
     !payload.planType ||
     !planTypes.has(payload.planType) ||
+    allowedPurchaseOptions.length < 1 ||
     !payload.linkMode ||
     !linkModes.has(payload.linkMode) ||
     amountCents < 50
@@ -114,6 +121,8 @@ export async function POST(request: Request) {
       parentPhone: parentCompletesPrivateDetails ? undefined : payload.parentPhone,
       trainingGroup: payload.trainingGroup,
       planType: payload.planType,
+      allowedPurchaseOptions,
+      privateSessionAmountCents,
       linkMode: payload.linkMode,
       amountCents,
       notesToParent: payload.notesToParent,

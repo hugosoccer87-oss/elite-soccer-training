@@ -402,7 +402,9 @@ export async function createStripeCustomPaymentLinkCheckoutSession(
   }
 
   const siteUrl = getSiteUrl();
-  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const selectedPlanType = link.selected_plan_type || link.plan_type;
+  const selectedAmountCents = link.selected_amount_cents ?? link.amount_cents;
+  const planLabel = customPaymentLinkPlanLabel(selectedPlanType);
   const params = new URLSearchParams({
     mode: "payment",
     success_url: `${siteUrl}/custom-payment/${link.token}/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -412,23 +414,23 @@ export async function createStripeCustomPaymentLinkCheckoutSession(
     "line_items[0][price_data][currency]": sessionCurrency,
     "line_items[0][price_data][product_data][name]": `Elite Soccer Training CV - ${planLabel}`,
     "line_items[0][price_data][product_data][description]":
-      link.plan_type === "four_session_training_package"
+      selectedPlanType === "four_session_training_package"
         ? "4 training credits for EST CV small group training."
-        : link.plan_type === "six_session_training_package"
+        : selectedPlanType === "six_session_training_package"
           ? "6 training credits for EST CV small group training."
           : link.notes_to_parent?.slice(0, 450) || planLabel,
-    "line_items[0][price_data][unit_amount]": String(Math.max(0, Number(link.amount_cents) || 0)),
+    "line_items[0][price_data][unit_amount]": String(Math.max(0, Number(selectedAmountCents) || 0)),
     "line_items[0][quantity]": "1",
     "payment_intent_data[metadata][purchase_type]": "custom_payment_link",
     "payment_intent_data[metadata][customPaymentLinkId]": link.id,
     "payment_intent_data[metadata][customPaymentLinkToken]": link.token,
-    "payment_intent_data[metadata][plan_type]": link.plan_type,
+    "payment_intent_data[metadata][plan_type]": selectedPlanType,
     "payment_intent_data[metadata][parent_email]": link.parent_email,
     "payment_intent_data[metadata][player_name]": link.player_name,
     "metadata[purchase_type]": "custom_payment_link",
     "metadata[customPaymentLinkId]": link.id,
     "metadata[customPaymentLinkToken]": link.token,
-    "metadata[plan_type]": link.plan_type,
+    "metadata[plan_type]": selectedPlanType,
     "metadata[parent_email]": link.parent_email,
     "metadata[player_name]": link.player_name
   });

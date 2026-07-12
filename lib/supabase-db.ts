@@ -214,6 +214,11 @@ export type CustomPaymentLinkRow = {
   plan_type: CustomPaymentLinkPlanType;
   link_mode: CustomPaymentLinkMode;
   amount_cents: number;
+  private_session_amount_cents?: number | null;
+  allowed_purchase_options?: CustomPaymentLinkPlanType[] | null;
+  selected_plan_type?: CustomPaymentLinkPlanType | null;
+  selected_amount_cents?: number | null;
+  selected_total_credits?: number | null;
   notes_to_parent?: string | null;
   internal_note?: string | null;
   suggested_availability?: string | null;
@@ -1101,6 +1106,60 @@ function customPaymentLinkCredits(planType: CustomPaymentLinkPlanType) {
   return 0;
 }
 
+function isCustomPaymentLinkPlanType(value: string): value is CustomPaymentLinkPlanType {
+  return [
+    "single_session",
+    "four_session_training_package",
+    "six_session_training_package",
+    "private_1_on_1",
+    "custom_amount"
+  ].includes(value);
+}
+
+export function normalizeCustomPaymentLinkOptions(
+  values: unknown,
+  fallback: CustomPaymentLinkPlanType
+): CustomPaymentLinkPlanType[] {
+  const raw = Array.isArray(values) ? values : [];
+  const filtered = raw.filter((value): value is CustomPaymentLinkPlanType => typeof value === "string" && isCustomPaymentLinkPlanType(value));
+  const unique = Array.from(new Set(filtered));
+
+  return unique.length > 0 ? unique : [fallback];
+}
+
+export function customPaymentLinkAmountCents(
+  planType: CustomPaymentLinkPlanType,
+  privateAmountCents = 0,
+  fallbackAmountCents = 0
+) {
+  switch (planType) {
+    case "single_session":
+      return 5500;
+    case "four_session_training_package":
+      return 20000;
+    case "six_session_training_package":
+      return 28500;
+    case "private_1_on_1":
+      return Math.max(0, Math.round(privateAmountCents || fallbackAmountCents || 0));
+    case "custom_amount":
+    default:
+      return Math.max(0, Math.round(fallbackAmountCents || 0));
+  }
+}
+
+export function customPaymentLinkOptionMeta(
+  planType: CustomPaymentLinkPlanType,
+  privateAmountCents = 0,
+  fallbackAmountCents = 0
+) {
+  return {
+    planType,
+    label: customPaymentLinkPlanLabel(planType),
+    amountCents: customPaymentLinkAmountCents(planType, privateAmountCents, fallbackAmountCents),
+    credits: customPaymentLinkCredits(planType)
+  };
+}
+
 export function customPaymentLinkPlanLabel(planType: CustomPaymentLinkPlanType) {
   switch (planType) {
     case "four_session_training_package":
@@ -1212,12 +1271,21 @@ export async function createCustomPaymentLink(input: {
   planType: CustomPaymentLinkPlanType;
   linkMode: CustomPaymentLinkMode;
   amountCents: number;
+  privateSessionAmountCents?: number;
+  allowedPurchaseOptions?: CustomPaymentLinkPlanType[];
   notesToParent?: string;
   internalNote?: string;
   suggestedAvailability?: string;
   proposedSessionIds?: string[];
 }) {
-  const credits = customPaymentLinkCredits(input.planType);
+  const allowedPurchaseOptions = normalizeCustomPaymentLinkOptions(input.allowedPurchaseOptions, input.planType);
+  const primaryPlanType = allowedPurchaseOptions[0] ?? input.planType;
+  const privateAmountCents = Math.max(
+    0,
+    Math.round(input.privateSessionAmountCents ?? (input.planType === "private_1_on_1" ? input.amountCents : 0))
+  );
+  const primaryAmountCents = customPaymentLinkAmountCents(primaryPlanType, privateAmountCents, input.amountCents);
+  const credits = customPaymentLinkCredits(primaryPlanType);
   const rows = await supabaseRequest<CustomPaymentLinkRow[]>("custom_payment_links", {
     method: "POST",
     body: JSON.stringify({
@@ -1228,9 +1296,11 @@ export async function createCustomPaymentLink(input: {
       parent_email: input.parentEmail?.trim().toLowerCase() || "pending@elitesoccertrainingcv.com",
       parent_phone: input.parentPhone?.trim() || "Parent will complete",
       training_group: input.trainingGroup,
-      plan_type: input.planType,
+      plan_type: primaryPlanType,
       link_mode: input.linkMode,
-      amount_cents: Math.max(0, Math.round(input.amountCents)),
+      amount_cents: primaryAmountCents,
+      private_session_amount_cents: privateAmountCents,
+      allowed_purchase_options: allowedPurchaseOptions,
       notes_to_parent: input.notesToParent?.trim() || null,
       internal_note: input.internalNote?.trim() || null,
       suggested_availability: input.suggestedAvailability?.trim() || null,
@@ -1297,6 +1367,9 @@ export async function updateCustomPaymentLink(input: {
   selectedSessionIds?: string[];
   selectedPrivateSessionIds?: string[];
   selectedPaymentMethod?: "card" | "zelle" | null;
+  selectedPlanType?: CustomPaymentLinkPlanType | null;
+  selectedAmountCents?: number | null;
+  selectedTotalCredits?: number | null;
   playerName?: string;
   playerAge?: string;
   parentName?: string;
@@ -1326,6 +1399,9 @@ export async function updateCustomPaymentLink(input: {
   if (input.selectedSessionIds) patch.selected_session_ids = input.selectedSessionIds;
   if (input.selectedPrivateSessionIds) patch.selected_private_session_ids = input.selectedPrivateSessionIds;
   if (input.selectedPaymentMethod !== undefined) patch.selected_payment_method = input.selectedPaymentMethod;
+  if (input.selectedPlanType !== undefined) patch.selected_plan_type = input.selectedPlanType;
+  if (input.selectedAmountCents !== undefined) patch.selected_amount_cents = input.selectedAmountCents;
+  if (input.selectedTotalCredits !== undefined) patch.selected_total_credits = input.selectedTotalCredits;
   if (input.playerName !== undefined) patch.player_name = input.playerName.trim();
   if (input.playerAge !== undefined) patch.player_age = input.playerAge.trim();
   if (input.parentName !== undefined) patch.parent_name = input.parentName.trim();
@@ -1378,7 +1454,7 @@ export async function confirmCustomPaymentLinkPaid(input: {
     throw new Error("Custom payment link could not be found.");
   }
 
-  const totalCredits = Number(details.link.total_credits) || 0;
+  const totalCredits = Number(details.link.selected_total_credits ?? details.link.total_credits) || 0;
   const creditsUsed = Math.max(0, Number(input.creditsUsed ?? details.link.credits_used) || 0);
   const creditsRemaining =
     typeof input.creditsRemaining === "number"

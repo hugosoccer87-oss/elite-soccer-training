@@ -152,14 +152,13 @@ export async function POST(request: Request) {
           throw new Error(`Custom payment link ${customPaymentLinkId} was not found.`);
         }
 
-        if (
-          customDetails.link.link_mode === "payment_plus_choose_private_sessions" &&
-          customDetails.link.selected_private_session_ids.length > 0
-        ) {
+        if (customDetails.link.selected_private_session_ids.length > 0) {
           const bookedPrivateSessions = [];
           const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : undefined;
+          const selectedTotalCredits = Number(customDetails.link.selected_total_credits ?? customDetails.link.total_credits) || 0;
+          const selectedAmountCents = Number(customDetails.link.selected_amount_cents ?? customDetails.link.amount_cents) || 0;
           const amountPerPrivateSession = Math.round(
-            (typeof session.amount_total === "number" ? session.amount_total : customDetails.link.amount_cents) /
+            (typeof session.amount_total === "number" ? session.amount_total : selectedAmountCents) /
               Math.max(1, customDetails.link.selected_private_session_ids.length)
           );
 
@@ -215,7 +214,7 @@ export async function POST(request: Request) {
             paymentStatus: "paid",
             selectedPrivateSessionIds: bookedPrivateSessions.map((item) => item.id),
             creditsUsed: bookedPrivateSessions.length,
-            creditsRemaining: Math.max(0, Number(customDetails.link.total_credits || 0) - bookedPrivateSessions.length)
+            creditsRemaining: Math.max(0, selectedTotalCredits - bookedPrivateSessions.length)
           });
 
           console.info("[EST Stripe] Custom private session payment notifications complete", {
@@ -305,7 +304,7 @@ export async function POST(request: Request) {
           paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
           paymentStatus: "paid",
           creditsUsed: 0,
-          creditsRemaining: customDetails.link.total_credits
+          creditsRemaining: Number(customDetails.link.selected_total_credits ?? customDetails.link.total_credits) || 0
         });
 
         if (updatedLink) {

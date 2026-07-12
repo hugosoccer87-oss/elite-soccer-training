@@ -1379,6 +1379,7 @@ export function AdminAvailability() {
   const [customLinkParentPhone, setCustomLinkParentPhone] = useState("");
   const [customLinkGroup, setCustomLinkGroup] = useState<TrainingGroupId>("elite-performance");
   const [customLinkPlanType, setCustomLinkPlanType] = useState<CustomPaymentLinkPlanType>("single_session");
+  const [customLinkAllowedOptions, setCustomLinkAllowedOptions] = useState<CustomPaymentLinkPlanType[]>(["single_session"]);
   const [customLinkMode, setCustomLinkMode] = useState<CustomPaymentLinkMode>("payment_plus_choose_sessions");
   const [customLinkAmount, setCustomLinkAmount] = useState("55");
   const [customLinkNotesToParent, setCustomLinkNotesToParent] = useState("");
@@ -2033,6 +2034,7 @@ export function AdminAvailability() {
 
   function setCustomPaymentPlan(planType: CustomPaymentLinkPlanType) {
     setCustomLinkPlanType(planType);
+    setCustomLinkAllowedOptions((current) => (current.length === 1 ? [planType] : current.includes(planType) ? current : [planType, ...current]));
     const option = customPaymentLinkPlanOptions.find((item) => item.value === planType);
 
     if (option && (customLinkAmount === "0" || customPaymentLinkPlanOptions.some((item) => item.defaultAmount === customLinkAmount))) {
@@ -2048,6 +2050,17 @@ export function AdminAvailability() {
       setCustomLinkMode("payment_only");
       setCustomLinkProposedSessionIds([]);
     }
+  }
+
+  function toggleCustomLinkAllowedOption(planType: CustomPaymentLinkPlanType) {
+    setCustomLinkAllowedOptions((current) => {
+      if (current.includes(planType)) {
+        const next = current.filter((item) => item !== planType);
+        return next.length > 0 ? next : current;
+      }
+
+      return [...current, planType];
+    });
   }
 
   function toggleCustomLinkProposedSession(sessionId: string) {
@@ -2894,6 +2907,11 @@ export function AdminAvailability() {
       return;
     }
 
+    if (customLinkAllowedOptions.length < 1) {
+      setError("Choose at least one allowed purchase option.");
+      return;
+    }
+
     setIsSaving(true);
     setError("");
     setNotice("");
@@ -2913,6 +2931,8 @@ export function AdminAvailability() {
           parentPhone: customLinkParentPhone,
           trainingGroup: customLinkGroup,
           planType: customLinkPlanType,
+          allowedPurchaseOptions: customLinkAllowedOptions,
+          privateSessionAmount: Number(customLinkAmount) || 0,
           linkMode: customLinkMode,
           amount: Number(customLinkAmount) || 0,
           notesToParent: customLinkNotesToParent,
@@ -2934,6 +2954,7 @@ export function AdminAvailability() {
       setCustomLinkParentEmail("");
       setCustomLinkParentPhone("");
       setCustomLinkPlanType("single_session");
+      setCustomLinkAllowedOptions(["single_session"]);
       setCustomLinkMode("payment_plus_choose_sessions");
       setCustomLinkAmount("55");
       setCustomLinkNotesToParent("");
@@ -5853,7 +5874,41 @@ export function AdminAvailability() {
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                   Amount to Charge
                   <input className={inputClass} type="number" min={0} step="0.01" value={customLinkAmount} onChange={(event) => setCustomLinkAmount(event.target.value)} />
+                  <span className="text-[11px] font-bold normal-case text-slate-500">
+                    Used for Private 1-on-1 or custom pricing. Standard package prices stay fixed.
+                  </span>
                 </label>
+                <div className="grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 lg:col-span-3">
+                  <div>
+                    <p className="text-xs font-black uppercase text-slate-500">Allowed Purchase Options</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-600">
+                      Select what the parent can choose from when they open this link.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {customPaymentLinkPlanOptions
+                      .filter((option) => option.value !== "custom_amount")
+                      .map((option) => {
+                        const selected = customLinkAllowedOptions.includes(option.value);
+
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => toggleCustomLinkAllowedOption(option.value)}
+                            className={`rounded-lg border p-4 text-left transition ${
+                              selected ? "border-electric bg-blue-50 shadow-sm shadow-electric/10" : "border-slate-200 bg-white hover:border-electric/60"
+                            }`}
+                          >
+                            <p className="text-sm font-black text-navy">{option.label}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">
+                              {option.value === "private_1_on_1" ? "Custom price" : `$${option.defaultAmount}`}
+                            </p>
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-3">
                   Notes to Parent
                   <textarea

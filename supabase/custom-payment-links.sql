@@ -28,6 +28,11 @@ create table if not exists public.custom_payment_links (
     )
   ),
   amount_cents integer not null default 0 check (amount_cents >= 0),
+  private_session_amount_cents integer not null default 0 check (private_session_amount_cents >= 0),
+  allowed_purchase_options text[] not null default '{}',
+  selected_plan_type text,
+  selected_amount_cents integer,
+  selected_total_credits integer,
   notes_to_parent text,
   internal_note text,
   suggested_availability text,
@@ -80,6 +85,21 @@ create index if not exists idx_custom_payment_links_parent_email
 
 create index if not exists idx_custom_payment_links_stripe_checkout
   on public.custom_payment_links (stripe_checkout_session_id);
+
+alter table public.custom_payment_links
+  add column if not exists private_session_amount_cents integer not null default 0;
+
+alter table public.custom_payment_links
+  add column if not exists allowed_purchase_options text[] not null default '{}';
+
+alter table public.custom_payment_links
+  add column if not exists selected_plan_type text;
+
+alter table public.custom_payment_links
+  add column if not exists selected_amount_cents integer;
+
+alter table public.custom_payment_links
+  add column if not exists selected_total_credits integer;
 
 alter table public.custom_payment_links
   add column if not exists selected_private_session_ids text[] not null default '{}';

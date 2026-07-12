@@ -3,7 +3,13 @@
 import { useMemo, useState } from "react";
 import type { PublicAvailableSession } from "@/lib/public-availability";
 import { formatCurrencyFromCents } from "@/lib/pricing";
-import type { CustomPaymentLinkMode, CustomPaymentLinkPlanType, PrivateSessionAvailabilityRow } from "@/lib/supabase-db";
+import {
+  customPaymentLinkOptionMeta,
+  normalizeCustomPaymentLinkOptions,
+  type CustomPaymentLinkMode,
+  type CustomPaymentLinkPlanType,
+  type PrivateSessionAvailabilityRow
+} from "@/lib/supabase-db";
 import { waiverSections } from "@/lib/waiver-content";
 
 type CustomPaymentLinkClient = {
@@ -17,6 +23,11 @@ type CustomPaymentLinkClient = {
   planType: CustomPaymentLinkPlanType;
   linkMode: CustomPaymentLinkMode;
   amountCents: number;
+  privateSessionAmountCents: number;
+  allowedPurchaseOptions: CustomPaymentLinkPlanType[];
+  selectedPlanType?: CustomPaymentLinkPlanType | null;
+  selectedAmountCents?: number | null;
+  selectedTotalCredits?: number | null;
   notesToParent?: string | null;
   suggestedAvailability?: string | null;
   proposedSessionIds: string[];
@@ -38,11 +49,11 @@ const planLabels: Record<CustomPaymentLinkPlanType, string> = {
   custom_amount: "Custom Amount"
 };
 
-function maxSelectable(link: CustomPaymentLinkClient) {
-  if (link.planType === "single_session") return 1;
-  if (link.planType === "private_1_on_1") return 1;
-  if (link.planType === "four_session_training_package") return 4;
-  if (link.planType === "six_session_training_package") return 6;
+function maxSelectable(planType: CustomPaymentLinkPlanType) {
+  if (planType === "single_session") return 1;
+  if (planType === "private_1_on_1") return 1;
+  if (planType === "four_session_training_package") return 4;
+  if (planType === "six_session_training_package") return 6;
   return 0;
 }
 
@@ -79,9 +90,25 @@ function initialParentValue(value: string) {
 }
 
 export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props) {
-  const selectableLimit = maxSelectable(link);
+  const allowedPurchaseOptions = useMemo(
+    () => normalizeCustomPaymentLinkOptions(link.allowedPurchaseOptions, link.planType),
+    [link.allowedPurchaseOptions, link.planType]
+  );
+  const initialPlanType =
+    link.selectedPlanType && allowedPurchaseOptions.includes(link.selectedPlanType)
+      ? link.selectedPlanType
+      : allowedPurchaseOptions[0] ?? link.planType;
+  const [selectedPlanType, setSelectedPlanType] = useState<CustomPaymentLinkPlanType>(initialPlanType);
+  const selectedOption = customPaymentLinkOptionMeta(
+    selectedPlanType,
+    link.privateSessionAmountCents,
+    link.selectedAmountCents ?? link.amountCents
+  );
+  const selectableLimit = selectedOption.credits;
   const paymentOnly = isPaymentOnly(link);
-  const privateSelectionMode = link.linkMode === "payment_plus_choose_private_sessions";
+  const privateSelectionMode = selectedPlanType === "private_1_on_1";
+  const selectedPlanLabel = selectedOption.label;
+  const selectedAmountCents = selectedOption.amountCents;
   const proposedSet = useMemo(() => new Set(link.proposedSessionIds), [link.proposedSessionIds]);
   const availableSessions = useMemo(() => {
     const groupSessions = sessions.filter((session) => session.trainingGroupId === link.trainingGroup);
@@ -131,9 +158,17 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const selectedCount = selectedSessionIds.length + selectedPrivateSessionIds.length;
-  const needsWaiver = selectedCount > 0;
-  const planLabel = planLabels[link.planType];
+  const needsWaiver = true;
+  const planLabel = selectedPlanLabel;
   const isClosed = ["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(link.status);
+
+  function choosePlan(planType: CustomPaymentLinkPlanType) {
+    setSelectedPlanType(planType);
+    setSelectedSessionIds([]);
+    setSelectedPrivateSessionIds([]);
+    setError("");
+    setZelleResult(null);
+  }
 
   function toggleSession(sessionId: string) {
     setError("");
@@ -180,16 +215,14 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
       return;
     }
 
-    if (privateSelectionMode) {
-      if (!playerName.trim() || !playerAge.trim() || !parentName.trim() || !parentEmail.trim() || !parentPhone.trim()) {
-        setError("Complete the player and parent information before continuing.");
-        return;
-      }
+    if (!playerName.trim() || !playerAge.trim() || !parentName.trim() || !parentEmail.trim() || !parentPhone.trim()) {
+      setError("Complete the player and parent information before continuing.");
+      return;
+    }
 
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parentEmail.trim())) {
-        setError("Enter a valid parent email before continuing.");
-        return;
-      }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parentEmail.trim())) {
+      setError("Enter a valid parent email before continuing.");
+      return;
     }
 
     if (needsWaiver) {
@@ -210,6 +243,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
         body: JSON.stringify({
           selectedSessionIds,
           selectedPrivateSessionIds,
+          selectedPlanType,
           playerName,
           playerAge,
           parentName,
@@ -274,24 +308,24 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
           <dl className="mt-5 space-y-3 text-sm">
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Player</dt>
-              <dd className="text-right font-black text-slate-950">{privateSelectionMode ? playerName || "Parent will complete" : link.playerName}</dd>
+              <dd className="text-right font-black text-slate-950">{playerName || "Parent will complete"}</dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Player age</dt>
-              <dd className="text-right font-black text-slate-950">{privateSelectionMode ? playerAge || "Parent will complete" : link.playerAge}</dd>
+              <dd className="text-right font-black text-slate-950">{playerAge || "Parent will complete"}</dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Parent</dt>
-              <dd className="text-right font-black text-slate-950">{privateSelectionMode ? parentName || "Parent will complete" : link.parentName}</dd>
+              <dd className="text-right font-black text-slate-950">{parentName || "Parent will complete"}</dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Amount due</dt>
-              <dd className="text-right text-xl font-black text-slate-950">{formatCurrencyFromCents(link.amountCents)}</dd>
+              <dd className="text-right text-xl font-black text-slate-950">{formatCurrencyFromCents(selectedAmountCents)}</dd>
             </div>
-            {link.totalCredits > 0 ? (
+            {selectedOption.credits > 0 ? (
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
                 <dt className="font-bold text-slate-500">Training credits</dt>
-                <dd className="text-right font-black text-slate-950">{link.totalCredits}</dd>
+                <dd className="text-right font-black text-slate-950">{selectedOption.credits}</dd>
               </div>
             ) : null}
           </dl>
@@ -325,13 +359,50 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
               <div className="mt-4 rounded-[8px] border border-emerald-200 bg-white p-4">
                 <p className="font-black">Send Zelle payment to: {zelleResult.zellePhone || "3236848024"}</p>
                 <p className="mt-1">Memo: {zelleResult.memo || `${playerName} - ${planLabel}`}</p>
-                <p className="mt-1">Amount due: {formatCurrencyFromCents(zelleResult.amountDue ?? link.amountCents)}</p>
+                <p className="mt-1">Amount due: {formatCurrencyFromCents(zelleResult.amountDue ?? selectedAmountCents)}</p>
               </div>
             </div>
           ) : null}
 
-          {!zelleResult && privateSelectionMode ? (
-            <section>
+          {!zelleResult ? (
+            <section className={allowedPurchaseOptions.length > 1 ? "" : ""}>
+              <p className="text-xs font-black uppercase text-electric">Purchase Option</p>
+              <h2 className="mt-1 text-2xl font-black text-slate-950">Choose What You Need</h2>
+              <div className="mt-5 grid gap-3">
+                {allowedPurchaseOptions.map((optionType) => {
+                  const option = customPaymentLinkOptionMeta(optionType, link.privateSessionAmountCents, link.amountCents);
+                  const selected = selectedPlanType === optionType;
+                  const creditText = option.credits === 1 ? "1 training credit" : `${option.credits} training credits`;
+
+                  return (
+                    <button
+                      key={optionType}
+                      type="button"
+                      onClick={() => choosePlan(optionType)}
+                      className={`rounded-[8px] border p-4 text-left transition ${
+                        selected ? "border-electric bg-blue-50 ring-2 ring-electric/20" : "border-slate-200 bg-white hover:border-electric"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-slate-950">{option.label}</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-600">
+                            {optionType === "private_1_on_1" ? "Private session time selected from Coach Hugo's openings." : creditText}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black uppercase text-white">
+                          {optionType === "private_1_on_1" && option.amountCents <= 0 ? "Custom" : formatCurrencyFromCents(option.amountCents)}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
+          {!zelleResult ? (
+            <section className="mt-8 border-t border-slate-200 pt-6">
               <p className="text-xs font-black uppercase text-electric">Player & Parent Information</p>
               <h2 className="mt-1 text-2xl font-black text-slate-950">Complete Your Details</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -528,7 +599,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
             </section>
           ) : null}
 
-          {!zelleResult && privateSelectionMode ? (
+          {!zelleResult ? (
             <section className="mt-8 border-t border-slate-200 pt-6">
               <p className="text-xs font-black uppercase text-electric">Payment Method</p>
               <h2 className="mt-1 text-2xl font-black text-slate-950">Choose Payment Method</h2>
@@ -557,7 +628,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
                   <p className="font-black text-slate-950">Zelle instructions</p>
                   <p className="mt-1">Send payment through Zelle to: 3236848024</p>
                   <p>Memo: {playerName || "Player Name"} - {planLabel}</p>
-                  <p className="font-black text-slate-950">Amount due: {formatCurrencyFromCents(link.amountCents)}</p>
+                  <p className="font-black text-slate-950">Amount due: {formatCurrencyFromCents(selectedAmountCents)}</p>
                   <p className="mt-1 text-xs font-bold uppercase text-slate-500">Zelle payments must be confirmed manually.</p>
                 </div>
               ) : null}

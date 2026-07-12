@@ -551,14 +551,15 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
 }
 
 function customPaymentLinkCustomerEmail(link: CustomPaymentLinkRow): EmailMessage {
-  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const planLabel = customPaymentLinkPlanLabel(link.selected_plan_type || link.plan_type);
   const modeLabel = customPaymentLinkModeLabel(link.link_mode);
+  const totalCredits = Number(link.selected_total_credits ?? link.total_credits) || 0;
   const rows: Array<[string, string]> = [
     ["Player", link.player_name],
     ["Plan / Session Type", planLabel],
-    ["Amount Paid", formatCurrencyFromCents(link.amount_cents)],
+    ["Amount Paid", formatCurrencyFromCents(link.selected_amount_cents ?? link.amount_cents)],
     ["Payment Status", "Payment confirmed"],
-    ["Training Credits", link.total_credits > 0 ? `${link.total_credits} purchased / ${link.credits_remaining} remaining` : "Not applicable"],
+    ["Training Credits", totalCredits > 0 ? `${totalCredits} purchased / ${link.credits_remaining} remaining` : "Not applicable"],
     ["Scheduling", modeLabel],
     ["Notes", link.notes_to_parent || "None"]
   ];
@@ -603,11 +604,11 @@ function customPaymentLinkCustomerEmail(link: CustomPaymentLinkRow): EmailMessag
 }
 
 function customPaymentLinkInviteEmail(link: CustomPaymentLinkRow, paymentUrl: string): EmailMessage {
-  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const planLabel = customPaymentLinkPlanLabel(link.selected_plan_type || link.plan_type);
   const rows: Array<[string, string]> = [
     ["Player", link.player_name],
     ["Plan / Session Type", planLabel],
-    ["Amount Due", formatCurrencyFromCents(link.amount_cents)],
+    ["Amount Due", formatCurrencyFromCents(link.selected_amount_cents ?? link.amount_cents)],
     ["Scheduling", customPaymentLinkModeLabel(link.link_mode)],
     ["Notes from Coach Hugo", link.notes_to_parent || "None"]
   ];
@@ -648,7 +649,8 @@ function customPaymentLinkInviteEmail(link: CustomPaymentLinkRow, paymentUrl: st
 }
 
 function customPaymentLinkAdminEmail(link: CustomPaymentLinkRow): EmailMessage {
-  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const planLabel = customPaymentLinkPlanLabel(link.selected_plan_type || link.plan_type);
+  const totalCredits = Number(link.selected_total_credits ?? link.total_credits) || 0;
   const rows: Array<[string, string]> = [
     ["Custom Payment Link ID", link.id],
     ["Parent/Guardian", link.parent_name],
@@ -658,9 +660,9 @@ function customPaymentLinkAdminEmail(link: CustomPaymentLinkRow): EmailMessage {
     ["Player Age", link.player_age],
     ["Plan / Session Type", planLabel],
     ["Link Mode", customPaymentLinkModeLabel(link.link_mode)],
-    ["Amount Paid", formatCurrencyFromCents(link.amount_cents)],
+    ["Amount Paid", formatCurrencyFromCents(link.selected_amount_cents ?? link.amount_cents)],
     ["Status", link.status],
-    ["Training Credits", link.total_credits > 0 ? `${link.total_credits} total / ${link.credits_remaining} remaining` : "Not applicable"],
+    ["Training Credits", totalCredits > 0 ? `${totalCredits} total / ${link.credits_remaining} remaining` : "Not applicable"],
     ["Selected Sessions", link.selected_session_ids.length > 0 ? link.selected_session_ids.join(", ") : "None"],
     ["Stripe Checkout Session", link.stripe_checkout_session_id || "Not recorded"],
     ["Stripe Payment Intent", link.stripe_payment_intent_id || "Not recorded"],

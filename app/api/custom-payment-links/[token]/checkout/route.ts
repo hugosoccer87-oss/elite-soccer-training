@@ -9,13 +9,16 @@ import {
   bookPrivateSessionAvailability,
   createPendingBooking,
   createPendingPassPurchase,
+  customPaymentLinkOptionMeta,
   customPaymentLinkPassType,
   getCustomPaymentLinkByToken,
   listPublicPrivateSessionAvailability,
   getSupabaseAvailability,
+  normalizeCustomPaymentLinkOptions,
   updatePrivateSessionAvailability,
   updateCustomPaymentLink
 } from "@/lib/supabase-db";
+import type { CustomPaymentLinkPlanType } from "@/lib/supabase-db";
 import { waiverVersion } from "@/lib/waiver-content";
 import { syncBookedPrivateSessionCalendarEvent } from "@/lib/google-calendar";
 import { sendPrivateSessionAvailabilityTransactionalEmails } from "@/lib/transactional-email";
@@ -54,11 +57,16 @@ function planLabelsForMemo(planType: string) {
   return "Single Session";
 }
 
+function isAllowedSelectedPlan(value: unknown, allowed: CustomPaymentLinkPlanType[]): value is CustomPaymentLinkPlanType {
+  return typeof value === "string" && allowed.includes(value as CustomPaymentLinkPlanType);
+}
+
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const payload = (await request.json().catch(() => null)) as {
     selectedSessionIds?: unknown;
     selectedPrivateSessionIds?: unknown;
+    selectedPlanType?: CustomPaymentLinkPlanType;
     playerName?: string;
     playerAge?: string;
     parentName?: string;
@@ -97,33 +105,42 @@ export async function POST(request: Request, context: { params: Promise<{ token:
   try {
     const requestedSessionIds = selectedIds(payload?.selectedSessionIds);
     const requestedPrivateSessionIds = selectedIds(payload?.selectedPrivateSessionIds);
-    const passType = customPaymentLinkPassType(link.plan_type);
+    const allowedPurchaseOptions = normalizeCustomPaymentLinkOptions(link.allowed_purchase_options, link.plan_type);
+    const selectedPlanType = isAllowedSelectedPlan(payload?.selectedPlanType, allowedPurchaseOptions)
+      ? payload.selectedPlanType
+      : allowedPurchaseOptions[0] ?? link.plan_type;
+    const selectedOption = customPaymentLinkOptionMeta(
+      selectedPlanType,
+      link.private_session_amount_cents ?? 0,
+      link.amount_cents
+    );
+    const passType = customPaymentLinkPassType(selectedPlanType);
     const maxSessionCount =
-      link.plan_type === "single_session" || link.plan_type === "private_1_on_1"
+      selectedPlanType === "single_session" || selectedPlanType === "private_1_on_1"
         ? 1
         : passType
-          ? Number(link.total_credits) || 0
+          ? Number(selectedOption.credits) || 0
           : 0;
     const parentPlayerInfo = {
-      playerName: isPrivateSessionLink ? payload?.playerName?.trim() || "" : link.player_name,
-      playerAge: isPrivateSessionLink ? payload?.playerAge?.trim() || "" : link.player_age,
-      parentName: isPrivateSessionLink ? payload?.parentName?.trim() || "" : link.parent_name,
-      parentEmail: isPrivateSessionLink ? payload?.parentEmail?.trim().toLowerCase() || "" : link.parent_email,
-      parentPhone: isPrivateSessionLink ? payload?.parentPhone?.trim() || "" : link.parent_phone
+      playerName: payload?.playerName?.trim() || link.player_name,
+      playerAge: payload?.playerAge?.trim() || link.player_age,
+      parentName: payload?.parentName?.trim() || link.parent_name,
+      parentEmail: payload?.parentEmail?.trim().toLowerCase() || link.parent_email,
+      parentPhone: payload?.parentPhone?.trim() || link.parent_phone
     };
-    const selectedPaymentMethod: "card" | "zelle" =
-      isPrivateSessionLink && payload?.paymentMethod === "zelle" ? "zelle" : "card";
+    const selectedPaymentMethod: "card" | "zelle" = payload?.paymentMethod === "zelle" ? "zelle" : "card";
+    const selectedUsesPrivateSessions = selectedPlanType === "private_1_on_1";
     const signedAt = new Date().toISOString();
     const ipAddress = getRequestIpAddress(request);
 
-    if (link.link_mode === "payment_only" || link.plan_type === "custom_amount") {
+    if (link.link_mode === "payment_only" || selectedPlanType === "custom_amount") {
       if (requestedSessionIds.length > 0 || requestedPrivateSessionIds.length > 0) {
         return NextResponse.json(
           { error: "This private link is payment-only and does not book sessions." },
           { status: 400 }
         );
       }
-    } else if (isPrivateSessionLink) {
+    } else if (selectedUsesPrivateSessions) {
       if (requestedSessionIds.length > 0) {
         return NextResponse.json(
           { error: "This private link can only book private session openings created by Coach Hugo." },
@@ -142,15 +159,6 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         );
       }
 
-      if (
-        !parentPlayerInfo.playerName ||
-        !parentPlayerInfo.playerAge ||
-        !parentPlayerInfo.parentName ||
-        !parentPlayerInfo.parentPhone ||
-        !validateEmail(parentPlayerInfo.parentEmail)
-      ) {
-        return NextResponse.json({ error: "Complete the player and parent information before continuing." }, { status: 400 });
-      }
     } else {
       if (requestedPrivateSessionIds.length > 0) {
         return NextResponse.json(
@@ -171,6 +179,21 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       }
     }
 
+    if (
+      !parentPlayerInfo.playerName ||
+      parentPlayerInfo.playerName === "Parent will complete" ||
+      !parentPlayerInfo.playerAge ||
+      parentPlayerInfo.playerAge === "Parent will complete" ||
+      !parentPlayerInfo.parentName ||
+      parentPlayerInfo.parentName === "Parent will complete" ||
+      !parentPlayerInfo.parentPhone ||
+      parentPlayerInfo.parentPhone === "Parent will complete" ||
+      !validateEmail(parentPlayerInfo.parentEmail) ||
+      parentPlayerInfo.parentEmail === "pending@elitesoccertrainingcv.com"
+    ) {
+      return NextResponse.json({ error: "Complete the player and parent information before continuing." }, { status: 400 });
+    }
+
     if (link.link_mode === "payment_plus_confirm_proposed_schedule") {
       const proposed = new Set(link.proposed_session_ids ?? []);
       const outsideProposal = requestedSessionIds.find((sessionId) => !proposed.has(sessionId));
@@ -180,7 +203,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       }
     }
 
-    if (requiresWaiver(requestedSessionIds.length + requestedPrivateSessionIds.length)) {
+    if (requiresWaiver(1)) {
       if (
         !payload?.emergencyName?.trim() ||
         !payload.emergencyPhone?.trim() ||
@@ -197,7 +220,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     let bookingId: string | undefined;
     let bookingIds: string[] = [];
     const availability = await getSupabaseAvailability();
-    const privateAvailability = isPrivateSessionLink ? await listPublicPrivateSessionAvailability() : [];
+    const privateAvailability = selectedUsesPrivateSessions ? await listPublicPrivateSessionAvailability() : [];
 
     if (requestedSessionIds.length > 0) {
       const availableById = new Map(availability.sessions.map((session) => [session.id, session]));
@@ -227,11 +250,14 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       }
     }
 
-    if (isPrivateSessionLink) {
+    if (selectedUsesPrivateSessions) {
       const baseLinkUpdate = {
         id: link.id,
         selectedPrivateSessionIds: requestedPrivateSessionIds,
         selectedPaymentMethod,
+        selectedPlanType,
+        selectedAmountCents: selectedOption.amountCents,
+        selectedTotalCredits: selectedOption.credits,
         playerName: parentPlayerInfo.playerName,
         playerAge: parentPlayerInfo.playerAge,
         parentName: parentPlayerInfo.parentName,
@@ -247,12 +273,12 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         mediaConsent: payload?.mediaConsent,
         ipAddress,
         creditsUsed: requestedPrivateSessionIds.length,
-        creditsRemaining: Math.max(0, (Number(link.total_credits) || 0) - requestedPrivateSessionIds.length)
+        creditsRemaining: Math.max(0, (Number(selectedOption.credits) || 0) - requestedPrivateSessionIds.length)
       };
 
       if (selectedPaymentMethod === "zelle") {
         const amountPerPrivateSession = Math.round(
-          (Number(link.amount_cents) || 0) / Math.max(1, requestedPrivateSessionIds.length)
+          (Number(selectedOption.amountCents) || 0) / Math.max(1, requestedPrivateSessionIds.length)
         );
         const bookedPrivateSessions = [];
 
@@ -301,7 +327,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
 
         await updateCustomPaymentLink({
           ...baseLinkUpdate,
-          status: requestedPrivateSessionIds.length >= (Number(link.total_credits) || 0) ? "fully_scheduled" : "partially_scheduled",
+          status: requestedPrivateSessionIds.length >= (Number(selectedOption.credits) || 0) ? "fully_scheduled" : "partially_scheduled",
           paymentStatus: "zelle_pending"
         });
 
@@ -309,8 +335,8 @@ export async function POST(request: Request, context: { params: Promise<{ token:
           status: "zelle_pending",
           message: "Your waiver has been submitted. Zelle payment must be confirmed manually.",
           zellePhone: "3236848024",
-          memo: `${parentPlayerInfo.playerName} - ${planLabelsForMemo(link.plan_type)}`,
-          amountDue: link.amount_cents,
+          memo: `${parentPlayerInfo.playerName} - ${planLabelsForMemo(selectedPlanType)}`,
+          amountDue: selectedOption.amountCents,
           privateSessionsBooked: bookedPrivateSessions.length
         });
       }
@@ -332,7 +358,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         customPaymentLinkId: updatedLink.id,
         planType: updatedLink.plan_type,
         stripeMode: stripeDiagnostics.stripeMode,
-        amountCents: updatedLink.amount_cents
+        amountCents: selectedOption.amountCents
       });
 
       const checkout = await createStripeCustomPaymentLinkCheckoutSession(updatedLink, {
@@ -360,11 +386,11 @@ export async function POST(request: Request, context: { params: Promise<{ token:
 
     if (passType) {
       const pass = await createPendingPassPurchase({
-        parentName: link.parent_name,
-        parentEmail: link.parent_email,
-        parentPhone: link.parent_phone,
-        playerName: link.player_name,
-        playerAge: link.player_age,
+        parentName: parentPlayerInfo.parentName,
+        parentEmail: parentPlayerInfo.parentEmail,
+        parentPhone: parentPlayerInfo.parentPhone,
+        playerName: parentPlayerInfo.playerName,
+        playerAge: parentPlayerInfo.playerAge,
         trainingGroup: link.training_group,
         passType,
         selectedSessionIds: requestedSessionIds,
@@ -387,7 +413,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
               }
       });
       passPurchaseId = pass.id;
-    } else if (link.plan_type === "single_session" && requestedSessionIds.length === 1) {
+    } else if (selectedPlanType === "single_session" && requestedSessionIds.length === 1) {
       const publicSession = availability.sessions.find((session) => session.id === requestedSessionIds[0]);
       const group = getTrainingGroup((publicSession?.trainingGroupId || link.training_group) as TrainingGroupId);
 
@@ -398,11 +424,11 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       const rawBooking: BookingRecord = {
         id: `CUSTOM-${link.id}`,
         createdAt: new Date().toISOString(),
-        parentName: link.parent_name,
-        playerName: link.player_name,
-        playerAge: link.player_age,
-        phone: link.parent_phone,
-        email: link.parent_email,
+        parentName: parentPlayerInfo.parentName,
+        playerName: parentPlayerInfo.playerName,
+        playerAge: parentPlayerInfo.playerAge,
+        phone: parentPlayerInfo.parentPhone,
+        email: parentPlayerInfo.parentEmail,
         players: "1",
         notes: payload?.notes?.trim() ?? link.notes_to_parent ?? "",
         medicalNotes: payload?.medicalNotes?.trim() ?? "",
@@ -431,17 +457,71 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       bookingIds = [bookingId];
     }
 
+    const baseLinkUpdate = {
+      id: link.id,
+      selectedSessionIds: requestedSessionIds,
+      selectedPrivateSessionIds: requestedPrivateSessionIds,
+      selectedPaymentMethod,
+      selectedPlanType,
+      selectedAmountCents: selectedOption.amountCents,
+      selectedTotalCredits: selectedOption.credits,
+      playerName: parentPlayerInfo.playerName,
+      playerAge: parentPlayerInfo.playerAge,
+      parentName: parentPlayerInfo.parentName,
+      parentEmail: parentPlayerInfo.parentEmail,
+      parentPhone: parentPlayerInfo.parentPhone,
+      emergencyName: payload?.emergencyName?.trim() || "",
+      emergencyPhone: payload?.emergencyPhone?.trim() || "",
+      medicalNotes: payload?.medicalNotes?.trim() || "",
+      waiverSigned: true,
+      typedSignature: payload?.guardianSignature?.trim() || "",
+      signedAt,
+      waiverVersion,
+      mediaConsent: payload?.mediaConsent,
+      ipAddress,
+      passPurchaseId: passPurchaseId ?? null,
+      bookingIds,
+      creditsUsed: requestedSessionIds.length,
+      creditsRemaining: Math.max(0, (Number(selectedOption.credits) || 0) - requestedSessionIds.length)
+    };
+
+    if (selectedPaymentMethod === "zelle") {
+      await updateCustomPaymentLink({
+        ...baseLinkUpdate,
+        status: requestedSessionIds.length > 0 ? "partially_scheduled" : "viewed",
+        paymentStatus: "zelle_pending"
+      });
+
+      return NextResponse.json({
+        status: "zelle_pending",
+        message: "Your waiver has been submitted. Zelle payment must be confirmed manually.",
+        zellePhone: "3236848024",
+        memo: `${parentPlayerInfo.playerName} - ${planLabelsForMemo(selectedPlanType)}`,
+        amountDue: selectedOption.amountCents
+      });
+    }
+
+    const updatedLink = await updateCustomPaymentLink({
+      ...baseLinkUpdate,
+      status: link.status,
+      paymentStatus: "pending_card_payment"
+    });
+
+    if (!updatedLink) {
+      return NextResponse.json({ error: "This private payment link could not be updated." }, { status: 500 });
+    }
+
     const stripeDiagnostics = getStripeEnvironmentDiagnostics();
 
     console.info("[EST Stripe] Creating checkout session", {
       purchaseType: "custom_payment_link",
-      customPaymentLinkId: link.id,
-      planType: link.plan_type,
+      customPaymentLinkId: updatedLink.id,
+      planType: selectedPlanType,
       stripeMode: stripeDiagnostics.stripeMode,
-      amountCents: link.amount_cents
+      amountCents: selectedOption.amountCents
     });
 
-    const checkout = await createStripeCustomPaymentLinkCheckoutSession(link, {
+    const checkout = await createStripeCustomPaymentLinkCheckoutSession(updatedLink, {
       passPurchaseId,
       bookingId,
       selectedSessionCount: requestedSessionIds.length + requestedPrivateSessionIds.length
@@ -456,26 +536,21 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     }
 
     await updateCustomPaymentLink({
-      id: link.id,
-      selectedSessionIds: requestedSessionIds,
-      selectedPrivateSessionIds: requestedPrivateSessionIds,
-      passPurchaseId: passPurchaseId ?? null,
-      bookingIds,
+      id: updatedLink.id,
       checkoutSessionId: checkout.id,
-      creditsUsed: requestedSessionIds.length + requestedPrivateSessionIds.length,
-      creditsRemaining: Math.max(0, (Number(link.total_credits) || 0) - requestedSessionIds.length - requestedPrivateSessionIds.length)
+      paymentStatus: "pending_card_payment"
     });
 
     console.info("[EST Stripe] Redirecting to Stripe Checkout", {
       purchaseType: "custom_payment_link",
-      customPaymentLinkId: link.id,
+      customPaymentLinkId: updatedLink.id,
       sessionId: checkout.id
     });
 
     return NextResponse.json({
       checkoutUrl: checkout.url,
       sessionId: checkout.id,
-      customPaymentLinkId: link.id
+      customPaymentLinkId: updatedLink.id
     });
   } catch (error) {
     console.error("[EST Stripe] Custom payment link checkout could not be started", {
