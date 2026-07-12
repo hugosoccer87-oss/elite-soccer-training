@@ -34,6 +34,16 @@ create table if not exists public.custom_payment_links (
   proposed_session_ids text[] not null default '{}',
   selected_session_ids text[] not null default '{}',
   selected_private_session_ids text[] not null default '{}',
+  selected_payment_method text,
+  emergency_name text,
+  emergency_phone text,
+  medical_notes text,
+  waiver_signed boolean not null default false,
+  typed_signature text,
+  signed_at timestamptz,
+  waiver_version text,
+  media_consent text,
+  ip_address text,
   status text not null default 'draft' check (
     status in (
       'draft',
@@ -73,6 +83,36 @@ create index if not exists idx_custom_payment_links_stripe_checkout
 
 alter table public.custom_payment_links
   add column if not exists selected_private_session_ids text[] not null default '{}';
+
+alter table public.custom_payment_links
+  add column if not exists selected_payment_method text;
+
+alter table public.custom_payment_links
+  add column if not exists emergency_name text;
+
+alter table public.custom_payment_links
+  add column if not exists emergency_phone text;
+
+alter table public.custom_payment_links
+  add column if not exists medical_notes text;
+
+alter table public.custom_payment_links
+  add column if not exists waiver_signed boolean not null default false;
+
+alter table public.custom_payment_links
+  add column if not exists typed_signature text;
+
+alter table public.custom_payment_links
+  add column if not exists signed_at timestamptz;
+
+alter table public.custom_payment_links
+  add column if not exists waiver_version text;
+
+alter table public.custom_payment_links
+  add column if not exists media_consent text;
+
+alter table public.custom_payment_links
+  add column if not exists ip_address text;
 
 alter table public.custom_payment_links
   drop constraint if exists custom_payment_links_link_mode_check;

@@ -409,7 +409,6 @@ export async function createStripeCustomPaymentLinkCheckoutSession(
     cancel_url: `${siteUrl}/custom-payment/${link.token}`,
     allow_promotion_codes: "true",
     client_reference_id: link.id,
-    customer_email: link.parent_email,
     "line_items[0][price_data][currency]": sessionCurrency,
     "line_items[0][price_data][product_data][name]": `Elite Soccer Training CV - ${planLabel}`,
     "line_items[0][price_data][product_data][description]":
@@ -433,6 +432,10 @@ export async function createStripeCustomPaymentLinkCheckoutSession(
     "metadata[parent_email]": link.parent_email,
     "metadata[player_name]": link.player_name
   });
+
+  if (link.parent_email && link.parent_email !== "pending@elitesoccertrainingcv.com") {
+    params.set("customer_email", link.parent_email);
+  }
 
   if (metadata.passPurchaseId) {
     params.set("payment_intent_data[metadata][passPurchaseId]", metadata.passPurchaseId);

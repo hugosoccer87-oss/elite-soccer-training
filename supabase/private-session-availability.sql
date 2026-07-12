@@ -15,10 +15,21 @@ create table if not exists public.private_session_availability (
   parent_name text,
   parent_email text,
   parent_phone text,
+  payment_method text not null default 'card' check (payment_method in ('card', 'zelle')),
+  payment_status text not null default 'not_started' check (payment_status in ('not_started', 'pending_card_payment', 'paid', 'zelle_pending', 'cancelled')),
   custom_payment_link_id uuid references public.custom_payment_links(id) on delete set null,
   stripe_checkout_session_id text,
   stripe_payment_intent_id text,
   amount_paid integer not null default 0,
+  waiver_signed boolean not null default false,
+  typed_signature text,
+  signed_at timestamptz,
+  waiver_version text,
+  media_consent text check (media_consent in ('Granted', 'Declined') or media_consent is null),
+  emergency_name text,
+  emergency_phone text,
+  medical_notes text,
+  ip_address text,
   booked_at timestamptz,
   google_calendar_event_id text,
   calendar_status text,
@@ -33,6 +44,69 @@ create table if not exists public.private_session_availability (
 
 alter table public.custom_payment_links
   add column if not exists selected_private_session_ids text[] not null default '{}';
+
+alter table public.private_session_availability
+  add column if not exists payment_method text not null default 'card';
+
+alter table public.private_session_availability
+  add column if not exists payment_status text not null default 'not_started';
+
+alter table public.private_session_availability
+  add column if not exists waiver_signed boolean not null default false;
+
+alter table public.private_session_availability
+  add column if not exists typed_signature text;
+
+alter table public.private_session_availability
+  add column if not exists signed_at timestamptz;
+
+alter table public.private_session_availability
+  add column if not exists waiver_version text;
+
+alter table public.private_session_availability
+  add column if not exists media_consent text;
+
+alter table public.private_session_availability
+  add column if not exists emergency_name text;
+
+alter table public.private_session_availability
+  add column if not exists emergency_phone text;
+
+alter table public.private_session_availability
+  add column if not exists medical_notes text;
+
+alter table public.private_session_availability
+  add column if not exists ip_address text;
+
+alter table public.custom_payment_links
+  add column if not exists emergency_name text;
+
+alter table public.custom_payment_links
+  add column if not exists emergency_phone text;
+
+alter table public.custom_payment_links
+  add column if not exists medical_notes text;
+
+alter table public.custom_payment_links
+  add column if not exists waiver_signed boolean not null default false;
+
+alter table public.custom_payment_links
+  add column if not exists typed_signature text;
+
+alter table public.custom_payment_links
+  add column if not exists signed_at timestamptz;
+
+alter table public.custom_payment_links
+  add column if not exists waiver_version text;
+
+alter table public.custom_payment_links
+  add column if not exists media_consent text;
+
+alter table public.custom_payment_links
+  add column if not exists ip_address text;
+
+alter table public.custom_payment_links
+  add column if not exists selected_payment_method text;
 
 alter table public.custom_payment_links
   drop constraint if exists custom_payment_links_link_mode_check;

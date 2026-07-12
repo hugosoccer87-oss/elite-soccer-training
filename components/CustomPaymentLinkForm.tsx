@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { PublicAvailableSession } from "@/lib/public-availability";
 import { formatCurrencyFromCents } from "@/lib/pricing";
 import type { CustomPaymentLinkMode, CustomPaymentLinkPlanType, PrivateSessionAvailabilityRow } from "@/lib/supabase-db";
+import { waiverSections } from "@/lib/waiver-content";
 
 type CustomPaymentLinkClient = {
   token: string;
@@ -39,6 +40,7 @@ const planLabels: Record<CustomPaymentLinkPlanType, string> = {
 
 function maxSelectable(link: CustomPaymentLinkClient) {
   if (link.planType === "single_session") return 1;
+  if (link.planType === "private_1_on_1") return 1;
   if (link.planType === "four_session_training_package") return 4;
   if (link.planType === "six_session_training_package") return 6;
   return 0;
@@ -66,6 +68,14 @@ function formatPrivateTime(value: string, timeZone = "America/Los_Angeles") {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function initialParentValue(value: string) {
+  if (!value || value === "Parent will complete" || value === "pending@elitesoccertrainingcv.com") {
+    return "";
+  }
+
+  return value;
 }
 
 export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props) {
@@ -99,6 +109,18 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
       : [];
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>(initialSelected);
   const [selectedPrivateSessionIds, setSelectedPrivateSessionIds] = useState<string[]>([]);
+  const [playerName, setPlayerName] = useState(initialParentValue(link.playerName));
+  const [playerAge, setPlayerAge] = useState(initialParentValue(link.playerAge));
+  const [parentName, setParentName] = useState(initialParentValue(link.parentName));
+  const [parentEmail, setParentEmail] = useState(initialParentValue(link.parentEmail));
+  const [parentPhone, setParentPhone] = useState(initialParentValue(link.parentPhone));
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "zelle">("card");
+  const [zelleResult, setZelleResult] = useState<{
+    amountDue?: number;
+    zellePhone?: string;
+    memo?: string;
+    privateSessionsBooked?: number;
+  } | null>(null);
   const [notes, setNotes] = useState("");
   const [emergencyName, setEmergencyName] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
@@ -109,7 +131,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const selectedCount = selectedSessionIds.length + selectedPrivateSessionIds.length;
-  const needsWaiver = selectedSessionIds.length > 0;
+  const needsWaiver = selectedCount > 0;
   const planLabel = planLabels[link.planType];
   const isClosed = ["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(link.status);
 
@@ -158,6 +180,18 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
       return;
     }
 
+    if (privateSelectionMode) {
+      if (!playerName.trim() || !playerAge.trim() || !parentName.trim() || !parentEmail.trim() || !parentPhone.trim()) {
+        setError("Complete the player and parent information before continuing.");
+        return;
+      }
+
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parentEmail.trim())) {
+        setError("Enter a valid parent email before continuing.");
+        return;
+      }
+    }
+
     if (needsWaiver) {
       if (!emergencyName.trim() || !emergencyPhone.trim() || !medicalNotes.trim() || !mediaConsent || !guardianSignature.trim() || !waiverAccepted) {
         setError("Complete the emergency details and signed waiver before continuing.");
@@ -176,6 +210,12 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
         body: JSON.stringify({
           selectedSessionIds,
           selectedPrivateSessionIds,
+          playerName,
+          playerAge,
+          parentName,
+          parentEmail,
+          parentPhone,
+          paymentMethod,
           notes,
           emergencyName,
           emergencyPhone,
@@ -185,7 +225,26 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
           waiverAccepted
         })
       });
-      const result = (await response.json().catch(() => ({}))) as { checkoutUrl?: string; error?: string };
+      const result = (await response.json().catch(() => ({}))) as {
+        checkoutUrl?: string;
+        error?: string;
+        status?: string;
+        amountDue?: number;
+        zellePhone?: string;
+        memo?: string;
+        privateSessionsBooked?: number;
+      };
+
+      if (response.ok && result.status === "zelle_pending") {
+        setZelleResult({
+          amountDue: result.amountDue,
+          zellePhone: result.zellePhone,
+          memo: result.memo,
+          privateSessionsBooked: result.privateSessionsBooked
+        });
+        setIsSubmitting(false);
+        return;
+      }
 
       if (!response.ok || !result.checkoutUrl) {
         throw new Error(result.error || "Payment could not be started.");
@@ -204,7 +263,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
         <p className="text-xs font-black uppercase tracking-[0.18em] text-electric">Private EST CV Link</p>
         <h1 className="mt-3 text-3xl font-black uppercase tracking-tight sm:text-5xl">Complete Your Payment</h1>
         <p className="mt-3 max-w-2xl text-base leading-7 text-slate-300">
-          Review the details below, choose the allowed sessions if needed, and continue to secure card payment.
+          Complete the player details, choose the allowed session time if needed, sign the waiver, and choose card or Zelle.
         </p>
       </div>
 
@@ -215,15 +274,15 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
           <dl className="mt-5 space-y-3 text-sm">
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Player</dt>
-              <dd className="text-right font-black text-slate-950">{link.playerName}</dd>
+              <dd className="text-right font-black text-slate-950">{privateSelectionMode ? playerName || "Parent will complete" : link.playerName}</dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Player age</dt>
-              <dd className="text-right font-black text-slate-950">{link.playerAge}</dd>
+              <dd className="text-right font-black text-slate-950">{privateSelectionMode ? playerAge || "Parent will complete" : link.playerAge}</dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Parent</dt>
-              <dd className="text-right font-black text-slate-950">{link.parentName}</dd>
+              <dd className="text-right font-black text-slate-950">{privateSelectionMode ? parentName || "Parent will complete" : link.parentName}</dd>
             </div>
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Amount due</dt>
@@ -257,8 +316,54 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
             </div>
           ) : null}
 
-          {!paymentOnly ? (
+          {zelleResult ? (
+            <div className="rounded-[8px] border border-emerald-200 bg-emerald-50 p-5 text-sm leading-6 text-emerald-950">
+              <p className="text-lg font-black text-emerald-950">Waiver submitted. Zelle payment pending.</p>
+              <p className="mt-2">
+                Your private session time has been saved. Zelle payment must be confirmed manually by EST CV.
+              </p>
+              <div className="mt-4 rounded-[8px] border border-emerald-200 bg-white p-4">
+                <p className="font-black">Send Zelle payment to: {zelleResult.zellePhone || "3236848024"}</p>
+                <p className="mt-1">Memo: {zelleResult.memo || `${playerName} - ${planLabel}`}</p>
+                <p className="mt-1">Amount due: {formatCurrencyFromCents(zelleResult.amountDue ?? link.amountCents)}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {!zelleResult && privateSelectionMode ? (
             <section>
+              <p className="text-xs font-black uppercase text-electric">Player & Parent Information</p>
+              <h2 className="mt-1 text-2xl font-black text-slate-950">Complete Your Details</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Enter the player and parent information for this private payment link.
+              </p>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-black text-slate-950">
+                  Player name *
+                  <input className="mt-2 w-full rounded-[8px] border border-slate-300 px-3 py-3 font-bold text-slate-950" value={playerName} onChange={(event) => setPlayerName(event.target.value)} />
+                </label>
+                <label className="text-sm font-black text-slate-950">
+                  Player age *
+                  <input className="mt-2 w-full rounded-[8px] border border-slate-300 px-3 py-3 font-bold text-slate-950" value={playerAge} onChange={(event) => setPlayerAge(event.target.value)} />
+                </label>
+                <label className="text-sm font-black text-slate-950">
+                  Parent/guardian name *
+                  <input className="mt-2 w-full rounded-[8px] border border-slate-300 px-3 py-3 font-bold text-slate-950" value={parentName} onChange={(event) => setParentName(event.target.value)} />
+                </label>
+                <label className="text-sm font-black text-slate-950">
+                  Parent phone *
+                  <input className="mt-2 w-full rounded-[8px] border border-slate-300 px-3 py-3 font-bold text-slate-950" value={parentPhone} onChange={(event) => setParentPhone(event.target.value)} />
+                </label>
+                <label className="text-sm font-black text-slate-950 sm:col-span-2">
+                  Parent email *
+                  <input className="mt-2 w-full rounded-[8px] border border-slate-300 px-3 py-3 font-bold text-slate-950" type="email" value={parentEmail} onChange={(event) => setParentEmail(event.target.value)} />
+                </label>
+              </div>
+            </section>
+          ) : null}
+
+          {!zelleResult ? (!paymentOnly ? (
+            <section className={privateSelectionMode ? "mt-8 border-t border-slate-200 pt-6" : ""}>
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <p className="text-xs font-black uppercase text-electric">Choose Sessions</p>
@@ -366,15 +471,25 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
               <p className="font-black text-slate-950">No session selection required</p>
               <p className="mt-1">This private link is for payment only. Coach Hugo will follow up if scheduling is needed.</p>
             </div>
-          )}
+          )) : null}
 
-          {needsWaiver ? (
+          {!zelleResult && needsWaiver ? (
             <section className="mt-8 border-t border-slate-200 pt-6">
               <p className="text-xs font-black uppercase text-electric">Waiver & Contact</p>
               <h2 className="mt-1 text-2xl font-black text-slate-950">Parent Waiver</h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                By signing below, I confirm this waiver applies to the player listed on this private payment link.
+                By signing below, I confirm this waiver applies to all EST CV sessions, training activities, and dates connected to this registration/payment.
               </p>
+              <div className="mt-5 rounded-[8px] border border-slate-200 bg-slate-50 p-4">
+                <div className="grid gap-4 text-sm leading-6 text-slate-700">
+                  {waiverSections.map((section) => (
+                    <div key={section.title} className="border-b border-slate-200 pb-4 last:border-0 last:pb-0">
+                      <h3 className="font-black text-slate-950">{section.title}</h3>
+                      <p className="mt-1">{section.copy}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <label className="text-sm font-black text-slate-950">
                   Emergency contact name *
@@ -413,20 +528,64 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
             </section>
           ) : null}
 
+          {!zelleResult && privateSelectionMode ? (
+            <section className="mt-8 border-t border-slate-200 pt-6">
+              <p className="text-xs font-black uppercase text-electric">Payment Method</p>
+              <h2 className="mt-1 text-2xl font-black text-slate-950">Choose Payment Method</h2>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {[
+                  { value: "card", title: "Pay by Card", text: "Continue to secure card payment." },
+                  { value: "zelle", title: "Pay by Zelle", text: "Submit waiver and view Zelle instructions." }
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setPaymentMethod(option.value as "card" | "zelle")}
+                    className={`rounded-[8px] border p-4 text-left transition ${
+                      paymentMethod === option.value
+                        ? "border-electric bg-blue-50 ring-2 ring-electric/20"
+                        : "border-slate-200 bg-white hover:border-electric"
+                    }`}
+                  >
+                    <p className="font-black text-slate-950">{option.title}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-600">{option.text}</p>
+                  </button>
+                ))}
+              </div>
+              {paymentMethod === "zelle" ? (
+                <div className="mt-4 rounded-[8px] border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-slate-700">
+                  <p className="font-black text-slate-950">Zelle instructions</p>
+                  <p className="mt-1">Send payment through Zelle to: 3236848024</p>
+                  <p>Memo: {playerName || "Player Name"} - {planLabel}</p>
+                  <p className="font-black text-slate-950">Amount due: {formatCurrencyFromCents(link.amountCents)}</p>
+                  <p className="mt-1 text-xs font-bold uppercase text-slate-500">Zelle payments must be confirmed manually.</p>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           {error ? (
             <div className="mt-6 rounded-[8px] border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
               {error}
             </div>
           ) : null}
 
-          <button
-            type="button"
-            disabled={isSubmitting || isClosed}
-            onClick={submit}
-            className="mt-6 w-full rounded-[8px] bg-electric px-5 py-4 text-base font-black uppercase text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {isSubmitting ? "Opening secure payment..." : "Continue to Secure Payment"}
-          </button>
+          {!zelleResult ? (
+            <button
+              type="button"
+              disabled={isSubmitting || isClosed}
+              onClick={submit}
+              className="mt-6 w-full rounded-[8px] bg-electric px-5 py-4 text-base font-black uppercase text-white shadow-lg shadow-blue-500/20 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {isSubmitting
+                ? paymentMethod === "zelle"
+                  ? "Saving waiver..."
+                  : "Opening secure payment..."
+                : paymentMethod === "zelle"
+                  ? "Submit Waiver + View Zelle Instructions"
+                  : "Continue to Secure Card Payment"}
+            </button>
+          ) : null}
         </main>
       </div>
     </div>

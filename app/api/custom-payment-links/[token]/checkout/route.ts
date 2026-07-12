@@ -6,15 +6,20 @@ import { createStripeCustomPaymentLinkCheckoutSession, getStripeEnvironmentDiagn
 import {
   attachPassStripeCheckoutSession,
   attachStripeCheckoutSession,
+  bookPrivateSessionAvailability,
   createPendingBooking,
   createPendingPassPurchase,
   customPaymentLinkPassType,
   getCustomPaymentLinkByToken,
   listPublicPrivateSessionAvailability,
   getSupabaseAvailability,
+  updatePrivateSessionAvailability,
   updateCustomPaymentLink
 } from "@/lib/supabase-db";
 import { waiverVersion } from "@/lib/waiver-content";
+import { syncBookedPrivateSessionCalendarEvent } from "@/lib/google-calendar";
+import { sendPrivateSessionAvailabilityTransactionalEmails } from "@/lib/transactional-email";
+import { sendPrivateSessionAvailabilityAdminPushoverAlert } from "@/lib/pushover";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,11 +46,25 @@ function requiresWaiver(selectedSessionCount: number) {
   return selectedSessionCount > 0;
 }
 
+function planLabelsForMemo(planType: string) {
+  if (planType === "four_session_training_package") return "4-Session Training Package";
+  if (planType === "six_session_training_package") return "6-Session Training Package";
+  if (planType === "private_1_on_1") return "Private Session";
+  if (planType === "custom_amount") return "Custom Payment";
+  return "Single Session";
+}
+
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const payload = (await request.json().catch(() => null)) as {
     selectedSessionIds?: unknown;
     selectedPrivateSessionIds?: unknown;
+    playerName?: string;
+    playerAge?: string;
+    parentName?: string;
+    parentEmail?: string;
+    parentPhone?: string;
+    paymentMethod?: "card" | "zelle";
     notes?: string;
     medicalNotes?: string;
     emergencyName?: string;
@@ -61,6 +80,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
   }
 
   const link = details.link;
+  const isPrivateSessionLink = link.link_mode === "payment_plus_choose_private_sessions";
 
   if (link.status === "cancelled") {
     return NextResponse.json({ error: "This private payment link has been cancelled." }, { status: 410 });
@@ -70,7 +90,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     return NextResponse.json({ error: "This private payment link has already been paid." }, { status: 409 });
   }
 
-  if (!validateEmail(link.parent_email)) {
+  if (!isPrivateSessionLink && !validateEmail(link.parent_email)) {
     return NextResponse.json({ error: "The parent email on this private link is invalid." }, { status: 400 });
   }
 
@@ -79,8 +99,22 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     const requestedPrivateSessionIds = selectedIds(payload?.selectedPrivateSessionIds);
     const passType = customPaymentLinkPassType(link.plan_type);
     const maxSessionCount =
-      link.plan_type === "single_session" ? 1 : passType ? Number(link.total_credits) || 0 : 0;
-    const isPrivateSessionLink = link.link_mode === "payment_plus_choose_private_sessions";
+      link.plan_type === "single_session" || link.plan_type === "private_1_on_1"
+        ? 1
+        : passType
+          ? Number(link.total_credits) || 0
+          : 0;
+    const parentPlayerInfo = {
+      playerName: isPrivateSessionLink ? payload?.playerName?.trim() || "" : link.player_name,
+      playerAge: isPrivateSessionLink ? payload?.playerAge?.trim() || "" : link.player_age,
+      parentName: isPrivateSessionLink ? payload?.parentName?.trim() || "" : link.parent_name,
+      parentEmail: isPrivateSessionLink ? payload?.parentEmail?.trim().toLowerCase() || "" : link.parent_email,
+      parentPhone: isPrivateSessionLink ? payload?.parentPhone?.trim() || "" : link.parent_phone
+    };
+    const selectedPaymentMethod: "card" | "zelle" =
+      isPrivateSessionLink && payload?.paymentMethod === "zelle" ? "zelle" : "card";
+    const signedAt = new Date().toISOString();
+    const ipAddress = getRequestIpAddress(request);
 
     if (link.link_mode === "payment_only" || link.plan_type === "custom_amount") {
       if (requestedSessionIds.length > 0 || requestedPrivateSessionIds.length > 0) {
@@ -106,6 +140,16 @@ export async function POST(request: Request, context: { params: Promise<{ token:
           { error: "You have used all available training credits. Please purchase another session or package to continue booking." },
           { status: 400 }
         );
+      }
+
+      if (
+        !parentPlayerInfo.playerName ||
+        !parentPlayerInfo.playerAge ||
+        !parentPlayerInfo.parentName ||
+        !parentPlayerInfo.parentPhone ||
+        !validateEmail(parentPlayerInfo.parentEmail)
+      ) {
+        return NextResponse.json({ error: "Complete the player and parent information before continuing." }, { status: 400 });
       }
     } else {
       if (requestedPrivateSessionIds.length > 0) {
@@ -136,7 +180,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       }
     }
 
-    if (requiresWaiver(requestedSessionIds.length)) {
+    if (requiresWaiver(requestedSessionIds.length + requestedPrivateSessionIds.length)) {
       if (
         !payload?.emergencyName?.trim() ||
         !payload.emergencyPhone?.trim() ||
@@ -181,6 +225,137 @@ export async function POST(request: Request, context: { params: Promise<{ token:
           { status: 400 }
         );
       }
+    }
+
+    if (isPrivateSessionLink) {
+      const baseLinkUpdate = {
+        id: link.id,
+        selectedPrivateSessionIds: requestedPrivateSessionIds,
+        selectedPaymentMethod,
+        playerName: parentPlayerInfo.playerName,
+        playerAge: parentPlayerInfo.playerAge,
+        parentName: parentPlayerInfo.parentName,
+        parentEmail: parentPlayerInfo.parentEmail,
+        parentPhone: parentPlayerInfo.parentPhone,
+        emergencyName: payload?.emergencyName?.trim() || "",
+        emergencyPhone: payload?.emergencyPhone?.trim() || "",
+        medicalNotes: payload?.medicalNotes?.trim() || "",
+        waiverSigned: true,
+        typedSignature: payload?.guardianSignature?.trim() || "",
+        signedAt,
+        waiverVersion,
+        mediaConsent: payload?.mediaConsent,
+        ipAddress,
+        creditsUsed: requestedPrivateSessionIds.length,
+        creditsRemaining: Math.max(0, (Number(link.total_credits) || 0) - requestedPrivateSessionIds.length)
+      };
+
+      if (selectedPaymentMethod === "zelle") {
+        const amountPerPrivateSession = Math.round(
+          (Number(link.amount_cents) || 0) / Math.max(1, requestedPrivateSessionIds.length)
+        );
+        const bookedPrivateSessions = [];
+
+        for (const privateSessionId of requestedPrivateSessionIds) {
+          const bookedPrivateSession = await bookPrivateSessionAvailability({
+            privateSessionId,
+            customPaymentLinkId: link.id,
+            playerName: parentPlayerInfo.playerName,
+            playerAge: parentPlayerInfo.playerAge,
+            parentName: parentPlayerInfo.parentName,
+            parentEmail: parentPlayerInfo.parentEmail,
+            parentPhone: parentPlayerInfo.parentPhone,
+            paymentMethod: "zelle",
+            paymentStatus: "zelle_pending",
+            amountPaid: amountPerPrivateSession,
+            waiverSigned: true,
+            typedSignature: payload?.guardianSignature?.trim() || "",
+            signedAt,
+            waiverVersion,
+            mediaConsent: payload?.mediaConsent,
+            emergencyName: payload?.emergencyName?.trim() || "",
+            emergencyPhone: payload?.emergencyPhone?.trim() || "",
+            medicalNotes: payload?.medicalNotes?.trim() || "",
+            ipAddress
+          });
+
+          const calendarResult = await syncBookedPrivateSessionCalendarEvent(bookedPrivateSession);
+          const withCalendarStatus = await updatePrivateSessionAvailability(bookedPrivateSession.id, {
+            google_calendar_event_id: calendarResult.eventId || bookedPrivateSession.google_calendar_event_id || null,
+            calendar_status: calendarResult.status,
+            calendar_message: calendarResult.message || null
+          }) ?? bookedPrivateSession;
+          const emailResult = await sendPrivateSessionAvailabilityTransactionalEmails(withCalendarStatus);
+          const withEmailStatus = await updatePrivateSessionAvailability(withCalendarStatus.id, {
+            email_status: emailResult.sent ? "sent" : "failed",
+            email_message: emailResult.message || null
+          }) ?? withCalendarStatus;
+          const pushoverResult = await sendPrivateSessionAvailabilityAdminPushoverAlert(withEmailStatus);
+          const finalPrivateSession = await updatePrivateSessionAvailability(withEmailStatus.id, {
+            pushover_status: pushoverResult.sent ? "sent" : pushoverResult.skipped ? "skipped" : "failed",
+            pushover_message: pushoverResult.message || null
+          }) ?? withEmailStatus;
+
+          bookedPrivateSessions.push(finalPrivateSession);
+        }
+
+        await updateCustomPaymentLink({
+          ...baseLinkUpdate,
+          status: requestedPrivateSessionIds.length >= (Number(link.total_credits) || 0) ? "fully_scheduled" : "partially_scheduled",
+          paymentStatus: "zelle_pending"
+        });
+
+        return NextResponse.json({
+          status: "zelle_pending",
+          message: "Your waiver has been submitted. Zelle payment must be confirmed manually.",
+          zellePhone: "3236848024",
+          memo: `${parentPlayerInfo.playerName} - ${planLabelsForMemo(link.plan_type)}`,
+          amountDue: link.amount_cents,
+          privateSessionsBooked: bookedPrivateSessions.length
+        });
+      }
+
+      const updatedLink = await updateCustomPaymentLink({
+        ...baseLinkUpdate,
+        status: link.status,
+        paymentStatus: "pending_card_payment"
+      });
+
+      if (!updatedLink) {
+        return NextResponse.json({ error: "This private payment link could not be updated." }, { status: 500 });
+      }
+
+      const stripeDiagnostics = getStripeEnvironmentDiagnostics();
+
+      console.info("[EST Stripe] Creating checkout session", {
+        purchaseType: "custom_payment_link",
+        customPaymentLinkId: updatedLink.id,
+        planType: updatedLink.plan_type,
+        stripeMode: stripeDiagnostics.stripeMode,
+        amountCents: updatedLink.amount_cents
+      });
+
+      const checkout = await createStripeCustomPaymentLinkCheckoutSession(updatedLink, {
+        selectedSessionCount: requestedPrivateSessionIds.length
+      });
+
+      await updateCustomPaymentLink({
+        id: updatedLink.id,
+        checkoutSessionId: checkout.id,
+        paymentStatus: "pending_card_payment"
+      });
+
+      console.info("[EST Stripe] Redirecting to Stripe Checkout", {
+        purchaseType: "custom_payment_link",
+        customPaymentLinkId: updatedLink.id,
+        sessionId: checkout.id
+      });
+
+      return NextResponse.json({
+        checkoutUrl: checkout.url,
+        sessionId: checkout.id,
+        customPaymentLinkId: updatedLink.id
+      });
     }
 
     if (passType) {

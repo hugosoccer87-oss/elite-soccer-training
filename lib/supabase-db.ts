@@ -220,6 +220,16 @@ export type CustomPaymentLinkRow = {
   proposed_session_ids: string[];
   selected_session_ids: string[];
   selected_private_session_ids: string[];
+  selected_payment_method?: "card" | "zelle" | null;
+  emergency_name?: string | null;
+  emergency_phone?: string | null;
+  medical_notes?: string | null;
+  waiver_signed?: boolean | null;
+  typed_signature?: string | null;
+  signed_at?: string | null;
+  waiver_version?: string | null;
+  media_consent?: "Granted" | "Declined" | null;
+  ip_address?: string | null;
   status: CustomPaymentLinkStatus;
   total_credits: number;
   credits_used: number;
@@ -386,6 +396,13 @@ export type PrivateSessionRequestRow = {
 };
 
 export type PrivateSessionAvailabilityStatus = "available" | "booked" | "closed" | "cancelled";
+export type PrivateSessionPaymentMethod = "card" | "zelle";
+export type PrivateSessionPaymentStatus =
+  | "not_started"
+  | "pending_card_payment"
+  | "paid"
+  | "zelle_pending"
+  | "cancelled";
 
 export type PrivateSessionAvailabilityRow = {
   id: string;
@@ -401,10 +418,21 @@ export type PrivateSessionAvailabilityRow = {
   parent_name?: string | null;
   parent_email?: string | null;
   parent_phone?: string | null;
+  payment_method: PrivateSessionPaymentMethod;
+  payment_status: PrivateSessionPaymentStatus;
   custom_payment_link_id?: string | null;
   stripe_checkout_session_id?: string | null;
   stripe_payment_intent_id?: string | null;
   amount_paid: number;
+  waiver_signed: boolean;
+  typed_signature?: string | null;
+  signed_at?: string | null;
+  waiver_version?: string | null;
+  media_consent?: "Granted" | "Declined" | null;
+  emergency_name?: string | null;
+  emergency_phone?: string | null;
+  medical_notes?: string | null;
+  ip_address?: string | null;
   booked_at?: string | null;
   google_calendar_event_id?: string | null;
   calendar_status?: string | null;
@@ -1175,11 +1203,11 @@ export async function listAdminCustomPaymentLinks(): Promise<AdminCustomPaymentL
 
 export async function createCustomPaymentLink(input: {
   token: string;
-  playerName: string;
-  playerAge: string;
-  parentName: string;
-  parentEmail: string;
-  parentPhone: string;
+  playerName?: string;
+  playerAge?: string;
+  parentName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
   trainingGroup: TrainingGroupId;
   planType: CustomPaymentLinkPlanType;
   linkMode: CustomPaymentLinkMode;
@@ -1194,11 +1222,11 @@ export async function createCustomPaymentLink(input: {
     method: "POST",
     body: JSON.stringify({
       token: input.token,
-      player_name: input.playerName.trim(),
-      player_age: input.playerAge.trim(),
-      parent_name: input.parentName.trim(),
-      parent_email: input.parentEmail.trim().toLowerCase(),
-      parent_phone: input.parentPhone.trim(),
+      player_name: input.playerName?.trim() || "Parent will complete",
+      player_age: input.playerAge?.trim() || "Parent will complete",
+      parent_name: input.parentName?.trim() || "Parent will complete",
+      parent_email: input.parentEmail?.trim().toLowerCase() || "pending@elitesoccertrainingcv.com",
+      parent_phone: input.parentPhone?.trim() || "Parent will complete",
       training_group: input.trainingGroup,
       plan_type: input.planType,
       link_mode: input.linkMode,
@@ -1268,6 +1296,21 @@ export async function updateCustomPaymentLink(input: {
   status?: CustomPaymentLinkStatus;
   selectedSessionIds?: string[];
   selectedPrivateSessionIds?: string[];
+  selectedPaymentMethod?: "card" | "zelle" | null;
+  playerName?: string;
+  playerAge?: string;
+  parentName?: string;
+  parentEmail?: string;
+  parentPhone?: string;
+  emergencyName?: string;
+  emergencyPhone?: string;
+  medicalNotes?: string;
+  waiverSigned?: boolean;
+  typedSignature?: string;
+  signedAt?: string;
+  waiverVersion?: string;
+  mediaConsent?: "Granted" | "Declined";
+  ipAddress?: string;
   passPurchaseId?: string | null;
   bookingIds?: string[];
   checkoutSessionId?: string | null;
@@ -1282,6 +1325,21 @@ export async function updateCustomPaymentLink(input: {
   if (input.status) patch.status = input.status;
   if (input.selectedSessionIds) patch.selected_session_ids = input.selectedSessionIds;
   if (input.selectedPrivateSessionIds) patch.selected_private_session_ids = input.selectedPrivateSessionIds;
+  if (input.selectedPaymentMethod !== undefined) patch.selected_payment_method = input.selectedPaymentMethod;
+  if (input.playerName !== undefined) patch.player_name = input.playerName.trim();
+  if (input.playerAge !== undefined) patch.player_age = input.playerAge.trim();
+  if (input.parentName !== undefined) patch.parent_name = input.parentName.trim();
+  if (input.parentEmail !== undefined) patch.parent_email = input.parentEmail.trim().toLowerCase();
+  if (input.parentPhone !== undefined) patch.parent_phone = input.parentPhone.trim();
+  if (input.emergencyName !== undefined) patch.emergency_name = input.emergencyName.trim();
+  if (input.emergencyPhone !== undefined) patch.emergency_phone = input.emergencyPhone.trim();
+  if (input.medicalNotes !== undefined) patch.medical_notes = input.medicalNotes.trim();
+  if (input.waiverSigned !== undefined) patch.waiver_signed = input.waiverSigned;
+  if (input.typedSignature !== undefined) patch.typed_signature = input.typedSignature.trim();
+  if (input.signedAt !== undefined) patch.signed_at = input.signedAt;
+  if (input.waiverVersion !== undefined) patch.waiver_version = input.waiverVersion;
+  if (input.mediaConsent !== undefined) patch.media_consent = input.mediaConsent;
+  if (input.ipAddress !== undefined) patch.ip_address = input.ipAddress;
   if (input.passPurchaseId !== undefined) patch.pass_purchase_id = input.passPurchaseId;
   if (input.bookingIds) patch.booking_ids = input.bookingIds;
   if (input.checkoutSessionId !== undefined) patch.stripe_checkout_session_id = input.checkoutSessionId;
@@ -1612,6 +1670,17 @@ export async function updatePrivateSessionAvailability(
       | "session_focus"
       | "notes"
       | "status"
+      | "payment_method"
+      | "payment_status"
+      | "waiver_signed"
+      | "typed_signature"
+      | "signed_at"
+      | "waiver_version"
+      | "media_consent"
+      | "emergency_name"
+      | "emergency_phone"
+      | "medical_notes"
+      | "ip_address"
       | "google_calendar_event_id"
       | "calendar_status"
       | "calendar_message"
@@ -1641,6 +1710,17 @@ export async function updatePrivateSessionAvailability(
   if (typeof updates.session_focus === "string") payload.session_focus = updates.session_focus.trim() || "Private Session";
   if (typeof updates.notes === "string" || updates.notes === null) payload.notes = updates.notes?.trim() || null;
   if (updates.status) payload.status = updates.status;
+  if (updates.payment_method) payload.payment_method = updates.payment_method;
+  if (updates.payment_status) payload.payment_status = updates.payment_status;
+  if (updates.waiver_signed !== undefined) payload.waiver_signed = updates.waiver_signed;
+  if (updates.typed_signature !== undefined) payload.typed_signature = updates.typed_signature?.trim() || null;
+  if (updates.signed_at !== undefined) payload.signed_at = updates.signed_at;
+  if (updates.waiver_version !== undefined) payload.waiver_version = updates.waiver_version;
+  if (updates.media_consent !== undefined) payload.media_consent = updates.media_consent;
+  if (updates.emergency_name !== undefined) payload.emergency_name = updates.emergency_name?.trim() || null;
+  if (updates.emergency_phone !== undefined) payload.emergency_phone = updates.emergency_phone?.trim() || null;
+  if (updates.medical_notes !== undefined) payload.medical_notes = updates.medical_notes?.trim() || null;
+  if (updates.ip_address !== undefined) payload.ip_address = updates.ip_address;
   if (updates.google_calendar_event_id !== undefined) payload.google_calendar_event_id = updates.google_calendar_event_id;
   if (updates.calendar_status !== undefined) payload.calendar_status = updates.calendar_status;
   if (updates.calendar_message !== undefined) payload.calendar_message = updates.calendar_message;
@@ -1674,9 +1754,20 @@ export async function bookPrivateSessionAvailability(input: {
   parentName: string;
   parentEmail: string;
   parentPhone: string;
+  paymentMethod?: PrivateSessionPaymentMethod;
+  paymentStatus?: PrivateSessionPaymentStatus;
   checkoutSessionId?: string;
   paymentIntentId?: string;
   amountPaid?: number;
+  waiverSigned?: boolean;
+  typedSignature?: string;
+  signedAt?: string;
+  waiverVersion?: string;
+  mediaConsent?: "Granted" | "Declined";
+  emergencyName?: string;
+  emergencyPhone?: string;
+  medicalNotes?: string;
+  ipAddress?: string;
 }) {
   const rows = await supabaseRequest<PrivateSessionAvailabilityRow[]>(
     [
@@ -1692,10 +1783,21 @@ export async function bookPrivateSessionAvailability(input: {
         parent_name: input.parentName,
         parent_email: input.parentEmail,
         parent_phone: input.parentPhone,
+        payment_method: input.paymentMethod || "card",
+        payment_status: input.paymentStatus || "paid",
         custom_payment_link_id: input.customPaymentLinkId,
         stripe_checkout_session_id: input.checkoutSessionId || null,
         stripe_payment_intent_id: input.paymentIntentId || null,
         amount_paid: input.amountPaid ?? 0,
+        waiver_signed: input.waiverSigned ?? true,
+        typed_signature: input.typedSignature?.trim() || null,
+        signed_at: input.signedAt || new Date().toISOString(),
+        waiver_version: input.waiverVersion || null,
+        media_consent: input.mediaConsent || null,
+        emergency_name: input.emergencyName?.trim() || null,
+        emergency_phone: input.emergencyPhone?.trim() || null,
+        medical_notes: input.medicalNotes?.trim() || null,
+        ip_address: input.ipAddress || null,
         booked_at: new Date().toISOString()
       })
     }

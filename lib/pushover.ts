@@ -341,16 +341,22 @@ export async function sendPrivateSessionAvailabilityAdminPushoverAlert(session: 
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(session.start_datetime));
+  const paymentLabel =
+    session.payment_method === "zelle" && session.payment_status === "zelle_pending"
+      ? "Zelle Pending / not manually confirmed"
+      : session.payment_status === "paid"
+        ? "Paid"
+        : session.payment_status || "Not recorded";
   const message = [
     `Player: ${session.player_name || "Not recorded"}`,
     `Session date: ${dateLabel}`,
     `Session time: ${timeLabel}`,
     `Session focus/title: ${session.session_focus || "Private Session"}`,
-    "Payment status: Paid",
+    `Payment status: ${paymentLabel}`,
     `Amount paid: ${formatMoney(session.amount_paid || 0)}`,
     `Parent: ${session.parent_name || "Not recorded"}`,
     `Parent phone: ${session.parent_phone || "Not recorded"}`,
-    "Waiver status: Not submitted through small-group booking flow"
+    `Waiver status: ${session.waiver_signed ? "Signed" : "Missing"}`
   ].join("\n");
 
   return sendPushoverAlert({

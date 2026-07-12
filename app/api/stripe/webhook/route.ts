@@ -172,9 +172,20 @@ export async function POST(request: Request) {
               parentName: customDetails.link.parent_name,
               parentEmail: customDetails.link.parent_email,
               parentPhone: customDetails.link.parent_phone,
+              paymentMethod: "card",
+              paymentStatus: "paid",
               checkoutSessionId: session.id,
               paymentIntentId,
-              amountPaid: amountPerPrivateSession
+              amountPaid: amountPerPrivateSession,
+              waiverSigned: Boolean(customDetails.link.waiver_signed),
+              typedSignature: customDetails.link.typed_signature || "",
+              signedAt: customDetails.link.signed_at || new Date().toISOString(),
+              waiverVersion: customDetails.link.waiver_version || undefined,
+              mediaConsent: customDetails.link.media_consent || undefined,
+              emergencyName: customDetails.link.emergency_name || "",
+              emergencyPhone: customDetails.link.emergency_phone || "",
+              medicalNotes: customDetails.link.medical_notes || "",
+              ipAddress: customDetails.link.ip_address || ""
             });
 
             const calendarResult = await syncBookedPrivateSessionCalendarEvent(bookedPrivateSession);

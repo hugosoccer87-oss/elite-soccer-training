@@ -2873,12 +2873,17 @@ export function AdminAvailability() {
   }
 
   async function createCustomPaymentLink() {
+    const parentCompletesPrivateDetails = customLinkMode === "payment_plus_choose_private_sessions";
+
     if (
-      !customLinkPlayerName.trim() ||
-      !customLinkPlayerAge.trim() ||
-      !customLinkParentName.trim() ||
-      !customLinkParentEmail.trim() ||
-      !customLinkParentPhone.trim()
+      !parentCompletesPrivateDetails &&
+      (
+        !customLinkPlayerName.trim() ||
+        !customLinkPlayerAge.trim() ||
+        !customLinkParentName.trim() ||
+        !customLinkParentEmail.trim() ||
+        !customLinkParentPhone.trim()
+      )
     ) {
       setError("Complete the player and parent details before creating the private payment link.");
       return;
@@ -5771,6 +5776,11 @@ export function AdminAvailability() {
           <div className="grid gap-5 border-b border-slate-200 bg-mist p-5 sm:p-6">
             <div className="rounded-xl border border-slate-200 bg-white p-5">
               <div className="grid gap-4 lg:grid-cols-3">
+                {customLinkMode === "payment_plus_choose_private_sessions" ? (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm font-bold leading-6 text-navy lg:col-span-3">
+                    For private session links, you can leave player and parent details blank. The parent will complete them, sign the waiver, and choose card or Zelle from the private link.
+                  </div>
+                ) : null}
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                   Player Name
                   <input className={inputClass} value={customLinkPlayerName} onChange={(event) => setCustomLinkPlayerName(event.target.value)} />
@@ -6033,7 +6043,20 @@ export function AdminAvailability() {
                           <p className="mt-1 text-sm font-bold text-slate-600">{session.session_focus || "Private Session"}</p>
                           <p className="mt-1 text-sm text-slate-600">{session.location || business.location}</p>
                           {session.status === "booked" ? (
-                            <p className="mt-2 text-sm font-black text-electric">Booked: {session.player_name || "Player not recorded"}</p>
+                            <div className="mt-2 grid gap-1 text-sm text-slate-600">
+                              <p className="font-black text-electric">Booked: {session.player_name || "Player not recorded"}</p>
+                              <p>
+                                Payment: {(session.payment_method || "card").toUpperCase()} / {(session.payment_status || "not_started").replaceAll("_", " ").toUpperCase()}
+                              </p>
+                              <p>Waiver: {session.waiver_signed ? "Signed" : "Missing"}</p>
+                              {session.signed_at ? <p>Signed: {formatWaiverTimestamp(session.signed_at)}</p> : null}
+                              {session.typed_signature ? <p>Signature: {session.typed_signature}</p> : null}
+                              {session.media_consent ? <p>Media consent: {session.media_consent}</p> : null}
+                              {session.emergency_name || session.emergency_phone ? (
+                                <p>Emergency: {[session.emergency_name, session.emergency_phone].filter(Boolean).join(" - ")}</p>
+                              ) : null}
+                              {session.medical_notes ? <p>Medical notes: {session.medical_notes}</p> : null}
+                            </div>
                           ) : null}
                           {session.notes ? <p className="mt-2 text-sm text-slate-500">Notes: {session.notes}</p> : null}
                         </div>

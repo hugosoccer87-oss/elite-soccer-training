@@ -689,23 +689,37 @@ function customPaymentLinkAdminEmail(link: CustomPaymentLinkRow): EmailMessage {
 function privateSessionCustomerEmail(session: PrivateSessionAvailabilityRow): EmailMessage {
   const sessionDate = formatSessionDate(session.start_datetime, session.timezone);
   const sessionTime = `${formatSessionTime(session.start_datetime, session.timezone)} - ${formatSessionTime(session.end_datetime, session.timezone)}`;
+  const isZellePending = session.payment_method === "zelle" && session.payment_status === "zelle_pending";
+  const paymentStatus = isZellePending ? "Zelle pending manual confirmation" : "Payment confirmed";
+  const amountLabel = isZellePending ? "Amount Due" : "Amount Paid";
   const rows: Array<[string, string]> = [
     ["Player", session.player_name || "Not recorded"],
     ["Session Type", "Private Session"],
     ["Session Focus", session.session_focus || "Private Session"],
     ["Date / Time", `${sessionDate} at ${sessionTime}`],
     ["Location", session.location || business.location],
-    ["Payment Status", "Payment confirmed"],
-    ["Amount Paid", formatCurrencyFromCents(session.amount_paid || 0)]
+    ["Payment Method", session.payment_method === "zelle" ? "Zelle" : "Card"],
+    ["Payment Status", paymentStatus],
+    [amountLabel, formatCurrencyFromCents(session.amount_paid || 0)],
+    ["Waiver", session.waiver_signed ? "Signed and recorded" : "Not recorded"]
   ];
   const text = [
-    "Elite Soccer Training CV private session confirmed",
+    isZellePending
+      ? "Elite Soccer Training CV private session saved - Zelle payment pending"
+      : "Elite Soccer Training CV private session confirmed",
     "",
     `Hi ${session.parent_name || "Parent"},`,
     "",
-    `Your private session for ${session.player_name || "your player"} is confirmed.`,
+    isZellePending
+      ? `Your private session time for ${session.player_name || "your player"} has been saved. Please complete Zelle payment so EST CV can manually confirm payment.`
+      : `Your private session for ${session.player_name || "your player"} is confirmed.`,
     "",
     ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    ...(isZellePending
+      ? ["Zelle: 3236848024", `Memo: ${session.player_name || "Player"} - Private Session`, ""]
+      : []),
+    "Your waiver has been signed and recorded for this session.",
     "",
     "Please arrive a few minutes early and bring plenty of water.",
     "",
@@ -716,16 +730,32 @@ function privateSessionCustomerEmail(session: PrivateSessionAvailabilityRow): Em
     from: process.env.EMAIL_FROM as string,
     to: session.parent_email || bookingNotificationEmail,
     replyTo: business.email,
-    subject: "EST CV Private Session Confirmation",
+    subject: isZellePending ? "EST CV Private Session Zelle Instructions" : "EST CV Private Session Confirmation",
     text,
     html: brandedEmailShell({
-      title: "Private Session Confirmed",
-      intro: "Your EST CV private session is confirmed.",
+      title: isZellePending ? "Private Session Saved" : "Private Session Confirmed",
+      intro: isZellePending
+        ? "Your EST CV private session time was saved. Zelle payment is pending manual confirmation."
+        : "Your EST CV private session is confirmed.",
       body: `
-        <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(session.parent_name || "Parent")}, your private session for <strong style="color:#06152b">${escapeHtml(session.player_name || "your player")}</strong> is confirmed.</p>
+        <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(session.parent_name || "Parent")}, ${
+          isZellePending
+            ? `your private session time for <strong style="color:#06152b">${escapeHtml(session.player_name || "your player")}</strong> has been saved. Zelle payment is pending manual confirmation.`
+            : `your private session for <strong style="color:#06152b">${escapeHtml(session.player_name || "your player")}</strong> is confirmed.`
+        }</p>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
           ${detailsRows(rows)}
         </table>
+        ${
+          isZellePending
+            ? `<div style="margin-top:22px;border-left:4px solid #1783ff;background:#f5f8fc;padding:16px;color:#334155;line-height:1.6">
+          <strong style="color:#06152b">Zelle Instructions</strong><br />
+          Send payment to: 3236848024<br />
+          Memo: ${escapeHtml(session.player_name || "Player")} - Private Session
+        </div>`
+            : ""
+        }
+        <p style="margin:18px 0 0;color:#334155;line-height:1.7">Your waiver has been signed and recorded for this session.</p>
         <div style="margin-top:22px;border-left:4px solid #1783ff;background:#f5f8fc;padding:16px;color:#334155;line-height:1.6">
           <strong style="color:#06152b">Contact</strong><br />
           Email: ${escapeHtml(business.email)}<br />
@@ -739,6 +769,7 @@ function privateSessionCustomerEmail(session: PrivateSessionAvailabilityRow): Em
 function privateSessionAdminEmail(session: PrivateSessionAvailabilityRow): EmailMessage {
   const sessionDate = formatSessionDate(session.start_datetime, session.timezone);
   const sessionTime = `${formatSessionTime(session.start_datetime, session.timezone)} - ${formatSessionTime(session.end_datetime, session.timezone)}`;
+  const isZellePending = session.payment_method === "zelle" && session.payment_status === "zelle_pending";
   const rows: Array<[string, string]> = [
     ["Private Session ID", session.id],
     ["Player", session.player_name || "Not recorded"],
@@ -749,8 +780,16 @@ function privateSessionAdminEmail(session: PrivateSessionAvailabilityRow): Email
     ["Session Focus", session.session_focus || "Private Session"],
     ["Date / Time", `${sessionDate} at ${sessionTime}`],
     ["Location", session.location || business.location],
-    ["Payment Status", "Paid"],
-    ["Amount Paid", formatCurrencyFromCents(session.amount_paid || 0)],
+    ["Payment Method", session.payment_method === "zelle" ? "Zelle" : "Card"],
+    ["Payment Status", isZellePending ? "Zelle Pending" : "Paid"],
+    [isZellePending ? "Amount Due" : "Amount Paid", formatCurrencyFromCents(session.amount_paid || 0)],
+    ["Waiver Signed", session.waiver_signed ? "Yes" : "No"],
+    ["Typed Signature", session.typed_signature || "Not recorded"],
+    ["Waiver Signed At", session.signed_at || "Not recorded"],
+    ["Media Consent", session.media_consent || "Not recorded"],
+    ["Emergency Contact", [session.emergency_name, session.emergency_phone].filter(Boolean).join(" - ") || "Not recorded"],
+    ["Medical Notes", session.medical_notes || "Not recorded"],
+    ["IP Address", session.ip_address || "Not recorded"],
     ["Stripe Checkout Session", session.stripe_checkout_session_id || "Not recorded"],
     ["Stripe Payment Intent", session.stripe_payment_intent_id || "Not recorded"],
     ["Custom Payment Link", session.custom_payment_link_id || "Not recorded"],
@@ -761,11 +800,15 @@ function privateSessionAdminEmail(session: PrivateSessionAvailabilityRow): Email
     from: process.env.EMAIL_FROM as string,
     to: bookingNotificationEmail,
     replyTo: session.parent_email || business.email,
-    subject: `New EST CV Private Session: ${session.player_name || "Player"}`,
+    subject: isZellePending
+      ? `New EST CV Private Session - Zelle Pending: ${session.player_name || "Player"}`
+      : `New EST CV Private Session: ${session.player_name || "Player"}`,
     text: rows.map(([label, value]) => `${label}: ${value}`).join("\n"),
     html: brandedEmailShell({
       title: "New Private Session Booking",
-      intro: "A parent paid for a private EST CV session.",
+      intro: isZellePending
+        ? "A parent submitted a private EST CV session with Zelle payment pending."
+        : "A parent paid for a private EST CV session.",
       body: `
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
           ${detailsRows(rows)}

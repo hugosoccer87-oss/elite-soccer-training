@@ -84,14 +84,14 @@ export async function POST(request: Request) {
     ? Array.from(new Set(payload.proposedSessionIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))))
     : [];
   const amountCents = Math.max(0, Math.round(Number(payload?.amount) * 100 || 0));
+  const parentCompletesPrivateDetails = payload?.linkMode === "payment_plus_choose_private_sessions";
 
   if (
-    !payload?.playerName?.trim() ||
-    !payload.playerAge?.trim() ||
-    !payload.parentName?.trim() ||
-    !payload.parentEmail?.trim() ||
-    !isValidEmail(payload.parentEmail) ||
-    !payload.parentPhone?.trim() ||
+    (!parentCompletesPrivateDetails && !payload?.playerName?.trim()) ||
+    (!parentCompletesPrivateDetails && !payload?.playerAge?.trim()) ||
+    (!parentCompletesPrivateDetails && !payload?.parentName?.trim()) ||
+    (!parentCompletesPrivateDetails && (!payload?.parentEmail?.trim() || !isValidEmail(payload.parentEmail))) ||
+    (!parentCompletesPrivateDetails && !payload?.parentPhone?.trim()) ||
     !payload.trainingGroup ||
     !isTrainingGroupId(payload.trainingGroup) ||
     !payload.planType ||
@@ -107,11 +107,11 @@ export async function POST(request: Request) {
     const token = randomBytes(24).toString("hex");
     const link = await createCustomPaymentLink({
       token,
-      playerName: payload.playerName,
-      playerAge: payload.playerAge,
-      parentName: payload.parentName,
-      parentEmail: payload.parentEmail,
-      parentPhone: payload.parentPhone,
+      playerName: parentCompletesPrivateDetails ? undefined : payload.playerName,
+      playerAge: parentCompletesPrivateDetails ? undefined : payload.playerAge,
+      parentName: parentCompletesPrivateDetails ? undefined : payload.parentName,
+      parentEmail: parentCompletesPrivateDetails ? undefined : payload.parentEmail,
+      parentPhone: parentCompletesPrivateDetails ? undefined : payload.parentPhone,
       trainingGroup: payload.trainingGroup,
       planType: payload.planType,
       linkMode: payload.linkMode,
