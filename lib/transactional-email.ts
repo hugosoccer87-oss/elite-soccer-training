@@ -12,12 +12,22 @@ import {
   getSessionTotalCents,
   sessionPriceLabel
 } from "@/lib/pricing";
-import type {
+import {
+  customPaymentLinkModeLabel,
+  customPaymentLinkPlanLabel,
+  type
   BookingRow,
+  type
   CreditAdjustmentRow,
+  type
+  CustomPaymentLinkRow,
+  type
   DirectPaymentRow,
+  type
   PassPurchaseRow,
+  type
   ScheduleApprovalRow,
+  type
   TrainingSessionRow
 } from "@/lib/supabase-db";
 import { buildSignedWaiverPdf, signedWaiverPdfFileName } from "@/lib/waiver-pdf";
@@ -529,6 +539,142 @@ function launchPassAdminEmail(pass: PassPurchaseRow): EmailMessage {
     html: brandedEmailShell({
       title: "New Training Package Purchase",
       intro: "A parent purchased an Elite Soccer Training CV Training Package.",
+      body: `
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+          ${detailsRows(rows)}
+        </table>
+      `
+    })
+  };
+}
+
+function customPaymentLinkCustomerEmail(link: CustomPaymentLinkRow): EmailMessage {
+  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const modeLabel = customPaymentLinkModeLabel(link.link_mode);
+  const rows: Array<[string, string]> = [
+    ["Player", link.player_name],
+    ["Plan / Session Type", planLabel],
+    ["Amount Paid", formatCurrencyFromCents(link.amount_cents)],
+    ["Payment Status", "Payment confirmed"],
+    ["Training Credits", link.total_credits > 0 ? `${link.total_credits} purchased / ${link.credits_remaining} remaining` : "Not applicable"],
+    ["Scheduling", modeLabel],
+    ["Notes", link.notes_to_parent || "None"]
+  ];
+  const text = [
+    "Elite Soccer Training CV payment confirmed",
+    "",
+    `Hi ${link.parent_name},`,
+    "",
+    `Your payment for ${planLabel} has been received.`,
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    link.link_mode === "payment_only"
+      ? "Coach Hugo will follow up if any scheduling details are needed."
+      : "If you did not select every session yet, your remaining training credits can be used for future available EST CV sessions.",
+    "",
+    `Questions? Email ${business.email} or call ${business.phone}.`
+  ].join("\n");
+  const html = brandedEmailShell({
+    title: "Payment Confirmed",
+    intro: "Your EST CV payment has been received.",
+    body: `
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(link.parent_name)}, your payment for <strong style="color:#06152b">${escapeHtml(planLabel)}</strong> has been received.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
+        ${detailsRows(rows)}
+      </table>
+      <div style="margin-top:22px;border-left:4px solid #1783ff;background:#eef6ff;padding:16px;color:#334155;line-height:1.6">
+        ${escapeHtml(link.link_mode === "payment_only"
+          ? "Coach Hugo will follow up if any scheduling details are needed."
+          : "If you did not select every session yet, your remaining training credits can be used for future available EST CV sessions.")}
+      </div>
+    `
+  });
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: link.parent_email,
+    replyTo: business.email,
+    subject: "EST CV Payment Confirmation",
+    text,
+    html
+  };
+}
+
+function customPaymentLinkInviteEmail(link: CustomPaymentLinkRow, paymentUrl: string): EmailMessage {
+  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const rows: Array<[string, string]> = [
+    ["Player", link.player_name],
+    ["Plan / Session Type", planLabel],
+    ["Amount Due", formatCurrencyFromCents(link.amount_cents)],
+    ["Scheduling", customPaymentLinkModeLabel(link.link_mode)],
+    ["Notes from Coach Hugo", link.notes_to_parent || "None"]
+  ];
+  const text = [
+    "Elite Soccer Training CV private payment link",
+    "",
+    `Hi ${link.parent_name},`,
+    "",
+    `Coach Hugo sent a private EST CV payment link for ${link.player_name}.`,
+    ...rows.map(([label, value]) => `${label}: ${value}`),
+    "",
+    `Open link: ${paymentUrl}`,
+    "",
+    `Questions? Email ${business.email} or call ${business.phone}.`
+  ].join("\n");
+  const html = brandedEmailShell({
+    title: "EST CV Private Payment Link",
+    intro: "Coach Hugo sent a private payment link for your player.",
+    body: `
+      <p style="margin:0 0 18px;color:#334155;line-height:1.7">Hi ${escapeHtml(link.parent_name)}, Coach Hugo sent a private EST CV payment link for <strong style="color:#06152b">${escapeHtml(link.player_name)}</strong>.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:18px 0">
+        ${detailsRows(rows)}
+      </table>
+      <p style="margin:22px 0 0">
+        <a href="${escapeHtml(paymentUrl)}" style="display:inline-block;background:#1783ff;color:#ffffff;text-decoration:none;font-weight:900;padding:14px 18px;border-radius:8px">Open private link</a>
+      </p>
+    `
+  });
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: link.parent_email,
+    replyTo: business.email,
+    subject: "EST CV Private Payment Link",
+    text,
+    html
+  };
+}
+
+function customPaymentLinkAdminEmail(link: CustomPaymentLinkRow): EmailMessage {
+  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const rows: Array<[string, string]> = [
+    ["Custom Payment Link ID", link.id],
+    ["Parent/Guardian", link.parent_name],
+    ["Parent Email", link.parent_email],
+    ["Parent Phone", link.parent_phone],
+    ["Player", link.player_name],
+    ["Player Age", link.player_age],
+    ["Plan / Session Type", planLabel],
+    ["Link Mode", customPaymentLinkModeLabel(link.link_mode)],
+    ["Amount Paid", formatCurrencyFromCents(link.amount_cents)],
+    ["Status", link.status],
+    ["Training Credits", link.total_credits > 0 ? `${link.total_credits} total / ${link.credits_remaining} remaining` : "Not applicable"],
+    ["Selected Sessions", link.selected_session_ids.length > 0 ? link.selected_session_ids.join(", ") : "None"],
+    ["Stripe Checkout Session", link.stripe_checkout_session_id || "Not recorded"],
+    ["Stripe Payment Intent", link.stripe_payment_intent_id || "Not recorded"],
+    ["Notes to Parent", link.notes_to_parent || "None"],
+    ["Internal Note", link.internal_note || "None"]
+  ];
+
+  return {
+    from: process.env.EMAIL_FROM as string,
+    to: bookingNotificationEmail,
+    replyTo: link.parent_email,
+    subject: `New EST CV Custom Payment: ${link.player_name} - ${planLabel}`,
+    text: rows.map(([label, value]) => `${label}: ${value}`).join("\n"),
+    html: brandedEmailShell({
+      title: "Custom Payment Link Paid",
+      intro: "A parent completed payment through a private EST CV link.",
       body: `
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
           ${detailsRows(rows)}
@@ -1287,6 +1433,210 @@ export async function sendLaunchPassTransactionalEmails(pass: PassPurchaseRow): 
       customerSent: false,
       adminSent: false,
       message: error instanceof Error ? error.message : "Training Package email failed to send."
+    };
+  }
+}
+
+export async function sendCustomPaymentLinkTransactionalEmails(link: CustomPaymentLinkRow): Promise<EmailResult> {
+  const customer = customPaymentLinkCustomerEmail(link);
+  const admin = customPaymentLinkAdminEmail(link);
+  const baseAttempt = {
+    bookingId: link.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Custom payment link was paid, but emails were not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      customPaymentLinkId: link.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message
+    };
+  }
+
+  console.info("[EST Email] Preparing customer confirmation email", {
+    customPaymentLinkId: link.id,
+    type: "custom_payment_link"
+  });
+  console.info("[EST Email] Customer recipient:", {
+    customPaymentLinkId: link.id,
+    to: customer.to
+  });
+  console.info("[EST Email] Preparing admin notification email", {
+    customPaymentLinkId: link.id,
+    type: "custom_payment_link"
+  });
+  console.info("[EST Email] Admin recipient:", {
+    customPaymentLinkId: link.id,
+    to: admin.to
+  });
+
+  try {
+    const transport = await createTransport();
+    const [customerResult, adminResult] = await Promise.allSettled([
+      transport.sendMail(customer),
+      transport.sendMail(admin)
+    ]);
+    const customerSent = customerResult.status === "fulfilled";
+    const adminSent = adminResult.status === "fulfilled";
+
+    if (customerSent) {
+      console.info("[EST Email] Customer email sent successfully", {
+        to: customer.to,
+        customPaymentLinkId: link.id,
+        messageId: customerResult.value.messageId
+      });
+    } else {
+      console.error("[EST Email] Customer email failed:", {
+        to: customer.to,
+        customPaymentLinkId: link.id,
+        error: customerResult.reason instanceof Error ? customerResult.reason.message : String(customerResult.reason)
+      });
+    }
+
+    if (adminSent) {
+      console.info("[EST Email] Admin email sent successfully", {
+        to: admin.to,
+        customPaymentLinkId: link.id,
+        messageId: adminResult.value.messageId
+      });
+    } else {
+      console.error("[EST Email] Admin email failed:", {
+        to: admin.to,
+        customPaymentLinkId: link.id,
+        error: adminResult.reason instanceof Error ? adminResult.reason.message : String(adminResult.reason)
+      });
+    }
+
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: customerSent ? "sent" : "failed",
+      adminStatus: adminSent ? "sent" : "failed",
+      message: customerSent && adminSent ? undefined : "One or more custom payment link emails failed to send."
+    });
+
+    return {
+      sent: customerSent && adminSent,
+      customerSent,
+      adminSent,
+      message: customerSent && adminSent ? undefined : "One or more custom payment link emails failed to send."
+    };
+  } catch (error) {
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "failed",
+      message: error instanceof Error ? error.message : "Custom payment link email failed to send."
+    });
+
+    console.error("[EST Email] Customer email failed:", {
+      to: customer.to,
+      customPaymentLinkId: link.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    console.error("[EST Email] Admin email failed:", {
+      to: admin.to,
+      customPaymentLinkId: link.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      sent: false,
+      customerSent: false,
+      adminSent: false,
+      message: error instanceof Error ? error.message : "Custom payment link email failed to send."
+    };
+  }
+}
+
+export async function sendCustomPaymentLinkInviteEmail(
+  link: CustomPaymentLinkRow,
+  paymentUrl: string
+): Promise<CustomerOnlyEmailResult> {
+  const customer = customPaymentLinkInviteEmail(link, paymentUrl);
+  const baseAttempt = {
+    bookingId: link.id,
+    smtpConfigured: isSmtpConfigured(),
+    emailFromConfigured: Boolean(process.env.EMAIL_FROM),
+    adminNotificationRecipient: bookingNotificationEmail,
+    customerRecipient: customer.to
+  };
+
+  logSmtpEnvironment();
+
+  if (!isSmtpConfigured()) {
+    const message = "Custom payment link was created, but invite email was not sent because email configuration is missing.";
+
+    console.warn(`[EST Email] ${message}`, {
+      customPaymentLinkId: link.id
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
+    };
+  }
+
+  try {
+    const transport = await createTransport();
+    const result = await transport.sendMail(customer);
+
+    console.info("[EST Email] Customer email sent successfully", {
+      to: customer.to,
+      customPaymentLinkId: link.id,
+      messageId: result.messageId,
+      type: "custom_payment_link_invite"
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "sent",
+      adminStatus: "not_attempted"
+    });
+
+    return {
+      sent: true
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Custom payment link invite failed to send.";
+
+    console.error("[EST Email] Customer email failed:", {
+      to: customer.to,
+      customPaymentLinkId: link.id,
+      error: message
+    });
+    setLastEmailAttempt({
+      ...baseAttempt,
+      customerStatus: "failed",
+      adminStatus: "not_attempted",
+      message
+    });
+
+    return {
+      sent: false,
+      message
     };
   }
 }

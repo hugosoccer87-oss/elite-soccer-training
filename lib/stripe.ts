@@ -8,7 +8,12 @@ import {
   sessionLineItemName,
   sessionUnitAmountCents
 } from "@/lib/pricing";
-import type { DirectPaymentRow, PassPurchaseRow } from "@/lib/supabase-db";
+import {
+  customPaymentLinkPlanLabel,
+  type CustomPaymentLinkRow,
+  type DirectPaymentRow,
+  type PassPurchaseRow
+} from "@/lib/supabase-db";
 
 const stripeApiBase = "https://api.stripe.com/v1";
 const defaultSiteUrl = "https://www.elitesoccertrainingcv.com";
@@ -375,6 +380,101 @@ export async function createStripeDirectPaymentCheckoutSession(record: DirectPay
 
 export function directPaymentIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
   return metadata?.purchase_type === "direct_payment" && metadata.directPaymentId ? metadata.directPaymentId : null;
+}
+
+export async function createStripeCustomPaymentLinkCheckoutSession(
+  link: CustomPaymentLinkRow,
+  metadata: {
+    passPurchaseId?: string;
+    bookingId?: string;
+    selectedSessionCount?: number;
+  } = {}
+) {
+  const secretKey = getStripeSecretKey();
+  const stripe = getStripeEnvironment();
+
+  if (!secretKey) {
+    throw new Error(`Stripe is not configured. Add ${stripe.secretKeyName} in Vercel.`);
+  }
+
+  if (!getStripePublishableKey()) {
+    throw new Error(`Stripe is not configured. Add ${stripe.publishableKeyName} in Vercel.`);
+  }
+
+  const siteUrl = getSiteUrl();
+  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const params = new URLSearchParams({
+    mode: "payment",
+    success_url: `${siteUrl}/custom-payment/${link.token}/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${siteUrl}/custom-payment/${link.token}`,
+    allow_promotion_codes: "true",
+    client_reference_id: link.id,
+    customer_email: link.parent_email,
+    "line_items[0][price_data][currency]": sessionCurrency,
+    "line_items[0][price_data][product_data][name]": `Elite Soccer Training CV - ${planLabel}`,
+    "line_items[0][price_data][product_data][description]":
+      link.plan_type === "four_session_training_package"
+        ? "4 training credits for EST CV small group training."
+        : link.plan_type === "six_session_training_package"
+          ? "6 training credits for EST CV small group training."
+          : link.notes_to_parent?.slice(0, 450) || planLabel,
+    "line_items[0][price_data][unit_amount]": String(Math.max(0, Number(link.amount_cents) || 0)),
+    "line_items[0][quantity]": "1",
+    "payment_intent_data[metadata][purchase_type]": "custom_payment_link",
+    "payment_intent_data[metadata][customPaymentLinkId]": link.id,
+    "payment_intent_data[metadata][customPaymentLinkToken]": link.token,
+    "payment_intent_data[metadata][plan_type]": link.plan_type,
+    "payment_intent_data[metadata][parent_email]": link.parent_email,
+    "payment_intent_data[metadata][player_name]": link.player_name,
+    "metadata[purchase_type]": "custom_payment_link",
+    "metadata[customPaymentLinkId]": link.id,
+    "metadata[customPaymentLinkToken]": link.token,
+    "metadata[plan_type]": link.plan_type,
+    "metadata[parent_email]": link.parent_email,
+    "metadata[player_name]": link.player_name
+  });
+
+  if (metadata.passPurchaseId) {
+    params.set("payment_intent_data[metadata][passPurchaseId]", metadata.passPurchaseId);
+    params.set("metadata[passPurchaseId]", metadata.passPurchaseId);
+  }
+
+  if (metadata.bookingId) {
+    params.set("payment_intent_data[metadata][bookingId]", metadata.bookingId);
+    params.set("metadata[bookingId]", metadata.bookingId);
+  }
+
+  if (typeof metadata.selectedSessionCount === "number") {
+    params.set("payment_intent_data[metadata][selected_session_count]", String(metadata.selectedSessionCount));
+    params.set("metadata[selected_session_count]", String(metadata.selectedSessionCount));
+  }
+
+  const response = await fetch(`${stripeApiBase}/checkout/sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: params.toString()
+  });
+
+  const result = (await response.json()) as StripeCheckoutSession & { error?: { message?: string } };
+
+  if (!response.ok) {
+    throw new Error(result.error?.message ?? "Stripe Checkout session could not be created.");
+  }
+
+  if (!result.url) {
+    throw new Error("Stripe did not return a Checkout URL.");
+  }
+
+  return result;
+}
+
+export function customPaymentLinkIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
+  return metadata?.purchase_type === "custom_payment_link" && metadata.customPaymentLinkId
+    ? metadata.customPaymentLinkId
+    : null;
 }
 
 export async function retrieveStripeCheckoutSession(sessionId: string) {

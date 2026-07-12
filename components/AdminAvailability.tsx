@@ -9,6 +9,9 @@ import type {
   AdminBookingRecord,
   AdminPassPurchase,
   AdminTrainingSession,
+  AdminCustomPaymentLink,
+  CustomPaymentLinkMode,
+  CustomPaymentLinkPlanType,
   DirectPaymentRow,
   DirectPaymentStatus,
   EmailSubscriberRow,
@@ -140,6 +143,12 @@ type PrivateSessionRequestsResponse = {
   error?: string;
 };
 
+type CustomPaymentLinksResponse = {
+  status?: string;
+  links?: AdminCustomPaymentLink[];
+  error?: string;
+};
+
 type ActiveWaiverRecord = {
   booking: AdminBookingRecord;
   session?: AdminTrainingSession;
@@ -175,6 +184,7 @@ type AdminSection =
   | "sessions"
   | "bookings"
   | "passes"
+  | "custom-payment-links"
   | "private-requests"
   | "direct-payments"
   | "email-list";
@@ -279,6 +289,7 @@ const adminSections: Array<{ id: AdminSection; label: string; note: string }> = 
   { id: "sessions", label: "Sessions", note: "Create and manage openings" },
   { id: "bookings", label: "Bookings", note: "Players and waivers" },
   { id: "passes", label: "Training Packages / Credits", note: "Credit tracking" },
+  { id: "custom-payment-links", label: "Send Payment Link", note: "Private checkout links" },
   { id: "private-requests", label: "Private Requests", note: "1-on-1 inquiries" },
   { id: "direct-payments", label: "Direct Payments", note: "Pay + waiver records" },
   { id: "email-list", label: "Email List", note: "Brevo CSV export" }
@@ -344,6 +355,20 @@ const scheduleApprovalPaymentMethods: Array<{ value: ScheduleApprovalPaymentMeth
   { value: "venmo", label: "Venmo" },
   { value: "stripe_manual", label: "Stripe manual" },
   { value: "other", label: "Other" }
+];
+
+const customPaymentLinkPlanOptions: Array<{ value: CustomPaymentLinkPlanType; label: string; defaultAmount: string }> = [
+  { value: "single_session", label: "Single Session", defaultAmount: "55" },
+  { value: "four_session_training_package", label: "4-Session Training Package", defaultAmount: "200" },
+  { value: "six_session_training_package", label: "6-Session Training Package", defaultAmount: "285" },
+  { value: "private_1_on_1", label: "Private 1-on-1 Session", defaultAmount: "55" },
+  { value: "custom_amount", label: "Custom Amount", defaultAmount: "0" }
+];
+
+const customPaymentLinkModeOptions: Array<{ value: CustomPaymentLinkMode; label: string }> = [
+  { value: "payment_only", label: "Payment only" },
+  { value: "payment_plus_choose_sessions", label: "Payment + choose sessions" },
+  { value: "payment_plus_confirm_proposed_schedule", label: "Payment + confirm proposed schedule" }
 ];
 const calendarHourStart = 5;
 const calendarHourEnd = 21;
@@ -1157,6 +1182,22 @@ async function readAdminPasses() {
   return result.passes ?? [];
 }
 
+async function readAdminCustomPaymentLinks() {
+  const response = await fetch(`/api/admin/custom-payment-links?fresh=${Date.now()}`, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache"
+    }
+  });
+  const result = (await response.json().catch(() => ({}))) as CustomPaymentLinksResponse;
+
+  if (!response.ok) {
+    throw new Error(result.error || "Custom payment links could not be loaded.");
+  }
+
+  return result.links ?? [];
+}
+
 async function readAdminDirectPayments() {
   const response = await fetch(`/api/admin/direct-payments?fresh=${Date.now()}`, {
     cache: "no-store",
@@ -1209,6 +1250,7 @@ export function AdminAvailability() {
   const [sessions, setSessions] = useState<AdminTrainingSession[]>([]);
   const [bookings, setBookings] = useState<AdminBookingRecord[]>([]);
   const [passes, setPasses] = useState<AdminPassPurchase[]>([]);
+  const [customPaymentLinks, setCustomPaymentLinks] = useState<AdminCustomPaymentLink[]>([]);
   const [directPayments, setDirectPayments] = useState<DirectPaymentRow[]>([]);
   const [emailSubscribers, setEmailSubscribers] = useState<EmailSubscriberRow[]>([]);
   const [privateSessionRequests, setPrivateSessionRequests] = useState<PrivateSessionRequestRow[]>([]);
@@ -1273,6 +1315,20 @@ export function AdminAvailability() {
   const [scheduleApprovalPassId, setScheduleApprovalPassId] = useState("");
   const [scheduleApprovalOverrideCount, setScheduleApprovalOverrideCount] = useState(false);
   const [scheduleApprovalOverrideSessionCount, setScheduleApprovalOverrideSessionCount] = useState("6");
+  const [customLinkPlayerName, setCustomLinkPlayerName] = useState("");
+  const [customLinkPlayerAge, setCustomLinkPlayerAge] = useState("");
+  const [customLinkParentName, setCustomLinkParentName] = useState("");
+  const [customLinkParentEmail, setCustomLinkParentEmail] = useState("");
+  const [customLinkParentPhone, setCustomLinkParentPhone] = useState("");
+  const [customLinkGroup, setCustomLinkGroup] = useState<TrainingGroupId>("elite-performance");
+  const [customLinkPlanType, setCustomLinkPlanType] = useState<CustomPaymentLinkPlanType>("single_session");
+  const [customLinkMode, setCustomLinkMode] = useState<CustomPaymentLinkMode>("payment_plus_choose_sessions");
+  const [customLinkAmount, setCustomLinkAmount] = useState("55");
+  const [customLinkNotesToParent, setCustomLinkNotesToParent] = useState("");
+  const [customLinkInternalNote, setCustomLinkInternalNote] = useState("");
+  const [customLinkSuggestedAvailability, setCustomLinkSuggestedAvailability] = useState("");
+  const [customLinkProposedSessionIds, setCustomLinkProposedSessionIds] = useState<string[]>([]);
+  const [customLinkCreatedUrl, setCustomLinkCreatedUrl] = useState("");
   const [privateRequestScheduleInputs, setPrivateRequestScheduleInputs] = useState<
     Record<string, { date: string; startTime: string; endTime: string; location: string }>
   >({});
@@ -1303,6 +1359,7 @@ export function AdminAvailability() {
         nextSessions,
         nextBookings,
         nextPasses,
+        nextCustomPaymentLinks,
         nextDirectPayments,
         nextEmailSubscribers,
         nextPrivateSessionRequests,
@@ -1312,6 +1369,7 @@ export function AdminAvailability() {
           readAdminSessions(),
           readAdminBookings(),
           readAdminPasses(),
+          readAdminCustomPaymentLinks(),
           readAdminDirectPayments(),
           readAdminEmailSubscribers(),
           readAdminPrivateSessionRequests(),
@@ -1321,6 +1379,7 @@ export function AdminAvailability() {
       setSessions(nextSessions);
       setBookings(nextBookings);
       setPasses(nextPasses);
+      setCustomPaymentLinks(nextCustomPaymentLinks);
       setDirectPayments(nextDirectPayments);
       setEmailSubscribers(nextEmailSubscribers);
       setPrivateSessionRequests(nextPrivateSessionRequests);
@@ -1864,6 +1923,39 @@ export function AdminAvailability() {
         .slice(0, 30),
     [scheduleApprovalGroup, sessions]
   );
+  const customPaymentLinkSessions = useMemo(
+    () =>
+      sessions
+        .filter(
+          (session) =>
+            session.training_group === customLinkGroup &&
+            session.status === "open" &&
+            session.remainingSpots > 0 &&
+            isFuture(session.start_datetime)
+        )
+        .slice(0, 40),
+    [customLinkGroup, sessions]
+  );
+
+  function setCustomPaymentPlan(planType: CustomPaymentLinkPlanType) {
+    setCustomLinkPlanType(planType);
+    const option = customPaymentLinkPlanOptions.find((item) => item.value === planType);
+
+    if (option && (customLinkAmount === "0" || customPaymentLinkPlanOptions.some((item) => item.defaultAmount === customLinkAmount))) {
+      setCustomLinkAmount(option.defaultAmount);
+    }
+
+    if (planType === "private_1_on_1" || planType === "custom_amount") {
+      setCustomLinkMode("payment_only");
+      setCustomLinkProposedSessionIds([]);
+    }
+  }
+
+  function toggleCustomLinkProposedSession(sessionId: string) {
+    setCustomLinkProposedSessionIds((current) =>
+      current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]
+    );
+  }
 
   async function addSession() {
     if (!newDate || !newTime) {
@@ -2568,6 +2660,136 @@ export function AdminAvailability() {
       setError(approvalError instanceof Error ? approvalError.message : "Schedule approval link could not be created.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function createCustomPaymentLink() {
+    if (
+      !customLinkPlayerName.trim() ||
+      !customLinkPlayerAge.trim() ||
+      !customLinkParentName.trim() ||
+      !customLinkParentEmail.trim() ||
+      !customLinkParentPhone.trim()
+    ) {
+      setError("Complete the player and parent details before creating the private payment link.");
+      return;
+    }
+
+    if (Number(customLinkAmount) <= 0) {
+      setError("Enter the amount to charge before creating the private payment link.");
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+    setCustomLinkCreatedUrl("");
+
+    try {
+      const response = await fetch("/api/admin/custom-payment-links", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          playerName: customLinkPlayerName,
+          playerAge: customLinkPlayerAge,
+          parentName: customLinkParentName,
+          parentEmail: customLinkParentEmail,
+          parentPhone: customLinkParentPhone,
+          trainingGroup: customLinkGroup,
+          planType: customLinkPlanType,
+          linkMode: customLinkMode,
+          amount: Number(customLinkAmount) || 0,
+          notesToParent: customLinkNotesToParent,
+          internalNote: customLinkInternalNote,
+          suggestedAvailability: customLinkSuggestedAvailability,
+          proposedSessionIds: customLinkMode === "payment_plus_confirm_proposed_schedule" ? customLinkProposedSessionIds : []
+        })
+      });
+      const result = (await response.json().catch(() => ({}))) as { error?: string; paymentUrl?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private payment link could not be created.");
+      }
+
+      setCustomLinkCreatedUrl(result.paymentUrl || "");
+      setCustomLinkPlayerName("");
+      setCustomLinkPlayerAge("");
+      setCustomLinkParentName("");
+      setCustomLinkParentEmail("");
+      setCustomLinkParentPhone("");
+      setCustomLinkPlanType("single_session");
+      setCustomLinkMode("payment_plus_choose_sessions");
+      setCustomLinkAmount("55");
+      setCustomLinkNotesToParent("");
+      setCustomLinkInternalNote("");
+      setCustomLinkSuggestedAvailability("");
+      setCustomLinkProposedSessionIds([]);
+      await refreshAdminData("Private payment link created. Copy it or resend it by email.");
+      setCustomLinkCreatedUrl(result.paymentUrl || "");
+    } catch (linkError) {
+      setError(linkError instanceof Error ? linkError.message : "Private payment link could not be created.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function updateCustomPaymentLinkAction(id: string, action: "mark_sent" | "cancel" | "resend") {
+    if (action === "cancel" && !window.confirm("Cancel this private payment link?")) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/custom-payment-links/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ action })
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        paymentUrl?: string;
+        emailSent?: boolean;
+        emailMessage?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Private payment link action failed.");
+      }
+
+      if (result.paymentUrl) {
+        setCustomLinkCreatedUrl(result.paymentUrl);
+      }
+
+      await refreshAdminData(
+        action === "cancel"
+          ? "Private payment link cancelled."
+          : action === "resend"
+            ? result.emailSent
+              ? "Private payment link emailed to the parent."
+              : `Private payment link saved, but email failed.${result.emailMessage ? ` ${result.emailMessage}` : ""}`
+            : "Private payment link marked as sent."
+      );
+    } catch (linkError) {
+      setError(linkError instanceof Error ? linkError.message : "Private payment link action failed.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function copyCustomPaymentLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice("Private payment link copied.");
+    } catch {
+      setCustomLinkCreatedUrl(url);
+      setNotice("Copy the visible private payment link.");
     }
   }
 
@@ -5180,6 +5402,293 @@ export function AdminAvailability() {
               </p>
             </div>
           )}
+        </section>
+      ) : null}
+
+      {activeSection === "custom-payment-links" ? (
+        <section className="panel overflow-hidden">
+          <div className="grid gap-4 border-b border-slate-200 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-start">
+            <div>
+              <p className="text-xs font-black uppercase text-electric">Send Payment Link</p>
+              <h3 className="mt-2 text-2xl font-black text-navy">Create a private checkout link.</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Send a parent a private link for payment only, payment plus session selection, or payment plus a proposed schedule.
+              </p>
+            </div>
+            <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm font-bold leading-6 text-navy">
+              Use Training Package and training credit language. Training credits do not expire.
+            </div>
+          </div>
+
+          <div className="grid gap-5 border-b border-slate-200 bg-mist p-5 sm:p-6">
+            <div className="rounded-xl border border-slate-200 bg-white p-5">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Player Name
+                  <input className={inputClass} value={customLinkPlayerName} onChange={(event) => setCustomLinkPlayerName(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Player Age
+                  <input className={inputClass} value={customLinkPlayerAge} onChange={(event) => setCustomLinkPlayerAge(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Parent Name
+                  <input className={inputClass} value={customLinkParentName} onChange={(event) => setCustomLinkParentName(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Parent Email
+                  <input className={inputClass} type="email" value={customLinkParentEmail} onChange={(event) => setCustomLinkParentEmail(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Parent Phone
+                  <input className={inputClass} value={customLinkParentPhone} onChange={(event) => setCustomLinkParentPhone(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Training Group
+                  <select
+                    className={inputClass}
+                    value={customLinkGroup}
+                    onChange={(event) => {
+                      setCustomLinkGroup(event.target.value as TrainingGroupId);
+                      setCustomLinkProposedSessionIds([]);
+                    }}
+                  >
+                    {trainingGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name} ({group.ages})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Plan / Session Type
+                  <select
+                    className={inputClass}
+                    value={customLinkPlanType}
+                    onChange={(event) => setCustomPaymentPlan(event.target.value as CustomPaymentLinkPlanType)}
+                  >
+                    {customPaymentLinkPlanOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Link Type
+                  <select
+                    className={inputClass}
+                    value={customLinkMode}
+                    disabled={customLinkPlanType === "private_1_on_1" || customLinkPlanType === "custom_amount"}
+                    onChange={(event) => {
+                      setCustomLinkMode(event.target.value as CustomPaymentLinkMode);
+                      setCustomLinkProposedSessionIds([]);
+                    }}
+                  >
+                    {customPaymentLinkModeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Amount to Charge
+                  <input className={inputClass} type="number" min={0} step="0.01" value={customLinkAmount} onChange={(event) => setCustomLinkAmount(event.target.value)} />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-3">
+                  Notes to Parent
+                  <textarea
+                    className={`${inputClass} min-h-20`}
+                    value={customLinkNotesToParent}
+                    onChange={(event) => setCustomLinkNotesToParent(event.target.value)}
+                    placeholder="Example: This link is for Tuesday 7:30-8:30 AM or any available small group session."
+                  />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
+                  Suggested Availability
+                  <textarea
+                    className={`${inputClass} min-h-20`}
+                    value={customLinkSuggestedAvailability}
+                    onChange={(event) => setCustomLinkSuggestedAvailability(event.target.value)}
+                    placeholder={"Tuesday 7:30-8:30 AM\nThursday 7:30-8:30 AM\nAny available small group session"}
+                  />
+                </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Internal Note
+                  <textarea
+                    className={`${inputClass} min-h-20`}
+                    value={customLinkInternalNote}
+                    onChange={(event) => setCustomLinkInternalNote(event.target.value)}
+                    placeholder="Only visible in admin"
+                  />
+                </label>
+              </div>
+
+              {customLinkMode === "payment_plus_confirm_proposed_schedule" ? (
+                <div className="mt-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase text-slate-500">Proposed sessions</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-600">
+                        Select the sessions this parent is allowed to confirm from the private link.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase text-electric">
+                      {customLinkProposedSessionIds.length} selected
+                    </span>
+                  </div>
+                  <div className="mt-3 grid max-h-[28rem] gap-3 overflow-y-auto rounded-lg border border-slate-200 bg-mist p-3">
+                    {customPaymentLinkSessions.length > 0 ? (
+                      customPaymentLinkSessions.map((session) => {
+                        const selected = customLinkProposedSessionIds.includes(session.id);
+
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            onClick={() => toggleCustomLinkProposedSession(session.id)}
+                            className={`rounded-lg border p-4 text-left transition ${
+                              selected
+                                ? "border-electric bg-blue-50 shadow-sm shadow-electric/10"
+                                : "border-slate-200 bg-white hover:border-electric/60"
+                            }`}
+                          >
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-sm font-black text-navy">{formatDateTime(session.start_datetime, session.timezone)}</p>
+                                <p className="mt-1 text-sm font-bold text-slate-600">{sessionFocusLabel(session)}</p>
+                                <p className="mt-1 text-xs font-bold text-slate-500">{session.location || business.location}</p>
+                              </div>
+                              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black uppercase text-navy">
+                                {session.remainingSpots} spots left
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-bold text-slate-600">
+                        No open future sessions are available for this training group.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {customLinkCreatedUrl ? (
+                <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="text-sm font-black text-emerald-900">Private payment link created</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <input className={inputClass} readOnly value={customLinkCreatedUrl} />
+                    <button type="button" onClick={() => void copyCustomPaymentLink(customLinkCreatedUrl)} className={primaryButtonClass}>
+                      Copy Link
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-semibold leading-6 text-slate-600">
+                  The parent pays by card through Stripe. If sessions are selected, the system books only the paid number of sessions.
+                </p>
+                <button type="button" disabled={isSaving} onClick={() => void createCustomPaymentLink()} className={primaryButtonClass}>
+                  Create Payment Link
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 bg-mist p-5 sm:p-6">
+            {customPaymentLinks.length > 0 ? (
+              customPaymentLinks.map((link) => {
+                const planLabel = customPaymentLinkPlanOptions.find((option) => option.value === link.plan_type)?.label ?? link.plan_type;
+                const modeLabel = customPaymentLinkModeOptions.find((option) => option.value === link.link_mode)?.label ?? link.link_mode;
+                const linkUrl = `https://www.elitesoccertrainingcv.com/custom-payment/${link.token}`;
+
+                return (
+                  <article key={link.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                      <div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-black uppercase text-electric">
+                            {planLabel}
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-mist px-3 py-1 text-[11px] font-black uppercase text-slate-600">
+                            {link.status.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        <h4 className="mt-3 text-xl font-black text-navy">{link.player_name}</h4>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Parent: {link.parent_name} - {link.parent_email} - {link.parent_phone}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {modeLabel} - {formatMoney(link.amount_cents)}
+                        </p>
+                        {link.notes_to_parent ? <p className="mt-2 text-sm text-slate-600">Parent note: {link.notes_to_parent}</p> : null}
+                        {link.internal_note ? <p className="mt-1 text-sm text-slate-500">Internal: {link.internal_note}</p> : null}
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm">
+                        <p className="font-black text-navy">
+                          Credits: {link.credits_used}/{link.total_credits || "0"} used
+                        </p>
+                        <p className="mt-1 text-slate-600">Remaining: {link.credits_remaining}</p>
+                        <p className="mt-1 text-slate-600">Selected sessions: {link.selected_session_ids.length}</p>
+                        <p className="mt-1 text-slate-600">Created: {formatWaiverTimestamp(link.created_at)}</p>
+                      </div>
+                    </div>
+                    {link.proposedSessions.length > 0 || link.selectedSessions.length > 0 ? (
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        {link.proposedSessions.length > 0 ? (
+                          <div className="rounded-lg border border-slate-200 bg-mist p-4">
+                            <p className="text-xs font-black uppercase text-slate-500">Proposed Sessions</p>
+                            <div className="mt-2 grid gap-1 text-sm text-slate-600">
+                              {link.proposedSessions.map((session) => (
+                                <p key={session.id}>{formatDateTime(session.start_datetime, session.timezone)} - {sessionFocusLabel(session)}</p>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {link.selectedSessions.length > 0 ? (
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                            <p className="text-xs font-black uppercase text-emerald-700">Selected Sessions</p>
+                            <div className="mt-2 grid gap-1 text-sm text-emerald-900">
+                              {link.selectedSessions.map((session) => (
+                                <p key={session.id}>{formatDateTime(session.start_datetime, session.timezone)} - {sessionFocusLabel(session)}</p>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-mist p-4 sm:grid-cols-[1fr_auto]">
+                      <input className={inputClass} readOnly value={linkUrl} />
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => void copyCustomPaymentLink(linkUrl)} className={secondaryButtonClass}>
+                          Copy Link
+                        </button>
+                        <button type="button" disabled={isSaving} onClick={() => void updateCustomPaymentLinkAction(link.id, "mark_sent")} className={secondaryButtonClass}>
+                          Mark Sent
+                        </button>
+                        <button type="button" disabled={isSaving} onClick={() => void updateCustomPaymentLinkAction(link.id, "resend")} className={primaryButtonClass}>
+                          Resend Email
+                        </button>
+                        {!["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(link.status) ? (
+                          <button type="button" disabled={isSaving} onClick={() => void updateCustomPaymentLinkAction(link.id, "cancel")} className={dangerButtonClass}>
+                            Cancel Link
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-white p-5 text-sm font-bold text-slate-600">
+                No private payment links have been created yet.
+              </p>
+            )}
+          </div>
         </section>
       ) : null}
 

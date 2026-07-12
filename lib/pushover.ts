@@ -1,6 +1,11 @@
 import type { BookingRecord } from "@/lib/booking-data";
 import { sessionUnitAmountCents, getLaunchPassOption } from "@/lib/pricing";
-import type { PassPurchaseRow, PrivateSessionRequestRow } from "@/lib/supabase-db";
+import {
+  customPaymentLinkPlanLabel,
+  type CustomPaymentLinkRow,
+  type PassPurchaseRow,
+  type PrivateSessionRequestRow
+} from "@/lib/supabase-db";
 import {
   hasSentAdminAlert,
   listRecentAdminAlertLogs,
@@ -297,5 +302,28 @@ export async function sendScheduleApprovalAdminPushoverAlert(input: {
     source: "schedule_approval_confirmation",
     sourceId: input.token,
     dedupeKey: `schedule_approval:${input.token}:admin_push`
+  });
+}
+
+export async function sendCustomPaymentLinkAdminPushoverAlert(link: CustomPaymentLinkRow) {
+  const planLabel = customPaymentLinkPlanLabel(link.plan_type);
+  const message = [
+    `Player: ${link.player_name}`,
+    link.selected_session_ids.length > 0 ? "Session date: Selected in private link" : "Session date: Not selected yet",
+    link.selected_session_ids.length > 0 ? "Session time: Selected in private link" : "Session time: Not selected yet",
+    `Session focus/title: ${planLabel}`,
+    `Payment status: ${link.payment_status || (link.status === "paid" ? "Paid" : link.status)}`,
+    `Amount paid: ${formatMoney(link.amount_cents)}`,
+    `Parent: ${link.parent_name}`,
+    `Parent phone: ${link.parent_phone}`,
+    "Waiver status: Recorded if sessions were selected"
+  ].join("\n");
+
+  return sendPushoverAlert({
+    title: "EST CV Custom Payment Paid",
+    message,
+    source: "custom_payment_link",
+    sourceId: link.id,
+    dedupeKey: `custom_payment_link:${link.id}:admin_push`
   });
 }

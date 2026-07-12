@@ -180,6 +180,74 @@ export type ScheduleApprovalDetails = {
   sessions: TrainingSessionRow[];
 };
 
+export type CustomPaymentLinkPlanType =
+  | "single_session"
+  | "four_session_training_package"
+  | "six_session_training_package"
+  | "private_1_on_1"
+  | "custom_amount";
+
+export type CustomPaymentLinkMode =
+  | "payment_only"
+  | "payment_plus_choose_sessions"
+  | "payment_plus_confirm_proposed_schedule";
+
+export type CustomPaymentLinkStatus =
+  | "draft"
+  | "sent"
+  | "viewed"
+  | "paid"
+  | "partially_scheduled"
+  | "fully_scheduled"
+  | "cancelled";
+
+export type CustomPaymentLinkRow = {
+  id: string;
+  token: string;
+  player_name: string;
+  player_age: string;
+  parent_name: string;
+  parent_email: string;
+  parent_phone: string;
+  training_group: TrainingGroupId;
+  plan_type: CustomPaymentLinkPlanType;
+  link_mode: CustomPaymentLinkMode;
+  amount_cents: number;
+  notes_to_parent?: string | null;
+  internal_note?: string | null;
+  suggested_availability?: string | null;
+  proposed_session_ids: string[];
+  selected_session_ids: string[];
+  status: CustomPaymentLinkStatus;
+  total_credits: number;
+  credits_used: number;
+  credits_remaining: number;
+  pass_purchase_id?: string | null;
+  booking_ids: string[];
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  payment_status?: string | null;
+  viewed_at?: string | null;
+  paid_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminCustomPaymentLink = CustomPaymentLinkRow & {
+  passPurchase?: PassPurchaseRow | null;
+  bookings: BookingRow[];
+  selectedSessions: TrainingSessionRow[];
+  proposedSessions: TrainingSessionRow[];
+};
+
+export type CustomPaymentLinkDetails = {
+  link: CustomPaymentLinkRow;
+  passPurchase?: PassPurchaseRow | null;
+  bookings: BookingRow[];
+  selectedSessions: TrainingSessionRow[];
+  proposedSessions: TrainingSessionRow[];
+};
+
 export type WaiverRow = {
   id: string;
   booking_id: string;
@@ -941,6 +1009,283 @@ export async function listAdminPassPurchases(): Promise<AdminPassPurchase[]> {
       })),
     adjustments: adjustments.filter((adjustment) => adjustment.pass_purchase_id === pass.id)
   }));
+}
+
+function customPaymentLinkCredits(planType: CustomPaymentLinkPlanType) {
+  if (planType === "four_session_training_package") {
+    return 4;
+  }
+
+  if (planType === "six_session_training_package") {
+    return 6;
+  }
+
+  if (planType === "single_session" || planType === "private_1_on_1") {
+    return 1;
+  }
+
+  return 0;
+}
+
+export function customPaymentLinkPlanLabel(planType: CustomPaymentLinkPlanType) {
+  switch (planType) {
+    case "four_session_training_package":
+      return "4-Session Training Package";
+    case "six_session_training_package":
+      return "6-Session Training Package";
+    case "private_1_on_1":
+      return "Private 1-on-1 Session";
+    case "custom_amount":
+      return "Custom Amount";
+    case "single_session":
+    default:
+      return "Single Session";
+  }
+}
+
+export function customPaymentLinkModeLabel(mode: CustomPaymentLinkMode) {
+  switch (mode) {
+    case "payment_only":
+      return "Payment only";
+    case "payment_plus_confirm_proposed_schedule":
+      return "Payment + confirm proposed schedule";
+    case "payment_plus_choose_sessions":
+    default:
+      return "Payment + choose sessions";
+  }
+}
+
+export function customPaymentLinkPassType(planType: CustomPaymentLinkPlanType): LaunchPassType | null {
+  if (planType === "four_session_training_package") {
+    return "four_session_launch_pass";
+  }
+
+  if (planType === "six_session_training_package") {
+    return "six_session_launch_pass";
+  }
+
+  return null;
+}
+
+async function loadCustomPaymentLinkDetails(link: CustomPaymentLinkRow): Promise<CustomPaymentLinkDetails> {
+  const sessionIds = Array.from(
+    new Set([...(link.proposed_session_ids ?? []), ...(link.selected_session_ids ?? [])].filter(Boolean))
+  );
+  const [passPurchase, bookings, sessions] = await Promise.all([
+    link.pass_purchase_id ? getPassPurchaseById(link.pass_purchase_id) : Promise.resolve(null),
+    link.booking_ids.length > 0
+      ? supabaseRequest<BookingRow[]>(
+          `bookings?select=*&id=in.(${link.booking_ids.map(encodeFilter).join(",")})`
+        ).catch(() => [])
+      : Promise.resolve([]),
+    sessionIds.length > 0
+      ? supabaseRequest<TrainingSessionRow[]>(
+          `training_sessions?select=*&id=in.(${sessionIds.map(encodeFilter).join(",")})&order=start_datetime.asc`
+        ).catch(() => [])
+      : Promise.resolve([])
+  ]);
+  const sessionMap = new Map(sessions.map((session) => [session.id, session]));
+
+  return {
+    link,
+    passPurchase,
+    bookings,
+    proposedSessions: (link.proposed_session_ids ?? [])
+      .map((sessionId) => sessionMap.get(sessionId))
+      .filter((session): session is TrainingSessionRow => Boolean(session)),
+    selectedSessions: (link.selected_session_ids ?? [])
+      .map((sessionId) => sessionMap.get(sessionId))
+      .filter((session): session is TrainingSessionRow => Boolean(session))
+  };
+}
+
+export async function listAdminCustomPaymentLinks(): Promise<AdminCustomPaymentLink[]> {
+  const links = await supabaseRequest<CustomPaymentLinkRow[]>(
+    "custom_payment_links?select=*&order=created_at.desc"
+  ).catch(() => []);
+  const details = await Promise.all(links.map(loadCustomPaymentLinkDetails));
+
+  return details.map((detail) => ({
+    ...detail.link,
+    passPurchase: detail.passPurchase,
+    bookings: detail.bookings,
+    proposedSessions: detail.proposedSessions,
+    selectedSessions: detail.selectedSessions
+  }));
+}
+
+export async function createCustomPaymentLink(input: {
+  token: string;
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  trainingGroup: TrainingGroupId;
+  planType: CustomPaymentLinkPlanType;
+  linkMode: CustomPaymentLinkMode;
+  amountCents: number;
+  notesToParent?: string;
+  internalNote?: string;
+  suggestedAvailability?: string;
+  proposedSessionIds?: string[];
+}) {
+  const credits = customPaymentLinkCredits(input.planType);
+  const rows = await supabaseRequest<CustomPaymentLinkRow[]>("custom_payment_links", {
+    method: "POST",
+    body: JSON.stringify({
+      token: input.token,
+      player_name: input.playerName.trim(),
+      player_age: input.playerAge.trim(),
+      parent_name: input.parentName.trim(),
+      parent_email: input.parentEmail.trim().toLowerCase(),
+      parent_phone: input.parentPhone.trim(),
+      training_group: input.trainingGroup,
+      plan_type: input.planType,
+      link_mode: input.linkMode,
+      amount_cents: Math.max(0, Math.round(input.amountCents)),
+      notes_to_parent: input.notesToParent?.trim() || null,
+      internal_note: input.internalNote?.trim() || null,
+      suggested_availability: input.suggestedAvailability?.trim() || null,
+      proposed_session_ids: Array.from(new Set(input.proposedSessionIds ?? [])),
+      selected_session_ids: [],
+      total_credits: credits,
+      credits_used: 0,
+      credits_remaining: credits,
+      status: "draft"
+    })
+  });
+  const link = rows[0];
+
+  if (!link) {
+    throw new Error("Custom payment link could not be created.");
+  }
+
+  return link;
+}
+
+export async function getCustomPaymentLinkByToken(token: string): Promise<CustomPaymentLinkDetails | null> {
+  const rows = await supabaseRequest<CustomPaymentLinkRow[]>(
+    `custom_payment_links?select=*&token=eq.${encodeFilter(token)}&limit=1`
+  ).catch(() => []);
+  const link = rows[0];
+
+  return link ? loadCustomPaymentLinkDetails(link) : null;
+}
+
+export async function getCustomPaymentLinkById(id: string): Promise<CustomPaymentLinkDetails | null> {
+  const rows = await supabaseRequest<CustomPaymentLinkRow[]>(
+    `custom_payment_links?select=*&id=eq.${encodeFilter(id)}&limit=1`
+  ).catch(() => []);
+  const link = rows[0];
+
+  return link ? loadCustomPaymentLinkDetails(link) : null;
+}
+
+export async function markCustomPaymentLinkViewed(token: string) {
+  const existing = await getCustomPaymentLinkByToken(token);
+
+  if (!existing || ["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(existing.link.status)) {
+    return existing?.link ?? null;
+  }
+
+  const rows = await supabaseRequest<CustomPaymentLinkRow[]>(
+    `custom_payment_links?token=eq.${encodeFilter(token)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        status: existing.link.status === "draft" || existing.link.status === "sent" ? "viewed" : existing.link.status,
+        viewed_at: existing.link.viewed_at || new Date().toISOString()
+      })
+    }
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function updateCustomPaymentLink(input: {
+  id: string;
+  status?: CustomPaymentLinkStatus;
+  selectedSessionIds?: string[];
+  passPurchaseId?: string | null;
+  bookingIds?: string[];
+  checkoutSessionId?: string | null;
+  paymentIntentId?: string | null;
+  paymentStatus?: string | null;
+  creditsUsed?: number;
+  creditsRemaining?: number;
+  paidAt?: string | null;
+}) {
+  const patch: Partial<CustomPaymentLinkRow> = {};
+
+  if (input.status) patch.status = input.status;
+  if (input.selectedSessionIds) patch.selected_session_ids = input.selectedSessionIds;
+  if (input.passPurchaseId !== undefined) patch.pass_purchase_id = input.passPurchaseId;
+  if (input.bookingIds) patch.booking_ids = input.bookingIds;
+  if (input.checkoutSessionId !== undefined) patch.stripe_checkout_session_id = input.checkoutSessionId;
+  if (input.paymentIntentId !== undefined) patch.stripe_payment_intent_id = input.paymentIntentId;
+  if (input.paymentStatus !== undefined) patch.payment_status = input.paymentStatus;
+  if (typeof input.creditsUsed === "number") patch.credits_used = Math.max(0, input.creditsUsed);
+  if (typeof input.creditsRemaining === "number") patch.credits_remaining = Math.max(0, input.creditsRemaining);
+  if (input.paidAt !== undefined) patch.paid_at = input.paidAt;
+
+  const rows = await supabaseRequest<CustomPaymentLinkRow[]>(
+    `custom_payment_links?id=eq.${encodeFilter(input.id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch)
+    }
+  );
+
+  return rows[0] ?? null;
+}
+
+export async function confirmCustomPaymentLinkPaid(input: {
+  customPaymentLinkId: string;
+  checkoutSessionId?: string;
+  paymentIntentId?: string;
+  paymentStatus?: string;
+  selectedSessionIds?: string[];
+  passPurchaseId?: string | null;
+  bookingIds?: string[];
+  creditsUsed?: number;
+  creditsRemaining?: number;
+}) {
+  const details = await getCustomPaymentLinkById(input.customPaymentLinkId);
+
+  if (!details) {
+    throw new Error("Custom payment link could not be found.");
+  }
+
+  const totalCredits = Number(details.link.total_credits) || 0;
+  const creditsUsed = Math.max(0, Number(input.creditsUsed ?? details.link.credits_used) || 0);
+  const creditsRemaining =
+    typeof input.creditsRemaining === "number"
+      ? Math.max(0, input.creditsRemaining)
+      : totalCredits > 0
+        ? Math.max(0, totalCredits - creditsUsed)
+        : 0;
+  const selectedCount = input.selectedSessionIds?.length ?? details.link.selected_session_ids.length;
+  const nextStatus: CustomPaymentLinkStatus =
+    totalCredits > 0 && creditsRemaining === 0
+      ? "fully_scheduled"
+      : selectedCount > 0
+        ? "partially_scheduled"
+        : "paid";
+
+  return updateCustomPaymentLink({
+    id: input.customPaymentLinkId,
+    status: nextStatus,
+    selectedSessionIds: input.selectedSessionIds,
+    passPurchaseId: input.passPurchaseId,
+    bookingIds: input.bookingIds,
+    checkoutSessionId: input.checkoutSessionId,
+    paymentIntentId: input.paymentIntentId,
+    paymentStatus: input.paymentStatus || "paid",
+    creditsUsed,
+    creditsRemaining,
+    paidAt: new Date().toISOString()
+  });
 }
 
 export async function createManualScheduleApprovalLink(input: {

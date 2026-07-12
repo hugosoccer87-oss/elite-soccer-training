@@ -3,14 +3,24 @@ import { confirmLaunchPassPurchase, confirmPaidBooking } from "@/lib/booking-con
 import { setLastPaymentVerificationResult } from "@/lib/stripe-diagnostics";
 import {
   bookingFromStripeMetadata,
+  customPaymentLinkIdFromStripeMetadata,
   directPaymentIdFromStripeMetadata,
   getStripeEnvironmentDiagnostics,
   isStripePaymentVerified,
   passPurchaseIdFromStripeMetadata,
   verifyStripeWebhookSignature
 } from "@/lib/stripe";
-import { markDirectPaymentPaid } from "@/lib/supabase-db";
-import { sendDirectPaymentTransactionalEmails } from "@/lib/transactional-email";
+import {
+  confirmCustomPaymentLinkPaid,
+  getBookingRecordForConfirmation,
+  getCustomPaymentLinkById,
+  markDirectPaymentPaid
+} from "@/lib/supabase-db";
+import {
+  sendCustomPaymentLinkTransactionalEmails,
+  sendDirectPaymentTransactionalEmails
+} from "@/lib/transactional-email";
+import { sendCustomPaymentLinkAdminPushoverAlert } from "@/lib/pushover";
 
 export const runtime = "nodejs";
 
@@ -97,6 +107,141 @@ export async function POST(request: Request) {
           paymentStatus: session.payment_status,
           message: "Direct Pay + Waiver payment verified."
         });
+
+        return NextResponse.json({ received: true });
+      }
+
+      const customPaymentLinkId = customPaymentLinkIdFromStripeMetadata(session.metadata);
+
+      if (customPaymentLinkId) {
+        if (!isStripePaymentVerified(session)) {
+          console.warn("[EST Stripe] Payment not verified", {
+            eventId: event.id,
+            sessionId: session.id,
+            customPaymentLinkId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status
+          });
+          setLastPaymentVerificationResult({
+            source: "webhook",
+            verified: false,
+            sessionId: session.id,
+            bookingId: customPaymentLinkId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status,
+            message: "Custom payment link Checkout session was not paid and complete."
+          });
+          return NextResponse.json({ received: true });
+        }
+
+        console.info("[EST Stripe] Payment verified", {
+          eventId: event.id,
+          sessionId: session.id,
+          customPaymentLinkId,
+          purchaseType: "custom_payment_link"
+        });
+
+        const metadata = session.metadata ?? {};
+        const customDetails = await getCustomPaymentLinkById(customPaymentLinkId);
+
+        if (!customDetails) {
+          throw new Error(`Custom payment link ${customPaymentLinkId} was not found.`);
+        }
+
+        const customPassPurchaseId = metadata.passPurchaseId;
+        const customBookingId = metadata.bookingId;
+
+        if (customPassPurchaseId) {
+          const result = await confirmLaunchPassPurchase({
+            passPurchaseId: customPassPurchaseId,
+            checkoutSessionId: session.id,
+            paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+            amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+          });
+          const confirmedBookingIds = result.selectedSessionResults
+            .map((item) => item.bookingId)
+            .filter((id): id is string => Boolean(id));
+
+          await confirmCustomPaymentLinkPaid({
+            customPaymentLinkId,
+            checkoutSessionId: session.id,
+            paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+            paymentStatus: "paid",
+            passPurchaseId: result.pass.id,
+            bookingIds: confirmedBookingIds,
+            selectedSessionIds: customDetails.link.selected_session_ids,
+            creditsUsed: Math.max(0, Number(result.pass.total_credits) - Number(result.pass.remaining_credits)),
+            creditsRemaining: result.pass.remaining_credits
+          });
+
+          console.info("[EST Stripe] Custom payment link Training Package confirmed", {
+            eventId: event.id,
+            sessionId: session.id,
+            customPaymentLinkId,
+            passPurchaseId: result.pass.id,
+            selectedBookings: confirmedBookingIds.length
+          });
+          return NextResponse.json({ received: true });
+        }
+
+        if (customBookingId) {
+          const booking = await getBookingRecordForConfirmation(customBookingId);
+          const result = await confirmPaidBooking(
+            booking,
+            {
+              checkoutSessionId: session.id,
+              paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+              amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+            },
+            {
+              adminAlertSource: "custom_payment_link_single_session"
+            }
+          );
+
+          await confirmCustomPaymentLinkPaid({
+            customPaymentLinkId,
+            checkoutSessionId: session.id,
+            paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+            paymentStatus: "paid",
+            bookingIds: [customBookingId],
+            selectedSessionIds: customDetails.link.selected_session_ids,
+            creditsUsed: 1,
+            creditsRemaining: 0
+          });
+
+          console.info("[EST Stripe] Custom payment link single booking confirmed", {
+            eventId: event.id,
+            sessionId: session.id,
+            customPaymentLinkId,
+            bookingId: customBookingId,
+            calendarStatus: result.calendarResult.status
+          });
+          return NextResponse.json({ received: true });
+        }
+
+        const updatedLink = await confirmCustomPaymentLinkPaid({
+          customPaymentLinkId,
+          checkoutSessionId: session.id,
+          paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+          paymentStatus: "paid",
+          creditsUsed: 0,
+          creditsRemaining: customDetails.link.total_credits
+        });
+
+        if (updatedLink) {
+          const [emailResult, pushoverResult] = await Promise.allSettled([
+            sendCustomPaymentLinkTransactionalEmails(updatedLink),
+            sendCustomPaymentLinkAdminPushoverAlert(updatedLink)
+          ]);
+
+          console.info("[EST Stripe] Custom payment link notifications complete", {
+            eventId: event.id,
+            sessionId: session.id,
+            customPaymentLinkId,
+            emailSent: emailResult.status === "fulfilled" ? emailResult.value.sent : false,
+            pushoverSent: pushoverResult.status === "fulfilled" ? pushoverResult.value.sent : false
+          });
+        }
 
         return NextResponse.json({ received: true });
       }

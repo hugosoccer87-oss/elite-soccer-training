@@ -28,6 +28,14 @@
       "namedRegex": "^/api/admin/bookings/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/admin/custom-payment-links/[id]",
+      "regex": "^/api/admin/custom\\-payment\\-links/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/admin/custom\\-payment\\-links/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/admin/direct-payments/[id]",
       "regex": "^/api/admin/direct\\-payments/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -60,6 +68,14 @@
       "namedRegex": "^/api/admin/sessions/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/custom-payment-links/[token]/checkout",
+      "regex": "^/api/custom\\-payment\\-links/([^/]+?)/checkout(?:/)?$",
+      "routeKeys": {
+        "nxtPtoken": "nxtPtoken"
+      },
+      "namedRegex": "^/api/custom\\-payment\\-links/(?<nxtPtoken>[^/]+?)/checkout(?:/)?$"
+    },
+    {
       "page": "/api/google-calendar/availability/[eventId]",
       "regex": "^/api/google\\-calendar/availability/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -74,6 +90,22 @@
         "nxtPtoken": "nxtPtoken"
       },
       "namedRegex": "^/api/schedule\\-approvals/(?<nxtPtoken>[^/]+?)/confirm(?:/)?$"
+    },
+    {
+      "page": "/custom-payment/[token]",
+      "regex": "^/custom\\-payment/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPtoken": "nxtPtoken"
+      },
+      "namedRegex": "^/custom\\-payment/(?<nxtPtoken>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/custom-payment/[token]/success",
+      "regex": "^/custom\\-payment/([^/]+?)/success(?:/)?$",
+      "routeKeys": {
+        "nxtPtoken": "nxtPtoken"
+      },
+      "namedRegex": "^/custom\\-payment/(?<nxtPtoken>[^/]+?)/success(?:/)?$"
     },
     {
       "page": "/schedule-confirmation/[token]",
