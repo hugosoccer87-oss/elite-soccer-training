@@ -194,6 +194,25 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const selectedCount = selectedSessionIds.length + selectedPrivateSessionIds.length;
+  const selectedSessionSummaries = useMemo(
+    () =>
+      selectedSessionIds
+        .map((sessionId) => availableSessions.find((session) => session.id === sessionId))
+        .filter((session): session is PublicAvailableSession => Boolean(session))
+        .map((session) => `${session.dayLabel}, ${session.dateLabel} · ${session.startTime}`),
+    [availableSessions, selectedSessionIds]
+  );
+  const selectedPrivateSessionSummaries = useMemo(
+    () =>
+      selectedPrivateSessionIds
+        .map((sessionId) => availablePrivateSessions.find((session) => session.id === sessionId))
+        .filter((session): session is PrivateSessionAvailabilityRow => Boolean(session))
+        .map(
+          (session) =>
+            `${formatPrivateDay(session.start_datetime, session.timezone)} · ${formatPrivateTime(session.start_datetime, session.timezone)}`
+        ),
+    [availablePrivateSessions, selectedPrivateSessionIds]
+  );
   const needsWaiver = true;
   const planLabel = selectedPlanLabel;
   const isClosed = ["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(link.status);
@@ -343,18 +362,6 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
           <h2 className="mt-2 text-2xl font-black text-slate-950">{planLabel}</h2>
           <dl className="mt-5 space-y-3 text-sm">
             <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
-              <dt className="font-bold text-slate-500">Player</dt>
-              <dd className="text-right font-black text-slate-950">{playerName || "Parent will complete"}</dd>
-            </div>
-            <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
-              <dt className="font-bold text-slate-500">Player age</dt>
-              <dd className="text-right font-black text-slate-950">{playerAge || "Parent will complete"}</dd>
-            </div>
-            <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
-              <dt className="font-bold text-slate-500">Parent</dt>
-              <dd className="text-right font-black text-slate-950">{parentName || "Parent will complete"}</dd>
-            </div>
-            <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
               <dt className="font-bold text-slate-500">Amount due</dt>
               <dd className="text-right text-xl font-black text-slate-950">{formatCurrencyFromCents(selectedAmountCents)}</dd>
             </div>
@@ -362,6 +369,34 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
                 <dt className="font-bold text-slate-500">Training credits</dt>
                 <dd className="text-right font-black text-slate-950">{selectedOption.credits}</dd>
+              </div>
+            ) : null}
+            {selectedCount > 0 ? (
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
+                <dt className="font-bold text-slate-500">Selected sessions</dt>
+                <dd className="text-right font-black text-slate-950">{selectedCount}</dd>
+              </div>
+            ) : null}
+            {selectedSessionSummaries.length > 0 || selectedPrivateSessionSummaries.length > 0 ? (
+              <div className="border-b border-slate-100 pb-3">
+                <dt className="font-bold text-slate-500">Selected time(s)</dt>
+                <dd className="mt-2 grid gap-1 text-sm font-bold text-slate-950">
+                  {[...selectedSessionSummaries, ...selectedPrivateSessionSummaries].map((summary) => (
+                    <span key={summary}>{summary}</span>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
+            {playerName.trim() ? (
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
+                <dt className="font-bold text-slate-500">Player</dt>
+                <dd className="text-right font-black text-slate-950">{playerName.trim()}</dd>
+              </div>
+            ) : null}
+            {parentName.trim() ? (
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-3">
+                <dt className="font-bold text-slate-500">Parent</dt>
+                <dd className="text-right font-black text-slate-950">{parentName.trim()}</dd>
               </div>
             ) : null}
           </dl>
