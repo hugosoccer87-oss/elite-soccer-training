@@ -61,6 +61,28 @@ function isAllowedSelectedPlan(value: unknown, allowed: CustomPaymentLinkPlanTyp
   return typeof value === "string" && allowed.includes(value as CustomPaymentLinkPlanType);
 }
 
+const parentSelectablePlanTypes: CustomPaymentLinkPlanType[] = [
+  "single_session",
+  "four_session_training_package",
+  "six_session_training_package"
+];
+
+function parentAllowedPlans(linkPlanType: CustomPaymentLinkPlanType, values: unknown) {
+  const normalized = normalizeCustomPaymentLinkOptions(values, linkPlanType).filter(
+    (option) => parentSelectablePlanTypes.includes(option) || option === "custom_amount"
+  );
+
+  if (normalized.length > 0) {
+    return normalized;
+  }
+
+  if (linkPlanType === "custom_amount") {
+    return ["custom_amount" as CustomPaymentLinkPlanType];
+  }
+
+  return parentSelectablePlanTypes.includes(linkPlanType) ? [linkPlanType] : ["single_session" as CustomPaymentLinkPlanType];
+}
+
 export async function POST(request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const payload = (await request.json().catch(() => null)) as {
@@ -105,7 +127,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
   try {
     const requestedSessionIds = selectedIds(payload?.selectedSessionIds);
     const requestedPrivateSessionIds = selectedIds(payload?.selectedPrivateSessionIds);
-    const allowedPurchaseOptions = normalizeCustomPaymentLinkOptions(link.allowed_purchase_options, link.plan_type);
+    const allowedPurchaseOptions = parentAllowedPlans(link.plan_type, link.allowed_purchase_options);
     const selectedPlanType = isAllowedSelectedPlan(payload?.selectedPlanType, allowedPurchaseOptions)
       ? payload.selectedPlanType
       : allowedPurchaseOptions[0] ?? link.plan_type;
@@ -129,7 +151,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       parentPhone: payload?.parentPhone?.trim() || link.parent_phone
     };
     const selectedPaymentMethod: "card" | "zelle" = payload?.paymentMethod === "zelle" ? "zelle" : "card";
-    const selectedUsesPrivateSessions = selectedPlanType === "private_1_on_1";
+    const selectedUsesPrivateSessions = isPrivateSessionLink;
     const signedAt = new Date().toISOString();
     const ipAddress = getRequestIpAddress(request);
 
@@ -155,6 +177,24 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       if (maxSessionCount > 0 && requestedPrivateSessionIds.length > maxSessionCount) {
         return NextResponse.json(
           { error: "You have used all available training credits. Please purchase another session or package to continue booking." },
+          { status: 400 }
+        );
+      }
+
+      const allowedPrivateSet = new Set(link.allowed_private_session_ids ?? []);
+
+      if (allowedPrivateSet.size < 1) {
+        return NextResponse.json(
+          { error: "No private session times are attached to this link. Please contact Coach Hugo." },
+          { status: 400 }
+        );
+      }
+
+      const outsidePrivateLink = requestedPrivateSessionIds.find((sessionId) => !allowedPrivateSet.has(sessionId));
+
+      if (outsidePrivateLink) {
+        return NextResponse.json(
+          { error: "Choose only the private session times Coach Hugo included in this link." },
           { status: 400 }
         );
       }
@@ -244,7 +284,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
 
       if (invalidPrivateSession) {
         return NextResponse.json(
-          { error: "One or more private session times are no longer available. Please refresh this link and choose again." },
+          { error: "That time is no longer available. Please choose another available time." },
           { status: 400 }
         );
       }

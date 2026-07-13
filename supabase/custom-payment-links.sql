@@ -37,6 +37,7 @@ create table if not exists public.custom_payment_links (
   internal_note text,
   suggested_availability text,
   proposed_session_ids text[] not null default '{}',
+  allowed_private_session_ids text[] not null default '{}',
   selected_session_ids text[] not null default '{}',
   selected_private_session_ids text[] not null default '{}',
   selected_payment_method text,
@@ -100,6 +101,9 @@ alter table public.custom_payment_links
 
 alter table public.custom_payment_links
   add column if not exists selected_total_credits integer;
+
+alter table public.custom_payment_links
+  add column if not exists allowed_private_session_ids text[] not null default '{}';
 
 alter table public.custom_payment_links
   add column if not exists selected_private_session_ids text[] not null default '{}';

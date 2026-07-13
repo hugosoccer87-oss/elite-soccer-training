@@ -81,12 +81,16 @@ export async function POST(request: Request) {
     internalNote?: string;
     suggestedAvailability?: string;
     proposedSessionIds?: unknown;
+    allowedPrivateSessionIds?: unknown;
   } | null;
   const proposedSessionIds = Array.isArray(payload?.proposedSessionIds)
     ? Array.from(new Set(payload.proposedSessionIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))))
     : [];
   const allowedPurchaseOptions = Array.isArray(payload?.allowedPurchaseOptions)
     ? Array.from(new Set(payload.allowedPurchaseOptions.filter((item): item is CustomPaymentLinkPlanType => typeof item === "string" && planTypes.has(item as CustomPaymentLinkPlanType))))
+    : [];
+  const allowedPrivateSessionIds = Array.isArray(payload?.allowedPrivateSessionIds)
+    ? Array.from(new Set(payload.allowedPrivateSessionIds.filter((id): id is string => typeof id === "string" && Boolean(id.trim()))))
     : [];
   const amountCents = Math.max(0, Math.round(Number(payload?.amount) * 100 || 0));
   const privateSessionAmountCents = Math.max(0, Math.round(Number(payload?.privateSessionAmount ?? payload?.amount) * 100 || 0));
@@ -110,6 +114,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Complete all payment link fields before creating the link." }, { status: 400 });
   }
 
+  if (parentCompletesPrivateDetails && allowedPrivateSessionIds.length < 1) {
+    return NextResponse.json(
+      { error: "Attach at least one private session time before creating this private payment link." },
+      { status: 400 }
+    );
+  }
+
   try {
     const token = randomBytes(24).toString("hex");
     const link = await createCustomPaymentLink({
@@ -128,7 +139,8 @@ export async function POST(request: Request) {
       notesToParent: payload.notesToParent,
       internalNote: payload.internalNote,
       suggestedAvailability: payload.suggestedAvailability,
-      proposedSessionIds
+      proposedSessionIds,
+      allowedPrivateSessionIds: parentCompletesPrivateDetails ? allowedPrivateSessionIds : []
     });
 
     return NextResponse.json({

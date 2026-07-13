@@ -223,6 +223,7 @@ export type CustomPaymentLinkRow = {
   internal_note?: string | null;
   suggested_availability?: string | null;
   proposed_session_ids: string[];
+  allowed_private_session_ids: string[];
   selected_session_ids: string[];
   selected_private_session_ids: string[];
   selected_payment_method?: "card" | "zelle" | null;
@@ -255,6 +256,7 @@ export type AdminCustomPaymentLink = CustomPaymentLinkRow & {
   bookings: BookingRow[];
   selectedSessions: TrainingSessionRow[];
   proposedSessions: TrainingSessionRow[];
+  allowedPrivateSessions: PrivateSessionAvailabilityRow[];
   selectedPrivateSessions: PrivateSessionAvailabilityRow[];
 };
 
@@ -264,6 +266,7 @@ export type CustomPaymentLinkDetails = {
   bookings: BookingRow[];
   selectedSessions: TrainingSessionRow[];
   proposedSessions: TrainingSessionRow[];
+  allowedPrivateSessions: PrivateSessionAvailabilityRow[];
   selectedPrivateSessions: PrivateSessionAvailabilityRow[];
 };
 
@@ -1206,7 +1209,9 @@ async function loadCustomPaymentLinkDetails(link: CustomPaymentLinkRow): Promise
   const sessionIds = Array.from(
     new Set([...(link.proposed_session_ids ?? []), ...(link.selected_session_ids ?? [])].filter(Boolean))
   );
-  const privateSessionIds = Array.from(new Set(link.selected_private_session_ids ?? []));
+  const privateSessionIds = Array.from(
+    new Set([...(link.allowed_private_session_ids ?? []), ...(link.selected_private_session_ids ?? [])].filter(Boolean))
+  );
   const [passPurchase, bookings, sessions, privateSessions] = await Promise.all([
     link.pass_purchase_id ? getPassPurchaseById(link.pass_purchase_id) : Promise.resolve(null),
     link.booking_ids.length > 0
@@ -1238,6 +1243,9 @@ async function loadCustomPaymentLinkDetails(link: CustomPaymentLinkRow): Promise
     selectedSessions: (link.selected_session_ids ?? [])
       .map((sessionId) => sessionMap.get(sessionId))
       .filter((session): session is TrainingSessionRow => Boolean(session)),
+    allowedPrivateSessions: (link.allowed_private_session_ids ?? [])
+      .map((sessionId) => privateSessionMap.get(sessionId))
+      .filter((session): session is PrivateSessionAvailabilityRow => Boolean(session)),
     selectedPrivateSessions: (link.selected_private_session_ids ?? [])
       .map((sessionId) => privateSessionMap.get(sessionId))
       .filter((session): session is PrivateSessionAvailabilityRow => Boolean(session))
@@ -1256,6 +1264,7 @@ export async function listAdminCustomPaymentLinks(): Promise<AdminCustomPaymentL
     bookings: detail.bookings,
     proposedSessions: detail.proposedSessions,
     selectedSessions: detail.selectedSessions,
+    allowedPrivateSessions: detail.allowedPrivateSessions,
     selectedPrivateSessions: detail.selectedPrivateSessions
   }));
 }
@@ -1277,6 +1286,7 @@ export async function createCustomPaymentLink(input: {
   internalNote?: string;
   suggestedAvailability?: string;
   proposedSessionIds?: string[];
+  allowedPrivateSessionIds?: string[];
 }) {
   const allowedPurchaseOptions = normalizeCustomPaymentLinkOptions(input.allowedPurchaseOptions, input.planType);
   const primaryPlanType = allowedPurchaseOptions[0] ?? input.planType;
@@ -1305,6 +1315,7 @@ export async function createCustomPaymentLink(input: {
       internal_note: input.internalNote?.trim() || null,
       suggested_availability: input.suggestedAvailability?.trim() || null,
       proposed_session_ids: Array.from(new Set(input.proposedSessionIds ?? [])),
+      allowed_private_session_ids: Array.from(new Set(input.allowedPrivateSessionIds ?? [])),
       selected_session_ids: [],
       selected_private_session_ids: [],
       total_credits: credits,

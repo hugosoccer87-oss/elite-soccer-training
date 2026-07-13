@@ -67,6 +67,7 @@ export default async function CustomPaymentLinkPage({ params }: { params: Promis
           notesToParent: details.link.notes_to_parent,
           suggestedAvailability: details.link.suggested_availability,
           proposedSessionIds: details.link.proposed_session_ids,
+          allowedPrivateSessionIds: details.link.allowed_private_session_ids ?? [],
           status: details.link.status,
           totalCredits: details.link.total_credits
         }}

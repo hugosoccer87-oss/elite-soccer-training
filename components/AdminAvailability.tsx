@@ -1386,6 +1386,13 @@ export function AdminAvailability() {
   const [customLinkInternalNote, setCustomLinkInternalNote] = useState("");
   const [customLinkSuggestedAvailability, setCustomLinkSuggestedAvailability] = useState("");
   const [customLinkProposedSessionIds, setCustomLinkProposedSessionIds] = useState<string[]>([]);
+  const [customLinkAllowedPrivateSessionIds, setCustomLinkAllowedPrivateSessionIds] = useState<string[]>([]);
+  const [customPrivateDateFilter, setCustomPrivateDateFilter] = useState("");
+  const [customPrivateDayFilter, setCustomPrivateDayFilter] = useState("all");
+  const [customPrivateStartFilter, setCustomPrivateStartFilter] = useState("");
+  const [customPrivateEndFilter, setCustomPrivateEndFilter] = useState("");
+  const [customPrivateFocusFilter, setCustomPrivateFocusFilter] = useState("all");
+  const [customPrivateLocationFilter, setCustomPrivateLocationFilter] = useState("");
   const [customLinkCreatedUrl, setCustomLinkCreatedUrl] = useState("");
   const [privateAvailabilityDate, setPrivateAvailabilityDate] = useState("");
   const [privateAvailabilityStartTime, setPrivateAvailabilityStartTime] = useState("17:00");
@@ -2031,10 +2038,72 @@ export function AdminAvailability() {
         .slice(0, 40),
     [customLinkGroup, sessions]
   );
+  const customPaymentPrivateAvailability = useMemo(
+    () =>
+      privateSessionAvailability
+        .filter((session) => {
+          if (session.status !== "available" || !isFuture(session.start_datetime)) {
+            return false;
+          }
+
+          const sessionDate = formatDateOnly(session.start_datetime, session.timezone);
+          const sessionStart = formatTimeInput(session.start_datetime, session.timezone);
+          const sessionEnd = formatTimeInput(session.end_datetime, session.timezone);
+          const sessionDay = String(dateFromDateInput(sessionDate).getUTCDay());
+          const focus = (session.session_focus || "Private Session").toLowerCase();
+          const location = (session.location || "").toLowerCase();
+
+          if (customPrivateDateFilter && sessionDate !== customPrivateDateFilter) {
+            return false;
+          }
+
+          if (customPrivateDayFilter !== "all" && sessionDay !== customPrivateDayFilter) {
+            return false;
+          }
+
+          if (customPrivateStartFilter && sessionStart < customPrivateStartFilter) {
+            return false;
+          }
+
+          if (customPrivateEndFilter && sessionEnd > customPrivateEndFilter) {
+            return false;
+          }
+
+          if (customPrivateFocusFilter !== "all" && focus !== customPrivateFocusFilter.toLowerCase()) {
+            return false;
+          }
+
+          if (customPrivateLocationFilter.trim() && !location.includes(customPrivateLocationFilter.trim().toLowerCase())) {
+            return false;
+          }
+
+          return true;
+        })
+        .slice(0, 60),
+    [
+      customPrivateDateFilter,
+      customPrivateDayFilter,
+      customPrivateEndFilter,
+      customPrivateFocusFilter,
+      customPrivateLocationFilter,
+      customPrivateStartFilter,
+      privateSessionAvailability
+    ]
+  );
+  const customPrivateFocusOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          "Private Session",
+          ...sessionFocusExamples,
+          ...privateSessionAvailability.map((session) => session.session_focus || "Private Session")
+        ])
+      ),
+    [privateSessionAvailability]
+  );
 
   function setCustomPaymentPlan(planType: CustomPaymentLinkPlanType) {
     setCustomLinkPlanType(planType);
-    setCustomLinkAllowedOptions((current) => (current.length === 1 ? [planType] : current.includes(planType) ? current : [planType, ...current]));
     const option = customPaymentLinkPlanOptions.find((item) => item.value === planType);
 
     if (option && (customLinkAmount === "0" || customPaymentLinkPlanOptions.some((item) => item.defaultAmount === customLinkAmount))) {
@@ -2043,16 +2112,26 @@ export function AdminAvailability() {
 
     if (planType === "private_1_on_1") {
       setCustomLinkMode("payment_plus_choose_private_sessions");
+      setCustomLinkAllowedOptions(["single_session"]);
       setCustomLinkProposedSessionIds([]);
+      return;
     }
 
     if (planType === "custom_amount") {
       setCustomLinkMode("payment_only");
+      setCustomLinkAllowedOptions(["custom_amount"]);
       setCustomLinkProposedSessionIds([]);
+      return;
     }
+
+    setCustomLinkAllowedOptions((current) => (current.length === 1 ? [planType] : current.includes(planType) ? current : [planType, ...current]));
   }
 
   function toggleCustomLinkAllowedOption(planType: CustomPaymentLinkPlanType) {
+    if (planType === "private_1_on_1" || planType === "custom_amount") {
+      return;
+    }
+
     setCustomLinkAllowedOptions((current) => {
       if (current.includes(planType)) {
         const next = current.filter((item) => item !== planType);
@@ -2065,6 +2144,12 @@ export function AdminAvailability() {
 
   function toggleCustomLinkProposedSession(sessionId: string) {
     setCustomLinkProposedSessionIds((current) =>
+      current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]
+    );
+  }
+
+  function toggleCustomLinkPrivateAvailability(sessionId: string) {
+    setCustomLinkAllowedPrivateSessionIds((current) =>
       current.includes(sessionId) ? current.filter((id) => id !== sessionId) : [...current, sessionId]
     );
   }
@@ -2912,6 +2997,11 @@ export function AdminAvailability() {
       return;
     }
 
+    if (parentCompletesPrivateDetails && customLinkAllowedPrivateSessionIds.length < 1) {
+      setError("Attach at least one private session time before creating this private payment link.");
+      return;
+    }
+
     setIsSaving(true);
     setError("");
     setNotice("");
@@ -2938,7 +3028,9 @@ export function AdminAvailability() {
           notesToParent: customLinkNotesToParent,
           internalNote: customLinkInternalNote,
           suggestedAvailability: customLinkSuggestedAvailability,
-          proposedSessionIds: customLinkMode === "payment_plus_confirm_proposed_schedule" ? customLinkProposedSessionIds : []
+          proposedSessionIds: customLinkMode === "payment_plus_confirm_proposed_schedule" ? customLinkProposedSessionIds : [],
+          allowedPrivateSessionIds:
+            customLinkMode === "payment_plus_choose_private_sessions" ? customLinkAllowedPrivateSessionIds : []
         })
       });
       const result = (await response.json().catch(() => ({}))) as { error?: string; paymentUrl?: string };
@@ -2961,6 +3053,13 @@ export function AdminAvailability() {
       setCustomLinkInternalNote("");
       setCustomLinkSuggestedAvailability("");
       setCustomLinkProposedSessionIds([]);
+      setCustomLinkAllowedPrivateSessionIds([]);
+      setCustomPrivateDateFilter("");
+      setCustomPrivateDayFilter("all");
+      setCustomPrivateStartFilter("");
+      setCustomPrivateEndFilter("");
+      setCustomPrivateFocusFilter("all");
+      setCustomPrivateLocationFilter("");
       await refreshAdminData("Private payment link created. Copy it or resend it by email.");
       setCustomLinkCreatedUrl(result.paymentUrl || "");
     } catch (linkError) {
@@ -5887,7 +5986,9 @@ export function AdminAvailability() {
                   </div>
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     {customPaymentLinkPlanOptions
-                      .filter((option) => option.value !== "custom_amount")
+                      .filter((option) =>
+                        ["single_session", "four_session_training_package", "six_session_training_package"].includes(option.value)
+                      )
                       .map((option) => {
                         const selected = customLinkAllowedOptions.includes(option.value);
 
@@ -5901,9 +6002,7 @@ export function AdminAvailability() {
                             }`}
                           >
                             <p className="text-sm font-black text-navy">{option.label}</p>
-                            <p className="mt-1 text-xs font-bold text-slate-500">
-                              {option.value === "private_1_on_1" ? "Custom price" : `$${option.defaultAmount}`}
-                            </p>
+                            <p className="mt-1 text-xs font-bold text-slate-500">${option.defaultAmount}</p>
                           </button>
                         );
                       })}
@@ -5983,6 +6082,107 @@ export function AdminAvailability() {
                     ) : (
                       <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-bold text-slate-600">
                         No open future sessions are available for this training group.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {customLinkMode === "payment_plus_choose_private_sessions" ? (
+                <div className="mt-5 rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase text-slate-500">Attach private availability</p>
+                      <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">
+                        Filter private openings, then attach only the times this parent should see.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black uppercase text-electric">
+                      {customLinkAllowedPrivateSessionIds.length} attached
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Specific date
+                      <input className={inputClass} type="date" value={customPrivateDateFilter} onChange={(event) => setCustomPrivateDateFilter(event.target.value)} />
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Day
+                      <select className={inputClass} value={customPrivateDayFilter} onChange={(event) => setCustomPrivateDayFilter(event.target.value)}>
+                        <option value="all">Any day</option>
+                        {dayOptions.map((day) => (
+                          <option key={day.value} value={day.value}>
+                            {day.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Start after
+                      <input className={inputClass} type="time" value={customPrivateStartFilter} onChange={(event) => setCustomPrivateStartFilter(event.target.value)} />
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      End by
+                      <input className={inputClass} type="time" value={customPrivateEndFilter} onChange={(event) => setCustomPrivateEndFilter(event.target.value)} />
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Focus
+                      <select className={inputClass} value={customPrivateFocusFilter} onChange={(event) => setCustomPrivateFocusFilter(event.target.value)}>
+                        <option value="all">Any focus</option>
+                        {customPrivateFocusOptions.map((focus) => (
+                          <option key={focus} value={focus}>
+                            {focus}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                      Location
+                      <input
+                        className={inputClass}
+                        value={customPrivateLocationFilter}
+                        onChange={(event) => setCustomPrivateLocationFilter(event.target.value)}
+                        placeholder="DCA"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="mt-4 grid max-h-[28rem] gap-3 overflow-y-auto rounded-lg border border-slate-200 bg-mist p-3">
+                    {customPaymentPrivateAvailability.length > 0 ? (
+                      customPaymentPrivateAvailability.map((session) => {
+                        const selected = customLinkAllowedPrivateSessionIds.includes(session.id);
+
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            onClick={() => toggleCustomLinkPrivateAvailability(session.id)}
+                            className={`rounded-lg border p-4 text-left transition ${
+                              selected
+                                ? "border-electric bg-blue-50 shadow-sm shadow-electric/10"
+                                : "border-slate-200 bg-white hover:border-electric/60"
+                            }`}
+                          >
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                              <div>
+                                <p className="text-sm font-black text-navy">
+                                  {formatDateTime(session.start_datetime, session.timezone)} - {formatTime(session.end_datetime, session.timezone)}
+                                </p>
+                                <p className="mt-1 text-sm font-bold text-slate-600">{session.session_focus || "Private Session"}</p>
+                                <p className="mt-1 text-xs font-bold text-slate-500">{session.location || business.location}</p>
+                                {session.notes ? <p className="mt-2 text-xs font-semibold text-slate-500">{session.notes}</p> : null}
+                              </div>
+                              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black uppercase text-navy">
+                                {selected ? "Attached" : "Attach"}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-bold text-slate-600">
+                        No available private openings match these filters.
                       </p>
                     )}
                   </div>
@@ -6181,8 +6381,8 @@ export function AdminAvailability() {
                         <p className="mt-1 text-slate-600">Created: {formatWaiverTimestamp(link.created_at)}</p>
                       </div>
                     </div>
-                    {link.proposedSessions.length > 0 || link.selectedSessions.length > 0 || link.selectedPrivateSessions.length > 0 ? (
-                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+	                    {link.proposedSessions.length > 0 || link.selectedSessions.length > 0 || link.allowedPrivateSessions.length > 0 || link.selectedPrivateSessions.length > 0 ? (
+	                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
                         {link.proposedSessions.length > 0 ? (
                           <div className="rounded-lg border border-slate-200 bg-mist p-4">
                             <p className="text-xs font-black uppercase text-slate-500">Proposed Sessions</p>
@@ -6193,7 +6393,7 @@ export function AdminAvailability() {
                             </div>
                           </div>
                         ) : null}
-                        {link.selectedSessions.length > 0 ? (
+	                        {link.selectedSessions.length > 0 ? (
                           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
                             <p className="text-xs font-black uppercase text-emerald-700">Selected Sessions</p>
                             <div className="mt-2 grid gap-1 text-sm text-emerald-900">
@@ -6202,8 +6402,20 @@ export function AdminAvailability() {
                               ))}
                             </div>
                           </div>
-                        ) : null}
-                        {link.selectedPrivateSessions.length > 0 ? (
+	                        ) : null}
+	                        {link.allowedPrivateSessions.length > 0 ? (
+	                          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+	                            <p className="text-xs font-black uppercase text-electric">Attached Private Options</p>
+	                            <div className="mt-2 grid gap-1 text-sm text-blue-950">
+	                              {link.allowedPrivateSessions.map((session) => (
+	                                <p key={session.id}>
+	                                  {formatDateTime(session.start_datetime, session.timezone)} - {session.session_focus || "Private Session"}
+	                                </p>
+	                              ))}
+	                            </div>
+	                          </div>
+	                        ) : null}
+	                        {link.selectedPrivateSessions.length > 0 ? (
                           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
                             <p className="text-xs font-black uppercase text-electric">Selected Private Sessions</p>
                             <div className="mt-2 grid gap-1 text-sm text-blue-950">

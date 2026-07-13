@@ -31,6 +31,7 @@ type CustomPaymentLinkClient = {
   notesToParent?: string | null;
   suggestedAvailability?: string | null;
   proposedSessionIds: string[];
+  allowedPrivateSessionIds: string[];
   status: string;
   totalCredits: number;
 };
@@ -49,6 +50,12 @@ const planLabels: Record<CustomPaymentLinkPlanType, string> = {
   custom_amount: "Custom Amount"
 };
 
+const parentSelectablePlanTypes: CustomPaymentLinkPlanType[] = [
+  "single_session",
+  "four_session_training_package",
+  "six_session_training_package"
+];
+
 function maxSelectable(planType: CustomPaymentLinkPlanType) {
   if (planType === "single_session") return 1;
   if (planType === "private_1_on_1") return 1;
@@ -61,15 +68,12 @@ function isPaymentOnly(link: CustomPaymentLinkClient) {
   return link.linkMode === "payment_only" || link.planType === "custom_amount";
 }
 
-function formatPrivateDateTime(value: string, timeZone = "America/Los_Angeles") {
+function formatPrivateDay(value: string, timeZone = "America/Los_Angeles") {
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
     weekday: "long",
     month: "long",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
+    day: "numeric"
   }).format(new Date(value));
 }
 
@@ -90,8 +94,22 @@ function initialParentValue(value: string) {
 }
 
 export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props) {
-  const allowedPurchaseOptions = useMemo(
-    () => normalizeCustomPaymentLinkOptions(link.allowedPurchaseOptions, link.planType),
+  const allowedPurchaseOptions = useMemo<CustomPaymentLinkPlanType[]>(
+    () => {
+      const normalized = normalizeCustomPaymentLinkOptions(link.allowedPurchaseOptions, link.planType).filter(
+        (option) => parentSelectablePlanTypes.includes(option) || option === "custom_amount"
+      );
+
+      if (normalized.length > 0) {
+        return normalized;
+      }
+
+      if (link.planType === "custom_amount") {
+        return ["custom_amount" as CustomPaymentLinkPlanType];
+      }
+
+      return parentSelectablePlanTypes.includes(link.planType) ? [link.planType] : ["single_session" as CustomPaymentLinkPlanType];
+    },
     [link.allowedPurchaseOptions, link.planType]
   );
   const initialPlanType =
@@ -106,10 +124,11 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
   );
   const selectableLimit = selectedOption.credits;
   const paymentOnly = isPaymentOnly(link);
-  const privateSelectionMode = selectedPlanType === "private_1_on_1";
+  const privateSelectionMode = link.linkMode === "payment_plus_choose_private_sessions";
   const selectedPlanLabel = selectedOption.label;
   const selectedAmountCents = selectedOption.amountCents;
   const proposedSet = useMemo(() => new Set(link.proposedSessionIds), [link.proposedSessionIds]);
+  const allowedPrivateSet = useMemo(() => new Set(link.allowedPrivateSessionIds), [link.allowedPrivateSessionIds]);
   const availableSessions = useMemo(() => {
     const groupSessions = sessions.filter((session) => session.trainingGroupId === link.trainingGroup);
 
@@ -128,8 +147,25 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
       return [];
     }
 
-    return privateSessions.filter((session) => session.status === "available");
-  }, [privateSelectionMode, privateSessions]);
+    if (allowedPrivateSet.size < 1) {
+      return [];
+    }
+
+    return privateSessions.filter((session) => session.status === "available" && allowedPrivateSet.has(session.id));
+  }, [allowedPrivateSet, privateSelectionMode, privateSessions]);
+  const availablePrivateSessionsByDay = useMemo(() => {
+    const groups = new Map<string, PrivateSessionAvailabilityRow[]>();
+
+    for (const session of availablePrivateSessions) {
+      const label = formatPrivateDay(session.start_datetime, session.timezone);
+      groups.set(label, [...(groups.get(label) ?? []), session]);
+    }
+
+    return Array.from(groups.entries()).map(([label, daySessions]) => ({
+      label,
+      sessions: daySessions
+    }));
+  }, [availablePrivateSessions]);
   const initialSelected =
     link.linkMode === "payment_plus_confirm_proposed_schedule"
       ? availableSessions.slice(0, selectableLimit || availableSessions.length).map((session) => session.id)
@@ -366,8 +402,8 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
 
           {!zelleResult ? (
             <section className={allowedPurchaseOptions.length > 1 ? "" : ""}>
-              <p className="text-xs font-black uppercase text-electric">Purchase Option</p>
-              <h2 className="mt-1 text-2xl font-black text-slate-950">Choose What You Need</h2>
+              <p className="text-xs font-black uppercase text-electric">Choose Your Training Option</p>
+              <h2 className="mt-1 text-2xl font-black text-slate-950">Select Your Plan</h2>
               <div className="mt-5 grid gap-3">
                 {allowedPurchaseOptions.map((optionType) => {
                   const option = customPaymentLinkOptionMeta(optionType, link.privateSessionAmountCents, link.amountCents);
@@ -387,11 +423,11 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
                         <div>
                           <p className="font-black text-slate-950">{option.label}</p>
                           <p className="mt-1 text-sm font-semibold text-slate-600">
-                            {optionType === "private_1_on_1" ? "Private session time selected from Coach Hugo's openings." : creditText}
+                            {optionType === "custom_amount" ? "Custom private payment amount." : creditText}
                           </p>
                         </div>
                         <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black uppercase text-white">
-                          {optionType === "private_1_on_1" && option.amountCents <= 0 ? "Custom" : formatCurrencyFromCents(option.amountCents)}
+                          {formatCurrencyFromCents(option.amountCents)}
                         </span>
                       </div>
                     </button>
@@ -458,40 +494,44 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
 
               <div className="mt-5 grid gap-3">
                 {privateSelectionMode ? (
-                  availablePrivateSessions.length > 0 ? (
-                    availablePrivateSessions.map((session) => {
-                      const selected = selectedPrivateSessionIds.includes(session.id);
+                  availablePrivateSessionsByDay.length > 0 ? (
+                    availablePrivateSessionsByDay.map((group) => (
+                      <div key={group.label} className="rounded-[8px] border border-slate-200 bg-slate-50 p-3">
+                        <p className="px-1 text-xs font-black uppercase tracking-wide text-slate-500">{group.label}</p>
+                        <div className="mt-3 grid gap-3">
+                          {group.sessions.map((session) => {
+                            const selected = selectedPrivateSessionIds.includes(session.id);
 
-                      return (
-                        <button
-                          key={session.id}
-                          type="button"
-                          onClick={() => togglePrivateSession(session.id)}
-                          className={`rounded-[8px] border p-4 text-left transition ${
-                            selected ? "border-electric bg-blue-50 ring-2 ring-electric/20" : "border-slate-200 bg-white hover:border-electric"
-                          }`}
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-lg font-black text-slate-950">
-                                {formatPrivateDateTime(session.start_datetime, session.timezone)}
-                              </p>
-                              <p className="mt-1 font-black text-electric">
-                                {formatPrivateTime(session.start_datetime, session.timezone)} - {formatPrivateTime(session.end_datetime, session.timezone)}
-                              </p>
-                              <p className="mt-2 text-sm font-bold text-slate-700">
-                                {session.session_focus || "Private Session"}
-                              </p>
-                              <p className="mt-1 text-sm text-slate-600">{session.location}</p>
-                              {session.notes ? <p className="mt-2 text-sm text-slate-500">{session.notes}</p> : null}
-                            </div>
-                            <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black uppercase text-white">
-                              Private
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })
+                            return (
+                              <button
+                                key={session.id}
+                                type="button"
+                                onClick={() => togglePrivateSession(session.id)}
+                                className={`rounded-[8px] border p-4 text-left transition ${
+                                  selected ? "border-electric bg-blue-50 ring-2 ring-electric/20" : "border-slate-200 bg-white hover:border-electric"
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <p className="font-black text-electric">
+                                      {formatPrivateTime(session.start_datetime, session.timezone)} - {formatPrivateTime(session.end_datetime, session.timezone)}
+                                    </p>
+                                    <p className="mt-2 text-sm font-bold text-slate-700">
+                                      {session.session_focus || "Private Session"}
+                                    </p>
+                                    <p className="mt-1 text-sm text-slate-600">{session.location}</p>
+                                    {session.notes ? <p className="mt-2 text-sm text-slate-500">{session.notes}</p> : null}
+                                  </div>
+                                  <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-black uppercase text-white">
+                                    {selected ? "Selected" : "Private"}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))
                   ) : (
                     <div className="rounded-[8px] border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-700">
                       No private session times are currently available for this link. Please contact Coach Hugo.
