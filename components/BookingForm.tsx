@@ -37,11 +37,12 @@ import { waiverSections, waiverVersion } from "@/lib/waiver-content";
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
-const publicStepLabels = ["Choose Your Training Session", "Athlete Information", "Parent Waiver + Secure Payment"];
+const publicStepLabels = ["Choose Training Option", "Athlete Information", "Parent Waiver + Secure Payment"];
 const activeBookingGroupId: TrainingGroupId = "elite-performance";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
 type BookingOption = "single_session" | LaunchPassType | "use_existing_pass" | "private_session" | "private_request";
+type BookingSessionType = "small_group" | "private_session";
 type LaunchPassUseMode = "choose_now" | "choose_later";
 
 type BookingFields = {
@@ -347,7 +348,7 @@ function sessionFocusTitle(slot: Pick<PublicAvailableSession, "trainingGroup"> &
 }
 
 const smallGroupAgeRestrictionMessage =
-  "This small group session is currently recommended for older players. Please submit a private training request and Coach Hugo will follow up with availability.";
+  "Small group training is currently recommended for older/advanced players ages 13–18. Please choose a Private Session for younger players or players needing a more personalized option.";
 
 function sessionTimeRange(slot: PublicAvailableSession) {
   return `${slot.startTime}-${slot.endTime}`;
@@ -447,6 +448,7 @@ function bookingOptionFromTypeParam(value: string | null): BookingOption | null 
 export function BookingForm() {
   const [step, setStep] = useState<BookingStep>("program");
   const [bookingOption, setBookingOption] = useState<BookingOption>("single_session");
+  const [selectedSessionType, setSelectedSessionType] = useState<BookingSessionType>("small_group");
   const [apiSessions, setApiSessions] = useState<PublicAvailableSession[]>([]);
   const [apiPrivateSessions, setApiPrivateSessions] = useState<PublicAvailablePrivateSession[]>([]);
   const [availabilityStatus, setAvailabilityStatus] = useState("Loading");
@@ -531,6 +533,11 @@ export function BookingForm() {
 
     if (directBookingOption) {
       selectBookingOption(directBookingOption);
+      const rawType = searchParams.get("type")?.trim().toLowerCase();
+
+      if (rawType === "private-session" || rawType === "private-booking") {
+        selectBookingSessionType("private_session");
+      }
     }
 
     setShowAvailabilityDebug(shouldShowDebug);
@@ -563,8 +570,11 @@ export function BookingForm() {
     bookingOption === "four_session_launch_pass" || bookingOption === "six_session_launch_pass";
   const selectedLaunchPassOption = isPassPurchaseOption ? getLaunchPassOption(bookingOption as LaunchPassType) : null;
   const passPurchaseAvailableSessions = useMemo(
-    () => apiSessions.filter((session) => session.trainingGroupId === activeBookingGroupId),
-    [apiSessions]
+    () =>
+      selectedSessionType === "small_group"
+        ? apiSessions.filter((session) => session.trainingGroupId === activeBookingGroupId)
+        : [],
+    [apiSessions, selectedSessionType]
   );
   const selectedPassSessions = useMemo(
     () =>
@@ -625,6 +635,14 @@ export function BookingForm() {
       return;
     }
 
+    if (selectedSessionType === "private_session") {
+      setSelectedPassSessionIds([]);
+      if (launchPassUseMode === "choose_now") {
+        setLaunchPassUseMode("choose_later");
+      }
+      return;
+    }
+
     setSelectedPassSessionIds((current) =>
       current
         .filter((sessionId) => {
@@ -634,7 +652,7 @@ export function BookingForm() {
         })
         .slice(0, selectedPassCreditLimit || current.length)
     );
-  }, [apiSessions, isPassPurchaseOption, selectedPassCreditLimit]);
+  }, [apiSessions, isPassPurchaseOption, launchPassUseMode, selectedSessionType, selectedPassCreditLimit]);
 
   const selectedSlot = availableSessions.find((slot) => slot.id === selectedSlotId);
   const selectedPrivateSession = availablePrivateSessions.find((slot) => slot.id === selectedPrivateSessionId);
@@ -642,6 +660,7 @@ export function BookingForm() {
   const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.trainingGroupId) : selectedGroup;
   const displaySlot = selectedSlot;
   const isPrivateSessionOption = bookingOption === "private_session";
+  const isPrivateSessionSelection = isPrivateSessionOption || selectedSessionType === "private_session";
   const isPrivateSessionBooking = isPrivateSessionOption || Boolean(selectedPrivateSession);
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
   const publicStepLabel = publicStepLabels[publicStepNumber - 1];
@@ -726,6 +745,25 @@ export function BookingForm() {
     setError("");
   }
 
+  function selectBookingSessionType(type: BookingSessionType) {
+    setSelectedSessionType(type);
+    setSelectedSlotId("");
+    setSelectedPrivateSessionId("");
+    setSelectedSessionDate("");
+    setVisibleMonth("");
+    setFieldErrors({});
+    setPrivateBookingSuccess(null);
+    setSelectedPassSessionIds([]);
+    setError("");
+
+    if (type === "private_session") {
+      setFields((current) => ({ ...current, players: "1" }));
+      if (isPassPurchaseOption) {
+        setLaunchPassUseMode("choose_later");
+      }
+    }
+  }
+
   function selectBookingOption(option: BookingOption) {
     setBookingOption(option);
     setSelectedSlotId("");
@@ -746,6 +784,7 @@ export function BookingForm() {
     }
 
     if (option === "use_existing_pass") {
+      setSelectedSessionType("small_group");
       setSelectedGroupId("");
       setFields((current) => ({ ...current, players: "1" }));
       return;
@@ -759,6 +798,7 @@ export function BookingForm() {
     }
 
     if (option === "private_session") {
+      setSelectedSessionType("private_session");
       setSelectedGroupId("");
       setSelectedPassId("");
       setFoundPasses([]);
@@ -827,6 +867,11 @@ export function BookingForm() {
     }
 
     if (needsSelectedSessions) {
+      if (selectedSessionType === "private_session") {
+        setError("Private Session Training Package scheduling is coordinated after purchase. Choose dates later or book a Single Session private time.");
+        return;
+      }
+
       if (passPlayerAge < 13) {
         setError(smallGroupAgeRestrictionMessage);
         return;
@@ -1268,7 +1313,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Booking</p>
               <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">{publicStepLabel}</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                {isPrivateSessionBooking
+                {isPrivateSessionSelection
                   ? "Private session booking with parent waiver and secure payment."
                   : `60-minute small group soccer training for 1-6 players. ${groupSizeMessage}`}
               </p>
@@ -1315,9 +1360,9 @@ export function BookingForm() {
           <section className="grid gap-6 p-5 sm:p-8">
             <div>
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
+              <h3 className="mt-2 text-2xl font-black text-navy">Choose Training Option</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Choose a booking option. Single Session can include available small group or public private session times.
+                Start with a Single Session or Training Package, then choose the session type that fits your player.
               </p>
             </div>
 
@@ -1370,6 +1415,43 @@ export function BookingForm() {
               </button>
             </div>
 
+            {bookingOption !== "private_request" && !usesExistingPass ? (
+              <div className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5">
+                <div>
+                  <p className="text-sm font-black uppercase text-electric">Step 2</p>
+                  <h4 className="mt-2 text-xl font-black text-navy">Choose Session Type</h4>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    [
+                      "small_group",
+                      "Small Group Training",
+                      "Recommended for older/advanced players, ages 13–18."
+                    ],
+                    ["private_session", "Private Session", "Open to all ages and skill levels."]
+                  ].map(([value, title, description]) => {
+                    const isSelected = selectedSessionType === value;
+
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => selectBookingSessionType(value as BookingSessionType)}
+                        className={`rounded-lg border p-4 text-left transition ${
+                          isSelected
+                            ? "border-navy bg-navy text-white shadow-lg shadow-navy/15"
+                            : "border-slate-200 bg-mist text-navy hover:border-electric"
+                        }`}
+                      >
+                        <span className="block text-base font-black">{title}</span>
+                        <span className="mt-2 block text-sm leading-6 opacity-80">{description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
             {bookingOption === "private_request" ? (
               <div className="rounded-lg border border-slate-200 bg-mist p-5">
                 <PrivateSessionRequestForm embedded />
@@ -1406,7 +1488,11 @@ export function BookingForm() {
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     Training Plan
-                    <input className={inputClass} value="EST CV Training Sessions" readOnly />
+                    <input
+                      className={inputClass}
+                      value={selectedSessionType === "private_session" ? "Private Session" : "Small Group Training"}
+                      readOnly
+                    />
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
                     <input
@@ -1418,43 +1504,50 @@ export function BookingForm() {
                     <span>Yes, I&apos;d like to receive EST CV training schedules, updates, and special offers by email.</span>
                   </label>
                 </div>
-                <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
-                  <div>
-                    <p className="text-xs font-black uppercase text-electric">How would you like to use your package?</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      Choose sessions now, or buy the package first and come back later to use the credits.
-                    </p>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {[
-                      ["choose_now", "Choose session dates now", "Reserve up to your training credits after payment."],
-                      ["choose_later", "Choose session dates later", "Keep all credits available for future booking."]
-                    ].map(([value, title, description]) => {
-                      const isSelected = launchPassUseMode === value;
+                {selectedSessionType === "private_session" ? (
+                  <p className="rounded-md border border-electric/20 bg-white p-4 text-sm font-bold leading-6 text-slate-700">
+                    Private Session Training Package scheduling is coordinated after purchase. Choose dates later or book
+                    a Single Session private time.
+                  </p>
+                ) : (
+                  <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4">
+                    <div>
+                      <p className="text-xs font-black uppercase text-electric">How would you like to use your package?</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Choose sessions now, or buy the package first and come back later to use the credits.
+                      </p>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[
+                        ["choose_now", "Choose session dates now", "Reserve up to your training credits after payment."],
+                        ["choose_later", "Choose session dates later", "Keep all credits available for future booking."]
+                      ].map(([value, title, description]) => {
+                        const isSelected = launchPassUseMode === value;
 
-                      return (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => {
-                            setLaunchPassUseMode(value as LaunchPassUseMode);
-                            setError("");
-                          }}
-                          className={`rounded-lg border p-4 text-left transition ${
-                            isSelected
-                              ? "border-navy bg-navy text-white shadow-lg shadow-navy/15"
-                              : "border-slate-200 bg-mist text-navy hover:border-electric"
-                          }`}
-                        >
-                          <span className={`block text-sm font-black ${isSelected ? "text-white" : "text-navy"}`}>{title}</span>
-                          <span className="mt-2 block text-sm leading-6 opacity-80">{description}</span>
-                        </button>
-                      );
-                    })}
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => {
+                              setLaunchPassUseMode(value as LaunchPassUseMode);
+                              setError("");
+                            }}
+                            className={`rounded-lg border p-4 text-left transition ${
+                              isSelected
+                                ? "border-navy bg-navy text-white shadow-lg shadow-navy/15"
+                                : "border-slate-200 bg-mist text-navy hover:border-electric"
+                            }`}
+                          >
+                            <span className={`block text-sm font-black ${isSelected ? "text-white" : "text-navy"}`}>{title}</span>
+                            <span className="mt-2 block text-sm leading-6 opacity-80">{description}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {launchPassUseMode === "choose_now" ? (
+                {selectedSessionType === "small_group" && launchPassUseMode === "choose_now" ? (
                   <div className="grid gap-5 rounded-lg border border-slate-200 bg-white p-4">
                     <div>
                       <p className="text-xs font-black uppercase text-electric">Select Sessions</p>
@@ -1619,7 +1712,7 @@ export function BookingForm() {
                 >
                   {isSubmitting
                     ? "Starting Payment..."
-                    : launchPassUseMode === "choose_now"
+                    : selectedSessionType === "small_group" && launchPassUseMode === "choose_now"
                       ? `Buy Package & Book ${selectedPassSessionIds.length || ""} Session${selectedPassSessionIds.length === 1 ? "" : "s"}`
                       : `Buy ${getLaunchPassOption(bookingOption as LaunchPassType).title}`}
                 </button>
@@ -1707,11 +1800,16 @@ export function BookingForm() {
             ) : (
               <>
                 <div className="rounded-lg border border-slate-200 bg-mist p-5">
-                  <p className="text-xs font-black uppercase text-electric">EST CV Training Sessions</p>
-                  <h4 className="mt-2 text-2xl font-black text-navy">Small Group and Private Training</h4>
+                  <p className="text-xs font-black uppercase text-electric">
+                    {selectedSessionType === "private_session" ? "Private Session" : "Small Group Training"}
+                  </p>
+                  <h4 className="mt-2 text-2xl font-black text-navy">
+                    {selectedSessionType === "private_session" ? "Private Session" : "Small Group Training"}
+                  </h4>
                   <p className="mt-3 text-sm leading-6 text-slate-600">
-                    Small group and private training options are designed to help players improve through focused,
-                    competitive, and personal coaching.
+                    {selectedSessionType === "private_session"
+                      ? "Open to all ages and skill levels."
+                      : "Recommended for older/advanced players, ages 13–18."}
                   </p>
                 </div>
 
@@ -1738,7 +1836,7 @@ export function BookingForm() {
                   onClick={() => setStep("session")}
                   className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
                 >
-                  View Available Sessions
+                  {selectedSessionType === "private_session" ? "View Private Sessions" : "View Small Group Sessions"}
                 </button>
               </>
             )}
@@ -1750,15 +1848,15 @@ export function BookingForm() {
             <div>
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">
-                {isPrivateSessionOption ? "Choose your private session" : "Choose your training session"}
+                {isPrivateSessionSelection ? "Choose your private session" : "Choose your small group session"}
               </h3>
               <p className="mt-2 text-sm font-bold text-slate-600">
-                {isPrivateSessionOption ? "Private Session" : "EST CV Training Sessions"}
+                {isPrivateSessionSelection ? "Private Session" : "Small Group Training"}
               </p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                {isPrivateSessionOption
+                {isPrivateSessionSelection
                   ? "Private sessions are one-on-one openings created by Coach Hugo. Choose an available time below."
-                  : groupSizeMessage}
+                  : "Small group training is recommended for older/advanced players, ages 13–18."}
               </p>
             </div>
 
@@ -1772,9 +1870,9 @@ export function BookingForm() {
                   <p><span className="font-black text-navy">All sessions loaded:</span> {availabilityDebug?.summary?.allSessionsLoaded ?? "loading"}</p>
                   <p><span className="font-black text-navy">Open future sessions:</span> {availabilityDebug?.summary?.openFutureSessions ?? "loading"}</p>
                   <p><span className="font-black text-navy">Sessions with remaining spots:</span> {availabilityDebug?.summary?.sessionsWithRemainingSpots ?? "loading"}</p>
-                  <p><span className="font-black text-navy">Selected sessions:</span> EST CV Training Sessions</p>
-                  <p><span className="font-black text-navy">Sessions after group/option filter:</span> {availableSessions.length}</p>
-                  <p><span className="font-black text-navy">Final sessions rendered:</span> {sessionsForSelectedDate.length}</p>
+                  <p><span className="font-black text-navy">Selected sessions:</span> {isPrivateSessionSelection ? "Private Session" : "Small Group Training"}</p>
+                  <p><span className="font-black text-navy">Sessions after group/option filter:</span> {isPrivateSessionSelection ? availablePrivateSessions.length : availableSessions.length}</p>
+                  <p><span className="font-black text-navy">Final sessions rendered:</span> {isPrivateSessionSelection ? availablePrivateSessions.length : sessionsForSelectedDate.length}</p>
                 </div>
                 {availabilityError ? <p className="mt-3 font-bold text-red-700">{availabilityError}</p> : null}
                 <div className="mt-3 grid gap-1">
@@ -1793,7 +1891,7 @@ export function BookingForm() {
               </div>
             ) : null}
 
-            {isPrivateSessionOption ? (
+            {isPrivateSessionSelection ? (
               <div
                 data-booking-field="session"
                 tabIndex={-1}
@@ -1866,7 +1964,7 @@ export function BookingForm() {
                 )}
                 {fieldErrorMessage("session")}
               </div>
-            ) : availableSessions.length > 0 || availablePrivateSessions.length > 0 ? (
+            ) : availableSessions.length > 0 ? (
               <div
                 data-booking-field="session"
                 tabIndex={-1}
@@ -1995,63 +2093,6 @@ export function BookingForm() {
                     No open sessions are available for this date. Choose another highlighted date.
                   </p>
                 ) : null}
-                {availablePrivateSessions.length > 0 ? (
-                  <div className="grid gap-3 border-t border-slate-200 pt-5">
-                    <div>
-                      <p className="text-sm font-black text-navy">Available private sessions</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">
-                        Private sessions are booked for one player and do not count toward small group capacity.
-                      </p>
-                    </div>
-                    {availablePrivateSessions.map((slot) => {
-                      const isSelected = selectedPrivateSessionId === slot.id;
-
-                      return (
-                        <button
-                          key={slot.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPrivateSessionId(slot.id);
-                            setSelectedSlotId("");
-                            setSelectedSessionDate("");
-                            setPrivateBookingSuccess(null);
-                            clearFieldError("session");
-                            setFields((current) => ({ ...current, players: "1" }));
-                          }}
-                          className={`rounded-lg border p-4 text-left transition ${
-                            isSelected
-                              ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
-                              : "border-slate-200 bg-white text-navy hover:border-electric"
-                          }`}
-                        >
-                          <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
-                            <div>
-                              <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
-                                {slot.dayLabel}, {slot.dateLabel}
-                              </span>
-                              <span className="mt-1 block text-2xl font-black">{privateSessionTimeRange(slot)}</span>
-                              <span className="mt-2 block text-sm font-bold opacity-90">Private Session</span>
-                              <span className="mt-1 block text-sm font-semibold opacity-80">
-                                {sessionLocationLines(slot.location).map((line) => (
-                                  <span key={line} className="block">{line}</span>
-                                ))}
-                              </span>
-                              <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
-                              <span className="mt-3 block text-xs font-black uppercase text-electric">Available</span>
-                            </div>
-                            <span
-                              className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
-                                isSelected ? "bg-electric text-white" : "bg-mist text-navy"
-                              }`}
-                            >
-                              {isSelected ? "Selected" : "Book Private Session"}
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
                 {fieldErrorMessage("session")}
               </div>
             ) : (
@@ -2139,13 +2180,13 @@ export function BookingForm() {
                 <button
                   type="button"
                   onClick={() => {
-                    selectBookingOption("private_request");
-                    setStep("program");
+                    selectBookingSessionType("private_session");
+                    setStep("session");
                     setError("");
                   }}
                   className="w-fit rounded-md border border-electric px-4 py-2 text-xs font-black uppercase text-electric transition hover:bg-electric hover:text-white"
                 >
-                  Request Private Training
+                  Choose Private Session
                 </button>
               ) : null}
             </label>

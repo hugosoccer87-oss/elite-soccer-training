@@ -76,7 +76,7 @@ export const groupSizeMessage =
   "Small group sessions are capped at 6 players to keep training focused, competitive, and personal.";
 
 export const juneLaunchScheduleNote =
-  "June launch sessions are limited and groups are capped at 6 players. Morning sessions are recommended for older players. Younger player sessions are scheduled in the early evening with water breaks and controlled training intensity.";
+  "June launch sessions are limited and groups are capped at 6 players. Small group and private training options are built around focused coaching, controlled intensity, and player development.";
 
 export const refundCancellationReminder =
   "Sessions are non-refundable. If Elite Soccer Training CV cancels due to weather, field conditions, or scheduling changes, families will receive a reschedule option.";

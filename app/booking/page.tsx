@@ -5,7 +5,7 @@ import { business } from "@/lib/site-data";
 
 export const metadata: Metadata = {
   title: "Book Training",
-  description: "Submit a small group soccer training request for Elite Soccer Training CV."
+  description: "Book small group or private soccer training with Elite Soccer Training CV."
 };
 
 export default function BookingPage() {
@@ -27,9 +27,8 @@ export default function BookingPage() {
             <div className="mt-5 grid gap-3">
               {[
                 ["Single Session", "$55", "Book one available training session online."],
-                ["4-Session Training Package", "$200", "4 training credits for EST CV small group training."],
-                ["6-Session Training Package", "$285", "6 training credits for EST CV small group training."],
-                ["Private 1-on-1 Session Request", "Request", "Submit preferred times. No payment is collected immediately."]
+                ["4-Session Training Package", "$200", "4 EST CV training credits."],
+                ["6-Session Training Package", "$285", "6 EST CV training credits."]
               ].map(([title, price, description]) => (
                 <div key={title} className="rounded-lg border border-slate-200 bg-white p-4">
                   <p className="font-black text-navy">
@@ -40,8 +39,8 @@ export default function BookingPage() {
               ))}
             </div>
             <p className="mt-5 rounded-lg border border-electric/20 bg-white p-4 text-sm font-bold leading-6 text-slate-600">
-              Groups are capped at 6 players. Morning sessions are recommended for older players. Younger sessions are
-              held in the early evening with water breaks.
+              Small group and private training options are designed to help players improve through focused,
+              competitive, and personal coaching.
             </p>
             <a
               href={business.phoneHref}
