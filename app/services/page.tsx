@@ -10,7 +10,7 @@ import { pricingOptions } from "@/lib/pricing";
 
 export const metadata: Metadata = {
   title: "Programs",
-  description: "Small group soccer training programs and focused finishing sessions for youth players in the Coachella Valley."
+  description: "Small group soccer training programs for youth players in the Coachella Valley."
 };
 
 export default function ServicesPage() {
@@ -19,7 +19,7 @@ export default function ServicesPage() {
       <PageHero
         eyebrow="Programs"
         title="Age-based small group soccer development."
-        description={`Main small group training serves players ages 9-18. Every session is 60 minutes and $55 per player. ${groupSizeMessage}`}
+        description={`Current small group training is focused on Elite Performance players ages 13–18. Every session is 60 minutes and $55 per player. ${groupSizeMessage}`}
       />
 
       <section className="bg-mist py-16 sm:py-20">
@@ -55,9 +55,9 @@ export default function ServicesPage() {
       <section className="bg-white py-16 sm:py-20">
         <div className="section-shell">
           <SectionHeader
-            eyebrow="Session Focus"
+            eyebrow="Session Structure"
             title="Every session has a plan, a tempo, and a clear soccer purpose."
-            description="Younger players build foundation and confidence. Older players train speed of play, intensity, finishing, and game-realistic decision making. Shooting & Finishing sessions add focused attacking repetition for players who want more confidence in front of goal."
+            description="Players train in a clean, competitive, age-appropriate environment built around repetition, confidence, speed of play, and game-realistic decision making."
           />
           <div className="mt-10 grid gap-5 md:grid-cols-4">
             {["Warm-up + ball mastery", "Technical theme", "Pressure reps", "Finish with game actions"].map((item, index) => (
@@ -94,7 +94,7 @@ export default function ServicesPage() {
               Special Training Request
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
-              Have a player outside the standard 9-18 age range, a sibling group, team training request, or a custom
+              Have a player outside the standard 13–18 age range, a sibling group, team training request, or a custom
               training need? Submit a special request and Coach Hugo will review the details.
             </p>
             <a

@@ -75,7 +75,7 @@ export default function ContactPage() {
               Special Training Request
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
-              Have a player outside the standard 9-18 age range, a sibling group, team training request, or a custom
+              Have a player outside the standard 13–18 age range, a sibling group, team training request, or a custom
               training need? Submit a special request and Coach Hugo will review the details.
             </p>
             <a

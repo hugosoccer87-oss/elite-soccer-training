@@ -24,18 +24,7 @@ export const navItems = [
 
 export const services = [
   {
-    title: "Future Elite (Ages 9-12)",
-    eyebrow: "Technical foundation",
-    description: "Small group development for young players building confidence, clean technique, and control.",
-    highlights: [
-      "First touch and ball mastery",
-      "Passing and receiving",
-      "Coordination and movement",
-      "Confidence on the ball"
-    ]
-  },
-  {
-    title: "Elite Performance (Ages 13-18)",
+    title: "Elite Performance (Ages 13–18)",
     eyebrow: "Game-realistic intensity",
     description: "High-intensity training for older players developing speed, decision making, and match execution.",
     highlights: [
@@ -43,23 +32,6 @@ export const services = [
       "Decision making under pressure",
       "Agility and intensity",
       "Game-realistic development"
-    ]
-  },
-  {
-    title: "Shooting & Finishing",
-    eyebrow: "Attacking confidence",
-    description:
-      "Focused attacking sessions designed to help players improve ball striking, finishing technique, movement in the final third, composure in front of goal, and confidence when creating or taking chances.",
-    detail:
-      "Shooting & Finishing sessions are built for players who want more confidence in front of goal. Players will get high-repetition finishing work with coaching detail on technique, movement, timing, and decision-making in attacking moments.",
-    highlights: [
-      "Ball striking technique",
-      "1-touch and 2-touch finishing",
-      "Finishing off the dribble",
-      "Movement before the shot",
-      "Shooting under pressure",
-      "Attacking confidence",
-      "Game-like finishing reps"
     ]
   }
 ];

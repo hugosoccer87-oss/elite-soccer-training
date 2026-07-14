@@ -1,13 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { bookingNotificationEmail, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
-import {
-  getSessionFocusLabel,
-  privateSessionTrainingFocusValue,
-  sessionFocusExamples,
-  shootingFinishingTrainingFocusValue
-} from "@/lib/session-focus";
+import { bookingNotificationEmail, getTrainingGroupSessionLabel, slotCapacity, trainingGroups, type TrainingGroupId } from "@/lib/booking-data";
+import { privateSessionTrainingFocusValue } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type {
   AdminAlertLogRow,
@@ -207,11 +202,7 @@ type SessionFilter =
   | "open"
   | "full"
   | "closed"
-  | "cancelled"
-  | "technical"
-  | "defending"
-  | "shooting-attacking"
-  | "shooting-finishing";
+  | "cancelled";
 type SessionDateRange = "all" | "today" | "this-week" | "upcoming" | "past";
 type BookingFilter = "confirmed" | "incomplete" | "all" | "upcoming" | "past";
 type PassFilter = "all" | "active" | "used-up" | "four" | "six";
@@ -309,9 +300,6 @@ const adminSections: Array<{ id: AdminSection; label: string; note: string }> = 
   { id: "email-list", label: "Email List", note: "Brevo CSV export" }
 ];
 
-const focusChoices = Array.from(
-  new Set(["General Training", ...sessionFocusExamples, shootingFinishingTrainingFocusValue, privateSessionTrainingFocusValue])
-);
 const dayOptions = [
   { value: 1, label: "Monday" },
   { value: 2, label: "Tuesday" },
@@ -388,16 +376,16 @@ const customPaymentLinkModeOptions: Array<{ value: CustomPaymentLinkMode; label:
 const calendarHourStart = 5;
 const calendarHourEnd = 21;
 const defaultBulkPatterns: BulkSessionPattern[] = [
-  { id: "monday-6", dayOfWeek: 1, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
-  { id: "monday-7", dayOfWeek: 1, startTime: "07:00", endTime: "08:00", trainingFocus: "Wingers / Wing Backs" },
-  { id: "tuesday-6", dayOfWeek: 2, startTime: "06:00", endTime: "07:00", trainingFocus: "First Touch & Passing" },
-  { id: "tuesday-7", dayOfWeek: 2, startTime: "07:00", endTime: "08:00", trainingFocus: "Defending Session" },
-  { id: "wednesday-6", dayOfWeek: 3, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
-  { id: "wednesday-7", dayOfWeek: 3, startTime: "07:00", endTime: "08:00", trainingFocus: "Shooting / Attacking Session" },
-  { id: "thursday-6", dayOfWeek: 4, startTime: "06:00", endTime: "07:00", trainingFocus: "Speed of Play & Decision Making" },
-  { id: "thursday-7", dayOfWeek: 4, startTime: "07:00", endTime: "08:00", trainingFocus: "Defending Session" },
-  { id: "friday-6", dayOfWeek: 5, startTime: "06:00", endTime: "07:00", trainingFocus: "Technical Work" },
-  { id: "friday-7", dayOfWeek: 5, startTime: "07:00", endTime: "08:00", trainingFocus: "Shooting / Attacking Session" }
+  { id: "monday-6", dayOfWeek: 1, startTime: "06:00", endTime: "07:00", trainingFocus: "General Training" },
+  { id: "monday-7", dayOfWeek: 1, startTime: "07:00", endTime: "08:00", trainingFocus: "General Training" },
+  { id: "tuesday-6", dayOfWeek: 2, startTime: "06:00", endTime: "07:00", trainingFocus: "General Training" },
+  { id: "tuesday-7", dayOfWeek: 2, startTime: "07:00", endTime: "08:00", trainingFocus: "General Training" },
+  { id: "wednesday-6", dayOfWeek: 3, startTime: "06:00", endTime: "07:00", trainingFocus: "General Training" },
+  { id: "wednesday-7", dayOfWeek: 3, startTime: "07:00", endTime: "08:00", trainingFocus: "General Training" },
+  { id: "thursday-6", dayOfWeek: 4, startTime: "06:00", endTime: "07:00", trainingFocus: "General Training" },
+  { id: "thursday-7", dayOfWeek: 4, startTime: "07:00", endTime: "08:00", trainingFocus: "General Training" },
+  { id: "friday-6", dayOfWeek: 5, startTime: "06:00", endTime: "07:00", trainingFocus: "General Training" },
+  { id: "friday-7", dayOfWeek: 5, startTime: "07:00", endTime: "08:00", trainingFocus: "General Training" }
 ];
 
 function escapeHtml(value: string) {
@@ -626,25 +614,11 @@ function directPaymentMethodLabel(method: string) {
   return method === "zelle" ? "Zelle" : "Card";
 }
 
-function sessionFocusLabel(session: Pick<AdminTrainingSession, "training_focus">) {
-  return getSessionFocusLabel(session.training_focus);
+function sessionFocusLabel(session: Pick<AdminTrainingSession, "training_group">) {
+  return getTrainingGroupSessionLabel(session.training_group);
 }
 
-function sessionFocusBadgeClass(session: Pick<AdminTrainingSession, "training_focus">) {
-  const focus = sessionFocusLabel(session).toLowerCase();
-
-  if (focus.includes("shooting")) {
-    return "border-blue-200 bg-blue-50 text-electric";
-  }
-
-  if (focus.includes("defending")) {
-    return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  }
-
-  if (focus.includes("technical") || focus.includes("first touch")) {
-    return "border-indigo-200 bg-indigo-50 text-indigo-700";
-  }
-
+function sessionFocusBadgeClass(_session: Pick<AdminTrainingSession, "training_group">) {
   return "border-slate-200 bg-white text-slate-700";
 }
 
@@ -935,11 +909,11 @@ function playerScheduleText(group: PlayerLookupGroup, sessionById: Map<string, A
     const sessionTime = session
       ? `${formatDateTime(session.start_datetime, session.timezone)} to ${formatTime(session.end_datetime, session.timezone)}`
       : "Session not loaded";
-    const focus = session ? sessionFocusLabel(session) : "Session not recorded";
+    const sessionType = session ? sessionFocusLabel(session) : "Session not recorded";
 
     return [
       `${index + 1}. ${sessionTime}`,
-      `Focus: ${focus}`,
+      `Session type: ${sessionType}`,
       `Training group: ${bookingProgramLabel(booking)}`,
       `Booking: ${bookingAdminStatusLabel(booking)}`,
       `Payment: ${paymentTypeLabel(booking)} / ${formatMoney(booking.amount_paid)}`,
@@ -961,7 +935,7 @@ function bookingWaiverRecordText(booking: AdminBookingRecord, session?: AdminTra
     `Booking ID: ${booking.id}`,
     `Training Group: ${bookingProgramLabel(booking)}`,
     `Session: ${session ? formatDateTime(session.start_datetime, session.timezone) : "Not recorded"}`,
-    `Session Focus: ${session ? sessionFocusLabel(session) : "Not recorded"}`,
+    `Session Type: ${session ? sessionFocusLabel(session) : "Not recorded"}`,
     "",
     "Participant Information",
     `Parent/Guardian Name: ${booking.parent_name}`,
@@ -1069,8 +1043,6 @@ function isThisMonth(value: string) {
 }
 
 function sessionMatchesFilter(session: AdminTrainingSession, filter: SessionFilter) {
-  const focus = sessionFocusLabel(session).toLowerCase();
-
   if (filter === "all") {
     return true;
   }
@@ -1089,22 +1061,6 @@ function sessionMatchesFilter(session: AdminTrainingSession, filter: SessionFilt
 
   if (filter === "cancelled") {
     return session.status === "cancelled";
-  }
-
-  if (filter === "technical") {
-    return focus.includes("technical") || focus.includes("first touch") || focus.includes("passing");
-  }
-
-  if (filter === "defending") {
-    return focus.includes("defending");
-  }
-
-  if (filter === "shooting-attacking") {
-    return focus.includes("shooting / attacking") || focus.includes("attacking");
-  }
-
-  if (filter === "shooting-finishing") {
-    return focus.includes("shooting & finishing") || focus.includes("finishing");
   }
 
   return true;
@@ -1314,7 +1270,6 @@ export function AdminAvailability() {
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>("elite-performance");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
-  const [newTrainingFocus, setNewTrainingFocus] = useState("");
   const [newCapacity, setNewCapacity] = useState(String(slotCapacity));
   const [newLocation, setNewLocation] = useState(business.location);
   const [newStatus, setNewStatus] = useState<"open" | "closed" | "cancelled">("open");
@@ -1346,7 +1301,6 @@ export function AdminAvailability() {
   const [actionsSessionId, setActionsSessionId] = useState("");
   const [creditingBookingId, setCreditingBookingId] = useState("");
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>("confirmed");
-  const [bookingFocusFilter, setBookingFocusFilter] = useState("");
   const [bookingDateFilter, setBookingDateFilter] = useState("");
   const [expandedBookingId, setExpandedBookingId] = useState("");
   const [updatingBookingId, setUpdatingBookingId] = useState("");
@@ -1391,14 +1345,12 @@ export function AdminAvailability() {
   const [customPrivateDayFilter, setCustomPrivateDayFilter] = useState("all");
   const [customPrivateStartFilter, setCustomPrivateStartFilter] = useState("");
   const [customPrivateEndFilter, setCustomPrivateEndFilter] = useState("");
-  const [customPrivateFocusFilter, setCustomPrivateFocusFilter] = useState("all");
   const [customPrivateLocationFilter, setCustomPrivateLocationFilter] = useState("");
   const [customLinkCreatedUrl, setCustomLinkCreatedUrl] = useState("");
   const [privateAvailabilityDate, setPrivateAvailabilityDate] = useState("");
   const [privateAvailabilityStartTime, setPrivateAvailabilityStartTime] = useState("17:00");
   const [privateAvailabilityEndTime, setPrivateAvailabilityEndTime] = useState("18:00");
   const [privateAvailabilityLocation, setPrivateAvailabilityLocation] = useState(business.location);
-  const [privateAvailabilityFocus, setPrivateAvailabilityFocus] = useState(privateSessionTrainingFocusValue);
   const [privateAvailabilityNotes, setPrivateAvailabilityNotes] = useState("");
   const [privateAvailabilityStatus, setPrivateAvailabilityStatus] = useState<PrivateSessionAvailabilityStatus>("available");
   const [privateRequestScheduleInputs, setPrivateRequestScheduleInputs] = useState<
@@ -1849,7 +1801,6 @@ export function AdminAvailability() {
       bookings.filter((booking) => {
         const session = sessionById.get(booking.session_id);
         const sessionDate = session?.start_datetime;
-        const focus = session ? sessionFocusLabel(session).toLowerCase() : "";
         const isConfirmed = isBookingConfirmedForAdmin(booking);
         const matchesStatus =
           bookingFilter === "all" ||
@@ -1857,13 +1808,12 @@ export function AdminAvailability() {
           (bookingFilter === "incomplete" && !isConfirmed) ||
           (bookingFilter === "upcoming" && isConfirmed && (!sessionDate || isFuture(sessionDate))) ||
           (bookingFilter === "past" && isConfirmed && (sessionDate ? !isFuture(sessionDate) : false));
-        const matchesFocus = !bookingFocusFilter || focus.includes(bookingFocusFilter.toLowerCase());
         const matchesDate =
           !bookingDateFilter || (session ? formatDateOnly(session.start_datetime, session.timezone) === bookingDateFilter : false);
 
-        return matchesStatus && matchesFocus && matchesDate;
+        return matchesStatus && matchesDate;
       }),
-    [bookingDateFilter, bookingFilter, bookingFocusFilter, bookings, sessionById]
+    [bookingDateFilter, bookingFilter, bookings, sessionById]
   );
   const playerLookupGroups = useMemo<PlayerLookupGroup[]>(() => {
     const search = normalizeLookupValue(playerLookupSearch);
@@ -2050,7 +2000,6 @@ export function AdminAvailability() {
           const sessionStart = formatTimeInput(session.start_datetime, session.timezone);
           const sessionEnd = formatTimeInput(session.end_datetime, session.timezone);
           const sessionDay = String(dateFromDateInput(sessionDate).getUTCDay());
-          const focus = (session.session_focus || "Private Session").toLowerCase();
           const location = (session.location || "").toLowerCase();
 
           if (customPrivateDateFilter && sessionDate !== customPrivateDateFilter) {
@@ -2069,10 +2018,6 @@ export function AdminAvailability() {
             return false;
           }
 
-          if (customPrivateFocusFilter !== "all" && focus !== customPrivateFocusFilter.toLowerCase()) {
-            return false;
-          }
-
           if (customPrivateLocationFilter.trim() && !location.includes(customPrivateLocationFilter.trim().toLowerCase())) {
             return false;
           }
@@ -2084,22 +2029,10 @@ export function AdminAvailability() {
       customPrivateDateFilter,
       customPrivateDayFilter,
       customPrivateEndFilter,
-      customPrivateFocusFilter,
       customPrivateLocationFilter,
       customPrivateStartFilter,
       privateSessionAvailability
     ]
-  );
-  const customPrivateFocusOptions = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          "Private Session",
-          ...sessionFocusExamples,
-          ...privateSessionAvailability.map((session) => session.session_focus || "Private Session")
-        ])
-      ),
-    [privateSessionAvailability]
   );
 
   function setCustomPaymentPlan(planType: CustomPaymentLinkPlanType) {
@@ -2180,7 +2113,7 @@ export function AdminAvailability() {
           startTime: privateAvailabilityStartTime,
           endTime: privateAvailabilityEndTime,
           location: privateAvailabilityLocation,
-          sessionFocus: privateAvailabilityFocus || privateSessionTrainingFocusValue,
+          sessionFocus: privateSessionTrainingFocusValue,
           notes: privateAvailabilityNotes,
           status: privateAvailabilityStatus
         })
@@ -2284,7 +2217,7 @@ export function AdminAvailability() {
           trainingGroup: newGroupId,
           date: newDate,
           time: newTime,
-          trainingFocus: newTrainingFocus.trim() || null,
+          trainingFocus: null,
           capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
           location: newLocation,
           status: newStatus
@@ -3058,7 +2991,6 @@ export function AdminAvailability() {
       setCustomPrivateDayFilter("all");
       setCustomPrivateStartFilter("");
       setCustomPrivateEndFilter("");
-      setCustomPrivateFocusFilter("all");
       setCustomPrivateLocationFilter("");
       await refreshAdminData("Private payment link created. Copy it or resend it by email.");
       setCustomLinkCreatedUrl(result.paymentUrl || "");
@@ -3415,7 +3347,6 @@ export function AdminAvailability() {
     setNewGroupId(session.training_group);
     setNewDate(formatDateOnly(session.start_datetime, session.timezone));
     setNewTime(formatTimeInput(session.start_datetime, session.timezone));
-    setNewTrainingFocus(session.training_focus || "");
     setNewCapacity(String(session.capacity || slotCapacity));
     setNewLocation(session.location || business.location);
     setNewStatus(session.status);
@@ -3444,16 +3375,6 @@ export function AdminAvailability() {
     }
 
     void updateSession(session.id, { location: nextLocation.trim() || business.location });
-  }
-
-  function editSessionFocus(session: AdminTrainingSession) {
-    const nextFocus = window.prompt("Set session focus. Leave blank for General Training.", session.training_focus || "");
-
-    if (nextFocus === null) {
-      return;
-    }
-
-    void updateSession(session.id, { training_focus: nextFocus.trim() || null });
   }
 
   async function updateDirectPayment(id: string, status: DirectPaymentStatus) {
@@ -4207,7 +4128,7 @@ export function AdminAvailability() {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-600">
-                  <p><span className="font-black text-navy">Training group:</span> Elite Performance ages 13-18</p>
+                  <p><span className="font-black text-navy">Training group:</span> Elite Performance ages 13–18</p>
                   <p><span className="font-black text-navy">Location:</span> {selectedCalendarSession.location || business.location}</p>
                   <p><span className="font-black text-navy">Remaining spots:</span> {selectedCalendarSession.remainingSpots}</p>
                   <p>
@@ -4330,7 +4251,7 @@ export function AdminAvailability() {
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-600">
-                  <p><span className="font-black text-navy">Session focus:</span> {selectedCalendarPrivateSession.session_focus || "Private Session"}</p>
+                  <p><span className="font-black text-navy">Session type:</span> Private Session</p>
                   <p><span className="font-black text-navy">Location:</span> {selectedCalendarPrivateSession.location || business.location}</p>
                   <p><span className="font-black text-navy">Notes:</span> {selectedCalendarPrivateSession.notes || "None"}</p>
                   <p>
@@ -4409,7 +4330,7 @@ export function AdminAvailability() {
                         {request.scheduled_start ? formatDateTime(request.scheduled_start, request.timezone) : "Not scheduled"}
                       </p>
                       <p className="mt-1 font-bold text-slate-700">Private 1-on-1 - {request.player_name}</p>
-                      <p className="mt-1 text-slate-600">{request.focus_areas.join(", ") || "General Technical Work"}</p>
+                      <p className="mt-1 text-slate-600">Private Session</p>
                       <p className="mt-1 text-xs font-black uppercase text-slate-500">
                         Calendar: {request.calendar_status || "not synced"}
                       </p>
@@ -4434,7 +4355,7 @@ export function AdminAvailability() {
                 <p className="text-xs font-black uppercase text-electric">Sessions</p>
                 <h3 className="mt-2 text-2xl font-black text-navy">Create and manage openings.</h3>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                  Elite Performance is the default group. Add a session focus so parents know what the training day covers.
+                  Elite Performance is the default group. Add the date, time, capacity, location, and status for each opening.
                 </p>
               </div>
               <button type="button" onClick={() => setShowCreateSession((value) => !value)} className={primaryButtonClass}>
@@ -4451,16 +4372,6 @@ export function AdminAvailability() {
                       {trainingGroups.map((group) => (
                         <option key={group.id} value={group.id}>
                           {group.name} ({group.ages})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-                    Session Focus
-                    <select className={inputClass} value={newTrainingFocus} onChange={(event) => setNewTrainingFocus(event.target.value)}>
-                      {focusChoices.map((focus) => (
-                        <option key={focus} value={focus === "General Training" ? "" : focus}>
-                          {focus}
                         </option>
                       ))}
                     </select>
@@ -4655,20 +4566,6 @@ export function AdminAvailability() {
                             onChange={(event) => updateBulkPattern(pattern.id, { endTime: event.target.value })}
                           />
                         </label>
-                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                          Session Focus
-                          <select
-                            className={inputClass}
-                            value={pattern.trainingFocus}
-                            onChange={(event) => updateBulkPattern(pattern.id, { trainingFocus: event.target.value })}
-                          >
-                            {focusChoices.map((focus) => (
-                              <option key={focus} value={focus}>
-                                {focus}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
                         <button
                           type="button"
                           onClick={() => removeBulkPattern(pattern.id)}
@@ -4732,9 +4629,8 @@ export function AdminAvailability() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-xs font-black uppercase text-slate-500">Session Focus</p>
-                              <p className="mt-1 font-black text-navy">{session.trainingFocus}</p>
-                              <p className="mt-1 text-sm text-slate-600">{session.trainingGroupLabel}</p>
+                              <p className="text-xs font-black uppercase text-slate-500">Training Group</p>
+                              <p className="mt-1 font-black text-navy">{session.trainingGroupLabel}</p>
                             </div>
                             <div>
                               <p className="text-xs font-black uppercase text-slate-500">Details</p>
@@ -4811,11 +4707,7 @@ export function AdminAvailability() {
                     ["open", "Open"],
                     ["full", "Full"],
                     ["closed", "Closed"],
-                    ["cancelled", "Cancelled"],
-                    ["shooting-attacking", "Shooting / Attacking"],
-                    ["defending", "Defending"],
-                    ["technical", "Technical Work"],
-                    ["shooting-finishing", "Shooting & Finishing"]
+                    ["cancelled", "Cancelled"]
                   ].map(([value, label]) => (
                     <button
                       key={value}
@@ -4970,9 +4862,6 @@ export function AdminAvailability() {
                                     <button type="button" onClick={() => setExpandedSessionId(detailsOpen ? "" : session.id)} className={secondaryButtonClass}>
                                       View Details
                                     </button>
-                                    <button type="button" onClick={() => editSessionFocus(session)} className={secondaryButtonClass}>
-                                      Edit Focus
-                                    </button>
                                     <button type="button" onClick={() => duplicateSession(session)} className={secondaryButtonClass}>
                                       Duplicate
                                     </button>
@@ -4996,19 +4885,8 @@ export function AdminAvailability() {
                                   </div>
                                 </div>
                                 <div>
-                                  <p className="text-xs font-black uppercase text-slate-500">Session Focus</p>
+                                  <p className="text-xs font-black uppercase text-slate-500">Details</p>
                                   <div className="mt-3 grid gap-2">
-                                    <button type="button" disabled={isSaving} onClick={() => void updateSession(session.id, { training_focus: null })} className={secondaryButtonClass}>
-                                      Set General
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={isSaving}
-                                      onClick={() => void updateSession(session.id, { training_focus: "Shooting & Finishing" })}
-                                      className={secondaryButtonClass}
-                                    >
-                                      Set Shooting & Finishing
-                                    </button>
                                     <button type="button" disabled={isSaving} onClick={() => editCapacity(session)} className={secondaryButtonClass}>
                                       Update Capacity
                                     </button>
@@ -5235,15 +5113,6 @@ export function AdminAvailability() {
                 </select>
               </label>
               <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                Session Focus
-                <input
-                  className={inputClass}
-                  value={bookingFocusFilter}
-                  onChange={(event) => setBookingFocusFilter(event.target.value)}
-                  placeholder="Shooting, Defending..."
-                />
-              </label>
-              <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                 Date
                 <input className={inputClass} type="date" value={bookingDateFilter} onChange={(event) => setBookingDateFilter(event.target.value)} />
               </label>
@@ -5251,7 +5120,6 @@ export function AdminAvailability() {
                 type="button"
                 onClick={() => {
                   setBookingFilter("confirmed");
-                  setBookingFocusFilter("");
                   setBookingDateFilter("");
                 }}
                 className={secondaryButtonClass}
@@ -6127,17 +5995,6 @@ export function AdminAvailability() {
                       <input className={inputClass} type="time" value={customPrivateEndFilter} onChange={(event) => setCustomPrivateEndFilter(event.target.value)} />
                     </label>
                     <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                      Focus
-                      <select className={inputClass} value={customPrivateFocusFilter} onChange={(event) => setCustomPrivateFocusFilter(event.target.value)}>
-                        <option value="all">Any focus</option>
-                        {customPrivateFocusOptions.map((focus) => (
-                          <option key={focus} value={focus}>
-                            {focus}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
                       Location
                       <input
                         className={inputClass}
@@ -6169,7 +6026,7 @@ export function AdminAvailability() {
                                 <p className="text-sm font-black text-navy">
                                   {formatDateTime(session.start_datetime, session.timezone)} - {formatTime(session.end_datetime, session.timezone)}
                                 </p>
-                                <p className="mt-1 text-sm font-bold text-slate-600">{session.session_focus || "Private Session"}</p>
+                                <p className="mt-1 text-sm font-bold text-slate-600">Private Session</p>
                                 <p className="mt-1 text-xs font-bold text-slate-500">{session.location || business.location}</p>
                                 {session.notes ? <p className="mt-2 text-xs font-semibold text-slate-500">{session.notes}</p> : null}
                               </div>
@@ -6251,16 +6108,6 @@ export function AdminAvailability() {
                   </select>
                 </label>
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
-                  Session Focus
-                  <select className={inputClass} value={privateAvailabilityFocus} onChange={(event) => setPrivateAvailabilityFocus(event.target.value)}>
-                    {focusChoices.map((focus) => (
-                      <option key={focus} value={focus}>
-                        {focus}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
                   Location
                   <input className={inputClass} value={privateAvailabilityLocation} onChange={(event) => setPrivateAvailabilityLocation(event.target.value)} />
                 </label>
@@ -6295,7 +6142,7 @@ export function AdminAvailability() {
                             </span>
                           </div>
                           <p className="mt-3 text-base font-black text-navy">{formatDateTime(session.start_datetime, session.timezone)} - {formatTime(session.end_datetime, session.timezone)}</p>
-                          <p className="mt-1 text-sm font-bold text-slate-600">{session.session_focus || "Private Session"}</p>
+                          <p className="mt-1 text-sm font-bold text-slate-600">Private Session</p>
                           <p className="mt-1 text-sm text-slate-600">{session.location || business.location}</p>
                           {session.status === "booked" ? (
                             <div className="mt-2 grid gap-1 text-sm text-slate-600">
@@ -6409,7 +6256,7 @@ export function AdminAvailability() {
 	                            <div className="mt-2 grid gap-1 text-sm text-blue-950">
 	                              {link.allowedPrivateSessions.map((session) => (
 	                                <p key={session.id}>
-	                                  {formatDateTime(session.start_datetime, session.timezone)} - {session.session_focus || "Private Session"}
+	                                  {formatDateTime(session.start_datetime, session.timezone)} - Private Session
 	                                </p>
 	                              ))}
 	                            </div>
@@ -6421,7 +6268,7 @@ export function AdminAvailability() {
                             <div className="mt-2 grid gap-1 text-sm text-blue-950">
                               {link.selectedPrivateSessions.map((session) => (
                                 <p key={session.id}>
-                                  {formatDateTime(session.start_datetime, session.timezone)} - {session.session_focus || "Private Session"}
+                                  {formatDateTime(session.start_datetime, session.timezone)} - Private Session
                                   {session.status === "booked" ? ` - ${session.player_name || "Booked"}` : ""}
                                 </p>
                               ))}
@@ -6517,7 +6364,7 @@ export function AdminAvailability() {
                           Preferred times: {request.preferred_times}
                         </p>
                         <p className="mt-2 text-sm leading-6 text-slate-600">
-                          Focus: {request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not selected"}
+                          Session type: Private Session
                         </p>
                         {request.notes ? <p className="mt-2 text-sm leading-6 text-slate-600">Notes: {request.notes}</p> : null}
                         {request.scheduled_start ? (

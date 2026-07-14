@@ -87,7 +87,7 @@ export function ReviewForm() {
           <span>
             Player Age Group <span className="font-semibold text-slate-500">(optional)</span>
           </span>
-          <input className={inputClass} name="playerAgeGroup" placeholder="Example: 2014 player or ages 9-12" />
+          <input className={inputClass} name="playerAgeGroup" placeholder="Example: 2010 player or ages 13–18" />
         </label>
       </div>
 

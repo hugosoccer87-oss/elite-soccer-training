@@ -84,7 +84,7 @@ export const trainingGroups: TrainingGroup[] = [
   {
     id: "future-elite",
     name: "Future Elite",
-    ages: "Ages 9-12",
+    ages: "Ages 9–12",
     minAge: 9,
     maxAge: 12,
     focus: [
@@ -99,7 +99,7 @@ export const trainingGroups: TrainingGroup[] = [
   {
     id: "elite-performance",
     name: "Elite Performance",
-    ages: "Ages 13-18",
+    ages: "Ages 13–18",
     minAge: 13,
     maxAge: 18,
     focus: [
@@ -112,6 +112,12 @@ export const trainingGroups: TrainingGroup[] = [
     ]
   }
 ];
+
+export function getTrainingGroupSessionLabel(groupId: TrainingGroupId) {
+  const group = getTrainingGroup(groupId);
+
+  return `${group.name} — ${group.ages}`;
+}
 
 export const defaultTrainingSlots: TrainingSlot[] = [];
 

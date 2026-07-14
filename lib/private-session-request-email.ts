@@ -101,7 +101,6 @@ function requestRows(request: PrivateSessionRequestRow) {
     ["Parent Email", request.parent_email],
     ["Parent Phone", request.parent_phone],
     ["Preferred Dates/Times", request.preferred_times],
-    ["Focus Areas", request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not selected"],
     ["Notes", request.notes || "None"],
     ["Request Status", request.status],
     ["Submitted", new Date(request.created_at).toLocaleString("en-US", { timeZone: request.timezone || "America/Los_Angeles" })]
@@ -157,7 +156,7 @@ export async function sendPrivateSessionRequestEmails(request: PrivateSessionReq
     "",
     `Player: ${request.player_name}`,
     `Preferred dates/times: ${request.preferred_times}`,
-    `Focus areas: ${request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not selected"}`,
+    `Notes: ${request.notes || "None"}`,
     "",
     "Coach Hugo",
     business.name
@@ -181,7 +180,7 @@ export async function sendPrivateSessionRequestEmails(request: PrivateSessionReq
                 ${detailsTable([
                   ["Player", request.player_name],
                   ["Preferred Dates/Times", request.preferred_times],
-                  ["Focus Areas", request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not selected"]
+                  ["Notes", request.notes || "None"]
                 ])}
               </table>
               <p style="margin:22px 0 0;color:#334155;line-height:1.7">Coach Hugo<br />${escapeHtml(business.name)}</p>

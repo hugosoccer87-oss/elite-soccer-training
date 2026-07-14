@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ScheduleApprovalConfirm } from "@/components/ScheduleApprovalConfirm";
+import { getTrainingGroupSessionLabel } from "@/lib/booking-data";
 import { getLaunchPassOption } from "@/lib/pricing";
-import { getSessionFocusLabel } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import { getScheduleApprovalByToken } from "@/lib/supabase-db";
 
@@ -99,7 +99,7 @@ export default async function ScheduleConfirmationPage({ params }: ScheduleConfi
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-xs font-black uppercase text-electric">Session {index + 1}</p>
-                    <h2 className="mt-1 text-lg font-black text-navy">{getSessionFocusLabel(session.training_focus)}</h2>
+                    <h2 className="mt-1 text-lg font-black text-navy">{getTrainingGroupSessionLabel(session.training_group)}</h2>
                     <p className="mt-1 text-sm font-bold text-slate-600">
                       {formatSessionDate(session.start_datetime, session.timezone)} at{" "}
                       {formatSessionTime(session.start_datetime, session.timezone)}

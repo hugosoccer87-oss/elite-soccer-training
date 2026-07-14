@@ -6,31 +6,13 @@ import { MailIcon } from "./Icons";
 const inputClass =
   "field-focus w-full rounded-md border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400";
 
-const focusOptions = [
-  "Shooting / Finishing",
-  "Confidence",
-  "First Touch & Passing",
-  "Speed of Play",
-  "Wingers / Wing Backs",
-  "Defending",
-  "Speed & Agility",
-  "General Technical Work"
-];
-
 type PrivateSessionRequestFormProps = {
   embedded?: boolean;
 };
 
 export function PrivateSessionRequestForm({ embedded = false }: PrivateSessionRequestFormProps) {
-  const [selectedFocus, setSelectedFocus] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  function toggleFocus(focus: string) {
-    setSelectedFocus((current) =>
-      current.includes(focus) ? current.filter((item) => item !== focus) : [...current, focus]
-    );
-  }
 
   async function submitRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,7 +27,7 @@ export function PrivateSessionRequestForm({ embedded = false }: PrivateSessionRe
       parentEmail: String(formData.get("parentEmail") ?? ""),
       parentPhone: String(formData.get("parentPhone") ?? ""),
       preferredTimes: String(formData.get("preferredTimes") ?? ""),
-      focusAreas: selectedFocus,
+      focusAreas: [],
       notes: String(formData.get("notes") ?? "")
     };
 
@@ -65,7 +47,6 @@ export function PrivateSessionRequestForm({ embedded = false }: PrivateSessionRe
       }
 
       event.currentTarget.reset();
-      setSelectedFocus([]);
       setStatus(result.message ?? "Thank you. We received your private session request and will contact you to confirm availability.");
     } catch {
       setStatus("Private session request could not be sent. Please try again.");
@@ -116,31 +97,8 @@ export function PrivateSessionRequestForm({ embedded = false }: PrivateSessionRe
         </label>
       </div>
 
-      <fieldset className="grid gap-3">
-        <legend className="text-sm font-bold text-navy">What should the player work on?</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {focusOptions.map((focus) => (
-            <label
-              key={focus}
-              className={`flex items-center gap-3 rounded-md border px-4 py-3 text-sm font-bold transition ${
-                selectedFocus.includes(focus)
-                  ? "border-electric bg-blue-50 text-navy"
-                  : "border-slate-200 bg-white text-slate-700"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedFocus.includes(focus)}
-                onChange={() => toggleFocus(focus)}
-              />
-              {focus}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
       <label className="grid gap-2 text-sm font-bold text-navy">
-        Notes
+        Training Goals / Notes
         <textarea
           className={`${inputClass} min-h-28 resize-y`}
           name="notes"

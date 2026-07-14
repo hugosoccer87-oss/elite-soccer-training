@@ -292,8 +292,8 @@ function spotsLabel(count: number) {
   return `${count} ${count === 1 ? "spot" : "spots"} remaining`;
 }
 
-function sessionFocusTitle(slot: Pick<PublicAvailableSession, "trainingFocus">) {
-  return slot.trainingFocus || "General Training";
+function sessionFocusTitle(slot: Pick<PublicAvailableSession, "trainingGroup"> & Partial<Pick<PublicAvailableSession, "trainingGroupAges">>) {
+  return slot.trainingGroupAges ? `${slot.trainingGroup} — ${slot.trainingGroupAges}` : slot.trainingGroup;
 }
 
 function sessionTimeRange(slot: PublicAvailableSession) {
@@ -365,10 +365,6 @@ function bookingOptionFromTypeParam(value: string | null): BookingOption | null 
   }
 
   if (normalized === "single") {
-    return "single_session";
-  }
-
-  if (normalized === "shooting-finishing") {
     return "single_session";
   }
 
@@ -968,7 +964,7 @@ export function BookingForm() {
       waiverVersion,
       mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined",
       programId: slot.trainingGroupId,
-      programName: `${sessionFocusTitle(slot)} - ${slot.trainingGroup}`,
+      programName: sessionFocusTitle(slot),
       sessionId: slot.id,
       sessionDateIso: slot.date,
       sessionDate: slot.dateLabel,
@@ -1124,7 +1120,7 @@ export function BookingForm() {
             </div>
 
             <div className="rounded-lg border border-electric/20 bg-blue-50 p-4 text-sm font-bold leading-6 text-navy">
-              Current sessions are focused on Elite Performance players ages 13-18.
+              Current sessions are focused on Elite Performance players ages 13–18.
             </div>
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -1289,11 +1285,6 @@ export function BookingForm() {
                                 }`}
                               >
                                 {sessionFocusTitle(slot)}
-                                {slot.trainingFocusDescription ? (
-                                  <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
-                                    {slot.trainingFocusDescription}
-                                  </span>
-                                ) : null}
                               </span>
                               <span className="mt-1 block text-sm font-semibold opacity-80">
                                 {sessionLocationLines(slot.location).map((line) => (
@@ -1491,15 +1482,10 @@ export function BookingForm() {
                   <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
                   <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
                   <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
-                  <div className="mt-4 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-2">
-                    {selectedGroup.focus.map((item) => (
-                      <p key={item}>{item}</p>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-white p-5">
-                  <h4 className="text-xl font-black text-navy">Need a different time, date, or session focus?</h4>
+                  <h4 className="text-xl font-black text-navy">Need a different time or date?</h4>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
                     Submit a special training request and Coach Hugo will do his best to make something work.
                   </p>
@@ -1678,11 +1664,6 @@ export function BookingForm() {
                               }`}
                             >
                               {sessionFocusTitle(slot)}
-                              {slot.trainingFocusDescription ? (
-                                <span className="mt-1 block text-[11px] font-bold normal-case opacity-80">
-                                  {slot.trainingFocusDescription}
-                                </span>
-                              ) : null}
                             </span>
                             <span className="mt-1 block text-sm font-semibold opacity-80">
                               {sessionLocationLines(slot.location).map((line) => (

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getTrainingGroup } from "@/lib/booking-data";
+import { getTrainingGroupSessionLabel } from "@/lib/booking-data";
 import type { BookingRecord, TrainingGroupId } from "@/lib/booking-data";
 import { sessionUnitAmountCents } from "@/lib/pricing";
 import { createStripeCustomPaymentLinkCheckoutSession, getStripeEnvironmentDiagnostics } from "@/lib/stripe";
@@ -455,7 +455,6 @@ export async function POST(request: Request, context: { params: Promise<{ token:
       passPurchaseId = pass.id;
     } else if (selectedPlanType === "single_session" && requestedSessionIds.length === 1) {
       const publicSession = availability.sessions.find((session) => session.id === requestedSessionIds[0]);
-      const group = getTrainingGroup((publicSession?.trainingGroupId || link.training_group) as TrainingGroupId);
 
       if (!publicSession) {
         return NextResponse.json({ error: "That session is no longer available." }, { status: 400 });
@@ -481,7 +480,7 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         ipAddress: getRequestIpAddress(request),
         mediaConsent: payload?.mediaConsent === "Declined" ? "Declined" : "Granted",
         programId: publicSession.trainingGroupId,
-        programName: publicSession.trainingFocus ? `${publicSession.trainingFocus} - ${group.name}` : group.name,
+        programName: getTrainingGroupSessionLabel(publicSession.trainingGroupId),
         sessionId: publicSession.id,
         sessionDateIso: publicSession.date,
         sessionDate: publicSession.dateLabel,

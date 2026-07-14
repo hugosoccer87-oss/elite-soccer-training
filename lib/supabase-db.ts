@@ -1,5 +1,6 @@
 import {
   getTrainingGroup,
+  getTrainingGroupSessionLabel,
   slotCapacity,
   type BookingRecord,
   type CalendarSyncStatus,
@@ -13,7 +14,7 @@ import {
   type DirectPaymentOption,
   type LaunchPassType
 } from "@/lib/pricing";
-import { getTrainingFocusDisplay, normalizeTrainingFocusForStorage } from "@/lib/session-focus";
+import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { PublicAvailableSession, PublicAvailabilityDebugResponse, PublicAvailabilityResponse } from "@/lib/public-availability";
 
@@ -748,7 +749,6 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
   const start = displayParts(session.start_datetime, session.timezone || defaultTimeZone);
   const end = displayParts(session.end_datetime, session.timezone || defaultTimeZone);
   const group = getTrainingGroup(session.training_group);
-  const focus = getTrainingFocusDisplay(session.training_focus);
 
   return {
     id: session.id,
@@ -763,8 +763,8 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
     trainingGroup: group.name,
     trainingGroupAges: group.ages,
     trainingFocusValue: session.training_focus ?? undefined,
-    trainingFocus: focus?.label,
-    trainingFocusDescription: focus?.description,
+    trainingFocus: undefined,
+    trainingFocusDescription: undefined,
     capacity: session.capacity,
     bookedCount: paidPlayers,
     remainingSpots: Math.max(0, session.capacity - paidPlayers),
@@ -774,7 +774,7 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
 }
 
 function publicSessionProgramName(publicSession: PublicAvailableSession) {
-  return `${publicSession.trainingFocus || "General Training"} - ${publicSession.trainingGroup}`;
+  return getTrainingGroupSessionLabel(publicSession.trainingGroupId);
 }
 
 export async function listTrainingSessions() {

@@ -697,7 +697,6 @@ function privateSessionCustomerEmail(session: PrivateSessionAvailabilityRow): Em
   const rows: Array<[string, string]> = [
     ["Player", session.player_name || "Not recorded"],
     ["Session Type", "Private Session"],
-    ["Session Focus", session.session_focus || "Private Session"],
     ["Date / Time", `${sessionDate} at ${sessionTime}`],
     ["Location", session.location || business.location],
     ["Payment Method", session.payment_method === "zelle" ? "Zelle" : "Card"],
@@ -779,7 +778,7 @@ function privateSessionAdminEmail(session: PrivateSessionAvailabilityRow): Email
     ["Parent/Guardian", session.parent_name || "Not recorded"],
     ["Parent Email", session.parent_email || "Not recorded"],
     ["Parent Phone", session.parent_phone || "Not recorded"],
-    ["Session Focus", session.session_focus || "Private Session"],
+    ["Session Type", "Private Session"],
     ["Date / Time", `${sessionDate} at ${sessionTime}`],
     ["Location", session.location || business.location],
     ["Payment Method", session.payment_method === "zelle" ? "Zelle" : "Card"],

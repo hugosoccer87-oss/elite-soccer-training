@@ -143,9 +143,9 @@ export default function HomePage() {
           <SectionHeader
             eyebrow="Programs"
             title="Age-based soccer development groups."
-            description="Future Elite builds foundation for ages 9-12. Elite Performance pushes ages 13-18, and Shooting & Finishing gives players focused attacking repetition and confidence in front of goal."
+            description="Current sessions are focused on Elite Performance players ages 13–18, with structured small group training built around confidence, speed of play, and game performance."
           />
-          <div className="mt-10 grid gap-6 lg:grid-cols-3">
+          <div className="mt-10 grid max-w-3xl gap-6">
             {services.map((service, index) => (
               <TrainingCard key={service.title} index={index} {...service} />
             ))}

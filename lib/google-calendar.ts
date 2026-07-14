@@ -1,6 +1,7 @@
 import {
   getRemainingSpots,
   getTrainingGroup,
+  getTrainingGroupSessionLabel,
   slotCapacity,
   trainingGroups,
   type BookingRecord,
@@ -10,7 +11,6 @@ import {
   type TrainingSlot
 } from "@/lib/booking-data";
 import { formatCurrencyFromCents, getSessionTotalCents, sessionPriceLabel } from "@/lib/pricing";
-import { getSessionFocusLabel } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
 import type { PrivateSessionAvailabilityRow, PrivateSessionRequestRow, TrainingSessionRow } from "@/lib/supabase-db";
 import { createSign } from "node:crypto";
@@ -707,10 +707,10 @@ async function findExistingPrivateAvailabilityEvent(privateSessionId: string, ac
 
 function trainingSessionDescription(session: TrainingSessionRow) {
   const group = getTrainingGroup(session.training_group);
-  const focus = getSessionFocusLabel(session.training_focus);
+  const sessionLabel = getTrainingGroupSessionLabel(session.training_group);
 
   return [
-    `Session focus: ${focus}`,
+    `Session type: ${sessionLabel}`,
     `Training group: ${group.name} (${group.ages})`,
     `Status: ${session.status}`,
     `Capacity: ${session.capacity}`,
@@ -723,12 +723,12 @@ function trainingSessionDescription(session: TrainingSessionRow) {
 
 function trainingSessionEventPayload(session: TrainingSessionRow) {
   const group = getTrainingGroup(session.training_group);
-  const focus = getSessionFocusLabel(session.training_focus);
+  const sessionLabel = getTrainingGroupSessionLabel(session.training_group);
   const cancelled = session.status === "cancelled";
   const closed = session.status === "closed";
 
   return {
-    summary: `${cancelled ? "[CANCELLED] " : closed ? "[CLOSED] " : ""}EST CV - ${focus}`,
+    summary: `${cancelled ? "[CANCELLED] " : closed ? "[CLOSED] " : ""}EST CV - ${sessionLabel}`,
     description: trainingSessionDescription(session),
     location: session.location || business.location,
     start: {
@@ -746,7 +746,7 @@ function trainingSessionEventPayload(session: TrainingSessionRow) {
         estSessionId: session.id,
         groupId: session.training_group,
         groupName: group.name,
-        trainingFocus: focus,
+        sessionType: sessionLabel,
         capacity: String(session.capacity),
         status: session.status
       }
@@ -856,7 +856,6 @@ function privateSessionDescription(request: PrivateSessionRequestRow) {
     `Parent email: ${request.parent_email}`,
     `Parent phone: ${request.parent_phone}`,
     `Preferred dates/times: ${request.preferred_times}`,
-    `Focus areas: ${request.focus_areas.length > 0 ? request.focus_areas.join(", ") : "Not recorded"}`,
     `Notes: ${request.notes || "None"}`,
     `Status: ${request.status}`,
     `Location: ${request.location || business.location}`,
@@ -985,7 +984,6 @@ export async function syncPrivateSessionCalendarEvent(request: PrivateSessionReq
 function privateAvailabilityDescription(session: PrivateSessionAvailabilityRow) {
   return [
     "Session type: Private Session",
-    `Session focus: ${session.session_focus || "Private Session"}`,
     `Player name: ${session.player_name || "Not booked"}`,
     `Player age: ${session.player_age || "Not recorded"}`,
     `Parent/guardian name: ${session.parent_name || "Not recorded"}`,

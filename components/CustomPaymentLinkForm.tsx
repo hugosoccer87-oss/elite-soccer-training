@@ -552,7 +552,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
                                       {formatPrivateTime(session.start_datetime, session.timezone)} - {formatPrivateTime(session.end_datetime, session.timezone)}
                                     </p>
                                     <p className="mt-2 text-sm font-bold text-slate-700">
-                                      {session.session_focus || "Private Session"}
+                                      Private Session
                                     </p>
                                     <p className="mt-1 text-sm text-slate-600">{session.location}</p>
                                     {session.notes ? <p className="mt-2 text-sm text-slate-500">{session.notes}</p> : null}
@@ -594,7 +594,7 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
                               {session.startTime} - {session.endTime}
                             </p>
                             <p className="mt-2 text-sm font-bold text-slate-700">
-                              {session.trainingFocus || "General Training"} - {session.trainingGroup} {session.trainingGroupAges}
+                              {session.trainingGroup} — {session.trainingGroupAges}
                             </p>
                             <p className="mt-1 text-sm text-slate-600">{session.location}</p>
                           </div>
