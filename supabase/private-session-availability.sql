@@ -10,6 +10,7 @@ create table if not exists public.private_session_availability (
   session_focus text not null default 'Private Session',
   notes text,
   status text not null default 'available' check (status in ('available', 'booked', 'closed', 'cancelled')),
+  visibility text not null default 'private_link' check (visibility in ('public', 'private_link', 'hidden')),
   player_name text,
   player_age text,
   parent_name text,
@@ -47,6 +48,9 @@ alter table public.custom_payment_links
 
 alter table public.private_session_availability
   add column if not exists payment_method text not null default 'card';
+
+alter table public.private_session_availability
+  add column if not exists visibility text not null default 'private_link';
 
 alter table public.private_session_availability
   add column if not exists payment_status text not null default 'not_started';
@@ -126,6 +130,9 @@ create index if not exists idx_private_session_availability_start
 
 create index if not exists idx_private_session_availability_status
   on public.private_session_availability (status);
+
+create index if not exists idx_private_session_availability_public
+  on public.private_session_availability (visibility, status, start_datetime);
 
 create index if not exists idx_private_session_availability_custom_link
   on public.private_session_availability (custom_payment_link_id);

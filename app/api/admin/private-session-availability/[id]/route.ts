@@ -3,13 +3,15 @@ import { verifyAdminSession } from "@/lib/admin-api";
 import {
   deletePrivateSessionAvailability,
   updatePrivateSessionAvailability,
-  type PrivateSessionAvailabilityStatus
+  type PrivateSessionAvailabilityStatus,
+  type PrivateSessionVisibility
 } from "@/lib/supabase-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const statuses = new Set<PrivateSessionAvailabilityStatus>(["available", "booked", "closed", "cancelled"]);
+const visibilities = new Set<PrivateSessionVisibility>(["public", "private_link", "hidden"]);
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const admin = await verifyAdminSession();
@@ -27,6 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     sessionFocus?: string;
     notes?: string | null;
     status?: PrivateSessionAvailabilityStatus;
+    visibility?: PrivateSessionVisibility;
   } | null;
 
   if (!id) {
@@ -41,7 +44,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       location: payload?.location,
       session_focus: payload?.sessionFocus,
       notes: payload?.notes,
-      status: payload?.status && statuses.has(payload.status) ? payload.status : undefined
+      status: payload?.status && statuses.has(payload.status) ? payload.status : undefined,
+      visibility: payload?.visibility && visibilities.has(payload.visibility) ? payload.visibility : undefined
     });
 
     return NextResponse.json({ status: "Updated", privateSession });

@@ -3,13 +3,15 @@ import { verifyAdminSession } from "@/lib/admin-api";
 import {
   createPrivateSessionAvailability,
   listAdminPrivateSessionAvailability,
-  type PrivateSessionAvailabilityStatus
+  type PrivateSessionAvailabilityStatus,
+  type PrivateSessionVisibility
 } from "@/lib/supabase-db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const statuses = new Set<PrivateSessionAvailabilityStatus>(["available", "booked", "closed", "cancelled"]);
+const visibilities = new Set<PrivateSessionVisibility>(["public", "private_link", "hidden"]);
 
 export async function GET() {
   const admin = await verifyAdminSession();
@@ -45,6 +47,7 @@ export async function POST(request: Request) {
     sessionFocus?: string;
     notes?: string;
     status?: PrivateSessionAvailabilityStatus;
+    visibility?: PrivateSessionVisibility;
   } | null;
 
   if (!payload?.date || !payload.startTime) {
@@ -59,7 +62,8 @@ export async function POST(request: Request) {
       location: payload.location,
       sessionFocus: payload.sessionFocus || "Private Session",
       notes: payload.notes,
-      status: payload.status && statuses.has(payload.status) ? payload.status : "available"
+      status: payload.status && statuses.has(payload.status) ? payload.status : "available",
+      visibility: payload.visibility && visibilities.has(payload.visibility) ? payload.visibility : "private_link"
     });
 
     return NextResponse.json({ status: "Created", privateSession });

@@ -24,9 +24,25 @@ export type PublicAvailableSession = {
   calendarEventId?: string;
 };
 
+export type PublicAvailablePrivateSession = {
+  id: string;
+  date: string;
+  dateLabel: string;
+  dayLabel: string;
+  startTime: string;
+  endTime: string;
+  isoDateTime: string;
+  timeZone: string;
+  title: string;
+  location: string;
+  duration: string;
+  status: "available";
+};
+
 export type PublicAvailabilityResponse = {
   status: CalendarSyncStatus;
   sessions: PublicAvailableSession[];
+  privateSessions: PublicAvailablePrivateSession[];
   generatedAt: string;
   timeZone: string;
   message?: string;

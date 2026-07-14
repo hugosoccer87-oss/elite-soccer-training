@@ -8,11 +8,13 @@ import {
   getStripeEnvironmentDiagnostics,
   isStripePaymentVerified,
   passPurchaseIdFromStripeMetadata,
+  publicPrivateSessionIdFromStripeMetadata,
   verifyStripeWebhookSignature
 } from "@/lib/stripe";
 import {
   bookPrivateSessionAvailability,
   confirmCustomPaymentLinkPaid,
+  confirmPrivateSessionAvailabilityPayment,
   getBookingRecordForConfirmation,
   getCustomPaymentLinkById,
   markDirectPaymentPaid,
@@ -110,6 +112,73 @@ export async function POST(request: Request) {
           sessionStatus: session.status,
           paymentStatus: session.payment_status,
           message: "Direct Pay + Waiver payment verified."
+        });
+
+        return NextResponse.json({ received: true });
+      }
+
+      const publicPrivateSessionId = publicPrivateSessionIdFromStripeMetadata(session.metadata);
+
+      if (publicPrivateSessionId) {
+        if (!isStripePaymentVerified(session)) {
+          console.warn("[EST Stripe] Payment not verified", {
+            eventId: event.id,
+            sessionId: session.id,
+            privateSessionId: publicPrivateSessionId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status
+          });
+          setLastPaymentVerificationResult({
+            source: "webhook",
+            verified: false,
+            sessionId: session.id,
+            bookingId: publicPrivateSessionId,
+            sessionStatus: session.status,
+            paymentStatus: session.payment_status,
+            message: "Public private session Checkout session was not paid and complete."
+          });
+          return NextResponse.json({ received: true });
+        }
+
+        const confirmedPrivateSession = await confirmPrivateSessionAvailabilityPayment({
+          privateSessionId: publicPrivateSessionId,
+          checkoutSessionId: session.id,
+          paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+          amountPaid: typeof session.amount_total === "number" ? session.amount_total : undefined
+        });
+        const calendarResult = await syncBookedPrivateSessionCalendarEvent(confirmedPrivateSession);
+        const withCalendarStatus =
+          (await updatePrivateSessionAvailability(confirmedPrivateSession.id, {
+            google_calendar_event_id: calendarResult.eventId || confirmedPrivateSession.google_calendar_event_id || null,
+            calendar_status: calendarResult.status,
+            calendar_message: calendarResult.message || null
+          })) ?? confirmedPrivateSession;
+        const emailResult = await sendPrivateSessionAvailabilityTransactionalEmails(withCalendarStatus);
+        const withEmailStatus =
+          (await updatePrivateSessionAvailability(withCalendarStatus.id, {
+            email_status: emailResult.sent ? "sent" : "failed",
+            email_message: emailResult.message || null
+          })) ?? withCalendarStatus;
+        const pushoverResult = await sendPrivateSessionAvailabilityAdminPushoverAlert(withEmailStatus);
+        await updatePrivateSessionAvailability(withEmailStatus.id, {
+          pushover_status: pushoverResult.sent ? "sent" : pushoverResult.skipped ? "skipped" : "failed",
+          pushover_message: pushoverResult.message || null
+        });
+
+        setLastPaymentVerificationResult({
+          source: "webhook",
+          verified: true,
+          sessionId: session.id,
+          bookingId: publicPrivateSessionId,
+          sessionStatus: session.status,
+          paymentStatus: session.payment_status,
+          message: "Public private session payment verified."
+        });
+
+        console.info("[EST Stripe] Public private session notifications complete", {
+          eventId: event.id,
+          sessionId: session.id,
+          privateSessionId: publicPrivateSessionId
         });
 
         return NextResponse.json({ received: true });

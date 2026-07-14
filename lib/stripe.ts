@@ -12,6 +12,7 @@ import {
   customPaymentLinkPlanLabel,
   type CustomPaymentLinkRow,
   type DirectPaymentRow,
+  type PrivateSessionAvailabilityRow,
   type PassPurchaseRow
 } from "@/lib/supabase-db";
 
@@ -479,6 +480,74 @@ export async function createStripeCustomPaymentLinkCheckoutSession(
 export function customPaymentLinkIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
   return metadata?.purchase_type === "custom_payment_link" && metadata.customPaymentLinkId
     ? metadata.customPaymentLinkId
+    : null;
+}
+
+export async function createStripePublicPrivateSessionCheckoutSession(input: {
+  privateSession: PrivateSessionAvailabilityRow;
+  parentEmail: string;
+  playerName: string;
+  amountCents: number;
+}) {
+  const secretKey = getStripeSecretKey();
+  const stripe = getStripeEnvironment();
+
+  if (!secretKey) {
+    throw new Error(`Stripe is not configured. Add ${stripe.secretKeyName} in Vercel.`);
+  }
+
+  if (!getStripePublishableKey()) {
+    throw new Error(`Stripe is not configured. Add ${stripe.publishableKeyName} in Vercel.`);
+  }
+
+  const siteUrl = getSiteUrl();
+  const params = new URLSearchParams({
+    mode: "payment",
+    success_url: `${siteUrl}/booking/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${siteUrl}/booking/cancel`,
+    allow_promotion_codes: "true",
+    client_reference_id: input.privateSession.id,
+    customer_email: input.parentEmail,
+    "line_items[0][price_data][currency]": sessionCurrency,
+    "line_items[0][price_data][product_data][name]": "Elite Soccer Training CV - Private Session",
+    "line_items[0][price_data][product_data][description]": `Private session for ${input.playerName}`,
+    "line_items[0][price_data][unit_amount]": String(Math.max(0, Number(input.amountCents) || 0)),
+    "line_items[0][quantity]": "1",
+    "payment_intent_data[metadata][purchase_type]": "public_private_session",
+    "payment_intent_data[metadata][privateSessionId]": input.privateSession.id,
+    "payment_intent_data[metadata][player_name]": input.playerName,
+    "payment_intent_data[metadata][parent_email]": input.parentEmail,
+    "metadata[purchase_type]": "public_private_session",
+    "metadata[privateSessionId]": input.privateSession.id,
+    "metadata[player_name]": input.playerName,
+    "metadata[parent_email]": input.parentEmail
+  });
+
+  const response = await fetch(`${stripeApiBase}/checkout/sessions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: params.toString()
+  });
+
+  const result = (await response.json()) as StripeCheckoutSession & { error?: { message?: string } };
+
+  if (!response.ok) {
+    throw new Error(result.error?.message ?? "Stripe Checkout session could not be created.");
+  }
+
+  if (!result.url) {
+    throw new Error("Stripe did not return a Checkout URL.");
+  }
+
+  return result;
+}
+
+export function publicPrivateSessionIdFromStripeMetadata(metadata: Record<string, string> | undefined) {
+  return metadata?.purchase_type === "public_private_session" && metadata.privateSessionId
+    ? metadata.privateSessionId
     : null;
 }
 

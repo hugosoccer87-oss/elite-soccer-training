@@ -13,6 +13,7 @@ import {
   type TrainingGroupId
 } from "@/lib/booking-data";
 import type {
+  PublicAvailablePrivateSession,
   PublicAvailabilityDebugResponse,
   PublicAvailabilityResponse,
   PublicAvailableSession
@@ -40,7 +41,7 @@ const publicStepLabels = ["Choose Your Training Session", "Athlete Information",
 const activeBookingGroupId: TrainingGroupId = "elite-performance";
 
 type BookingStep = "program" | "session" | "details" | "waiver" | "payment";
-type BookingOption = "single_session" | LaunchPassType | "use_existing_pass" | "private_request";
+type BookingOption = "single_session" | LaunchPassType | "use_existing_pass" | "private_session" | "private_request";
 type LaunchPassUseMode = "choose_now" | "choose_later";
 
 type BookingFields = {
@@ -84,6 +85,14 @@ type StripeCheckoutResult = {
   checkoutUrl?: string;
   sessionId?: string;
   error?: string;
+};
+
+type PrivateSessionCheckoutResult = StripeCheckoutResult & {
+  status?: "zelle_pending";
+  message?: string;
+  zellePhone?: string;
+  memo?: string;
+  amountDue?: number;
 };
 
 type LaunchPassSummary = {
@@ -149,6 +158,47 @@ async function createStripeCheckout(booking: BookingRecord) {
     return {
       error: "Secure payment could not be reached. Please try again."
     } satisfies StripeCheckoutResult;
+  }
+}
+
+async function createPrivateSessionCheckout(payload: {
+  privateSessionId: string;
+  playerName: string;
+  playerAge: string;
+  parentName: string;
+  parentEmail: string;
+  parentPhone: string;
+  paymentMethod: "card" | "zelle";
+  notes: string;
+  medicalNotes: string;
+  emergencyName: string;
+  emergencyPhone: string;
+  guardianSignature: string;
+  waiverAccepted: boolean;
+  mediaConsent: "Granted" | "Declined";
+  marketingOptIn: boolean;
+}) {
+  try {
+    const response = await fetch("/api/private-sessions/checkout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const result = (await response.json()) as PrivateSessionCheckoutResult;
+
+    if (!response.ok) {
+      return {
+        error: result.error ?? "Private session payment could not be started."
+      } satisfies PrivateSessionCheckoutResult;
+    }
+
+    return result;
+  } catch {
+    return {
+      error: "Private session payment could not be reached. Please try again."
+    } satisfies PrivateSessionCheckoutResult;
   }
 }
 
@@ -300,6 +350,10 @@ function sessionTimeRange(slot: PublicAvailableSession) {
   return `${slot.startTime}-${slot.endTime}`;
 }
 
+function privateSessionTimeRange(slot: PublicAvailablePrivateSession) {
+  return `${slot.startTime}-${slot.endTime}`;
+}
+
 function isValidEmailAddress(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -380,6 +434,10 @@ function bookingOptionFromTypeParam(value: string | null): BookingOption | null 
     return "private_request";
   }
 
+  if (normalized === "private-session" || normalized === "private-booking") {
+    return "private_session";
+  }
+
   return null;
 }
 
@@ -387,10 +445,12 @@ export function BookingForm() {
   const [step, setStep] = useState<BookingStep>("program");
   const [bookingOption, setBookingOption] = useState<BookingOption>("single_session");
   const [apiSessions, setApiSessions] = useState<PublicAvailableSession[]>([]);
+  const [apiPrivateSessions, setApiPrivateSessions] = useState<PublicAvailablePrivateSession[]>([]);
   const [availabilityStatus, setAvailabilityStatus] = useState("Loading");
   const [availabilityError, setAvailabilityError] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<TrainingGroupId | "">("");
   const [selectedSlotId, setSelectedSlotId] = useState("");
+  const [selectedPrivateSessionId, setSelectedPrivateSessionId] = useState("");
   const [selectedSessionDate, setSelectedSessionDate] = useState("");
   const [visibleMonth, setVisibleMonth] = useState("");
   const [isLoadingAvailability, setIsLoadingAvailability] = useState(true);
@@ -418,6 +478,8 @@ export function BookingForm() {
     bookingId: string;
     remainingCredits?: number;
   } | null>(null);
+  const [privatePaymentMethod, setPrivatePaymentMethod] = useState<"card" | "zelle">("card");
+  const [privateBookingSuccess, setPrivateBookingSuccess] = useState<PrivateSessionCheckoutResult | null>(null);
   const [fieldErrors, setFieldErrors] = useState<BookingFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -432,15 +494,18 @@ export function BookingForm() {
 
       if (!result) {
         setApiSessions([]);
+        setApiPrivateSessions([]);
         setAvailabilityStatus("Failed");
         setAvailabilityError("Availability could not be loaded.");
         return;
       }
 
       setApiSessions(result.sessions);
+      setApiPrivateSessions(result.privateSessions ?? []);
       setAvailabilityStatus(result.status);
       setAvailabilityError(result.message ?? "");
       setSelectedSlotId("");
+      setSelectedPrivateSessionId("");
     }).finally(() => {
       if (active) {
         setIsLoadingAvailability(false);
@@ -476,6 +541,7 @@ export function BookingForm() {
     () => apiSessions.filter((session) => session.trainingGroupId === activeBookingGroupId),
     [apiSessions]
   );
+  const availablePrivateSessions = useMemo(() => apiPrivateSessions, [apiPrivateSessions]);
   const sessionsByDate = useMemo(
     () =>
       availableSessions.reduce<Record<string, PublicAvailableSession[]>>((current, session) => {
@@ -524,6 +590,16 @@ export function BookingForm() {
   }, [availableSessions, selectedSlotId]);
 
   useEffect(() => {
+    if (!selectedPrivateSessionId) {
+      return;
+    }
+
+    if (!availablePrivateSessions.some((slot) => slot.id === selectedPrivateSessionId)) {
+      setSelectedPrivateSessionId("");
+    }
+  }, [availablePrivateSessions, selectedPrivateSessionId]);
+
+  useEffect(() => {
     if (availableSessions.length === 0) {
       return;
     }
@@ -558,18 +634,28 @@ export function BookingForm() {
   }, [apiSessions, isPassPurchaseOption, selectedPassCreditLimit]);
 
   const selectedSlot = availableSessions.find((slot) => slot.id === selectedSlotId);
+  const selectedPrivateSession = availablePrivateSessions.find((slot) => slot.id === selectedPrivateSessionId);
   const selectedGroup = getTrainingGroup(activeBookingGroupId);
   const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.trainingGroupId) : selectedGroup;
   const displaySlot = selectedSlot;
+  const isPrivateSessionOption = bookingOption === "private_session";
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
   const publicStepLabel = publicStepLabels[publicStepNumber - 1];
   const progressWidth = `${(publicStepNumber / publicStepLabels.length) * 100}%`;
   const selectedRemainingSpots = selectedSlot ? selectedSlot.remainingSpots : slotCapacity;
   const playerOptions = usesExistingPass
     ? [1]
+    : isPrivateSessionOption
+      ? [1]
     : Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
-  const paymentTotal = usesExistingPass ? "Training credit" : formatCurrencyFromCents(getSessionTotalCents(fields.players));
-  const paidSessionSummaryLabel = "Elite Soccer Training CV - Single Session";
+  const paymentTotal = usesExistingPass
+    ? "Training credit"
+    : isPrivateSessionOption
+      ? formatCurrencyFromCents(getSessionTotalCents("1"))
+      : formatCurrencyFromCents(getSessionTotalCents(fields.players));
+  const paidSessionSummaryLabel = isPrivateSessionOption
+    ? "Elite Soccer Training CV - Private Session"
+    : "Elite Soccer Training CV - Single Session";
 
   function clearFieldError(field: BookingFieldErrorKey) {
     setFieldErrors((current) => {
@@ -639,11 +725,13 @@ export function BookingForm() {
   function selectBookingOption(option: BookingOption) {
     setBookingOption(option);
     setSelectedSlotId("");
+    setSelectedPrivateSessionId("");
     setSelectedSessionDate("");
     setVisibleMonth("");
     setFieldErrors({});
     setPassNotice("");
     setCreditBookingSuccess(null);
+    setPrivateBookingSuccess(null);
     setSelectedPassSessionIds([]);
     setError("");
 
@@ -663,6 +751,14 @@ export function BookingForm() {
       setSelectedGroupId("");
       setSelectedPassId("");
       setFoundPasses([]);
+      return;
+    }
+
+    if (option === "private_session") {
+      setSelectedGroupId("");
+      setSelectedPassId("");
+      setFoundPasses([]);
+      setFields((current) => ({ ...current, players: "1" }));
       return;
     }
 
@@ -836,6 +932,20 @@ export function BookingForm() {
   }
 
   function requireSchedule() {
+    if (isPrivateSessionOption) {
+      if (!selectedPrivateSession) {
+        applyFieldErrors(
+          { session: "Select an available private session time before continuing." },
+          "Choose an available private session time before continuing."
+        );
+        return false;
+      }
+
+      clearFieldError("session");
+      setError("");
+      return true;
+    }
+
     if (!selectedSlot) {
       applyFieldErrors(
         { session: "Select an available date and time before continuing." },
@@ -868,7 +978,7 @@ export function BookingForm() {
 
       if (!Number.isInteger(playerAge)) {
         nextErrors.playerAge = "Enter a valid whole-number age.";
-      } else if (bookingGroup && !isAgeInGroup(playerAge, bookingGroup.id)) {
+      } else if (!isPrivateSessionOption && bookingGroup && !isAgeInGroup(playerAge, bookingGroup.id)) {
         nextErrors.playerAge = `${bookingGroup.name} is for ${bookingGroup.ages}. Choose the correct training group.`;
       }
     }
@@ -893,7 +1003,9 @@ export function BookingForm() {
 
     if (!fields.players.trim()) {
       nextErrors.players = "Select the number of players attending.";
-    } else if (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > selectedSlot.remainingSpots) {
+    } else if (isPrivateSessionOption && playerCount !== 1) {
+      nextErrors.players = "Private sessions are booked for one player at a time.";
+    } else if (!isPrivateSessionOption && (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > selectedSlot.remainingSpots)) {
       nextErrors.players = `This session has ${spotsLabel(selectedRemainingSpots)}. Adjust the player count before continuing.`;
     }
 
@@ -1023,6 +1135,68 @@ export function BookingForm() {
     window.location.href = checkout.checkoutUrl;
   }
 
+  async function startPrivateSessionCheckout() {
+    if (!selectedPrivateSession) {
+      setStep("session");
+      setError("That private session time is no longer available. Please choose another time.");
+      return;
+    }
+
+    const latestAvailability = await readAvailableSessions();
+    const latestPrivateSlot = latestAvailability?.privateSessions?.find((slot) => slot.id === selectedPrivateSession.id);
+
+    if (!latestPrivateSlot) {
+      setApiSessions(latestAvailability?.sessions ?? []);
+      setApiPrivateSessions(latestAvailability?.privateSessions ?? []);
+      setAvailabilityStatus(latestAvailability?.status ?? "Failed");
+      setAvailabilityError(latestAvailability?.message ?? "");
+      setStep("session");
+      setError("That private session time is no longer available. Please choose another time.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError("");
+
+    const checkout = await createPrivateSessionCheckout({
+      privateSessionId: latestPrivateSlot.id,
+      playerName: fields.playerName,
+      playerAge: fields.playerAge,
+      parentName: fields.parentName,
+      parentEmail: fields.email,
+      parentPhone: fields.phone,
+      paymentMethod: privatePaymentMethod,
+      notes: fields.notes,
+      medicalNotes: fields.medicalNotes,
+      emergencyName: fields.emergencyName,
+      emergencyPhone: fields.emergencyPhone,
+      guardianSignature: fields.guardianSignature,
+      waiverAccepted: fields.waiverAgreement,
+      mediaConsent: fields.mediaConsent === "yes" ? "Granted" : "Declined",
+      marketingOptIn: fields.marketingOptIn
+    });
+
+    if (checkout.status === "zelle_pending") {
+      setIsSubmitting(false);
+      setPrivateBookingSuccess(checkout);
+      void readAvailableSessions().then((next) => {
+        if (next) {
+          setApiSessions(next.sessions);
+          setApiPrivateSessions(next.privateSessions ?? []);
+        }
+      });
+      return;
+    }
+
+    if (!checkout.checkoutUrl) {
+      setIsSubmitting(false);
+      setError(checkout.error ?? "Private session payment could not be started. Please try again.");
+      return;
+    }
+
+    window.location.href = checkout.checkoutUrl;
+  }
+
   async function confirmWithLaunchPassCredit() {
     if (!selectedPass || !selectedSlot) {
       setStep("session");
@@ -1064,6 +1238,7 @@ export function BookingForm() {
     void readAvailableSessions().then((next) => {
       if (next) {
         setApiSessions(next.sessions);
+        setApiPrivateSessions(next.privateSessions ?? []);
       }
     });
   }
@@ -1077,7 +1252,9 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Booking</p>
               <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">{publicStepLabel}</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                60-minute small group soccer training for 1-6 players. {groupSizeMessage}
+                {isPrivateSessionOption
+                  ? "Private session booking with parent waiver and secure payment."
+                  : `60-minute small group soccer training for 1-6 players. ${groupSizeMessage}`}
               </p>
             </div>
             {displaySlot ? (
@@ -1088,6 +1265,15 @@ export function BookingForm() {
                 </p>
                 <p className="mt-1 text-slate-300">{displaySlot.duration}</p>
                 <p className="mt-2 text-xs font-bold uppercase text-electric">{groupSizeMessage}</p>
+              </div>
+            ) : null}
+            {selectedPrivateSession ? (
+              <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-sm">
+                <p className="font-black text-white">Selected Private Session</p>
+                <p className="mt-1 text-slate-200">
+                  {selectedPrivateSession.dateLabel} at {privateSessionTimeRange(selectedPrivateSession)}
+                </p>
+                <p className="mt-1 text-slate-300">{selectedPrivateSession.duration}</p>
               </div>
             ) : null}
           </div>
@@ -1123,9 +1309,10 @@ export function BookingForm() {
               Current sessions are focused on Elite Performance players ages 13–18.
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
               {[
                 ["single_session", "Single Session", "$55", "Book online"],
+                ["private_session", "Private Session", "$55", "Choose available time"],
                 [
                   "four_session_launch_pass",
                   "4-Session Training Package",
@@ -1476,6 +1663,24 @@ export function BookingForm() {
                   View Available Sessions
                 </button>
               </div>
+            ) : isPrivateSessionOption ? (
+              <>
+                <div className="rounded-lg border border-slate-200 bg-mist p-5">
+                  <p className="text-xs font-black uppercase text-electric">Private Session</p>
+                  <h4 className="mt-2 text-2xl font-black text-navy">Choose a private training time</h4>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    Private session openings are created by Coach Hugo and shown here when they are available for public booking.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setStep("session")}
+                  className="inline-flex w-full items-center justify-center rounded-md bg-electric px-6 py-4 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 transition hover:bg-blue-500 sm:w-fit"
+                >
+                  View Private Times
+                </button>
+              </>
             ) : (
               <>
                 <div className="rounded-lg border border-slate-200 bg-mist p-5">
@@ -1518,11 +1723,17 @@ export function BookingForm() {
           <section className="grid gap-6 p-5 sm:p-8">
             <div>
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
-              <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
+              <h3 className="mt-2 text-2xl font-black text-navy">
+                {isPrivateSessionOption ? "Choose your private session" : "Choose your training session"}
+              </h3>
               <p className="mt-2 text-sm font-bold text-slate-600">
-                {selectedGroup ? selectedGroup.ages : "All available training groups"}
+                {isPrivateSessionOption ? "Private Session" : selectedGroup ? selectedGroup.ages : "All available training groups"}
               </p>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                {isPrivateSessionOption
+                  ? "Private sessions are one-on-one openings created by Coach Hugo. Choose an available time below."
+                  : groupSizeMessage}
+              </p>
             </div>
 
             {showAvailabilityDebug ? (
@@ -1556,7 +1767,80 @@ export function BookingForm() {
               </div>
             ) : null}
 
-            {availableSessions.length > 0 ? (
+            {isPrivateSessionOption ? (
+              <div
+                data-booking-field="session"
+                tabIndex={-1}
+                className={`grid gap-3 rounded-lg outline-none ${
+                  fieldErrors.session ? "border border-red-300 bg-red-50 p-3" : ""
+                }`}
+              >
+                {availablePrivateSessions.length > 0 ? (
+                  availablePrivateSessions.map((slot) => {
+                    const isSelected = selectedPrivateSessionId === slot.id;
+
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPrivateSessionId(slot.id);
+                          clearFieldError("session");
+                          setFields((current) => ({ ...current, players: "1" }));
+                        }}
+                        className={`rounded-lg border p-4 text-left transition ${
+                          isSelected
+                            ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
+                            : "border-slate-200 bg-white text-navy hover:border-electric"
+                        }`}
+                      >
+                        <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                          <div>
+                            <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
+                              {slot.dayLabel}, {slot.dateLabel}
+                            </span>
+                            <span className="mt-1 block text-2xl font-black">{privateSessionTimeRange(slot)}</span>
+                            <span className="mt-2 block text-sm font-bold opacity-90">Private Session</span>
+                            <span className="mt-1 block text-sm font-semibold opacity-80">
+                              {sessionLocationLines(slot.location).map((line) => (
+                                <span key={line} className="block">{line}</span>
+                              ))}
+                            </span>
+                            <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
+                            <span className="mt-3 block text-xs font-black uppercase text-electric">Available</span>
+                          </div>
+                          <span
+                            className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
+                              isSelected ? "bg-electric text-white" : "bg-mist text-navy"
+                            }`}
+                          >
+                            {isSelected ? "Selected" : "Book Private Session"}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-lg border border-slate-200 bg-mist p-6 outline-none">
+                    {isLoadingAvailability ? (
+                      <>
+                        <p className="font-black text-navy">Loading private sessions...</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">Checking the latest private openings.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-black text-navy">No public private session times are available right now.</p>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          You can still submit a private request or call{" "}
+                          <a className="font-black underline" href={business.phoneHref}>{business.phone}</a> for schedule help.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+                {fieldErrorMessage("session")}
+              </div>
+            ) : availableSessions.length > 0 ? (
               <div
                 data-booking-field="session"
                 tabIndex={-1}
@@ -1834,6 +2118,10 @@ export function BookingForm() {
               <div className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600">
                 Training Package booking uses 1 credit for {fields.playerName || "this player"}.
               </div>
+            ) : isPrivateSessionOption ? (
+              <div className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600">
+                Private sessions are booked for one player at a time.
+              </div>
             ) : (
               <label className={fieldLabelClass("players")}>
                 Number of Players Attending
@@ -1856,6 +2144,11 @@ export function BookingForm() {
             {selectedSlot ? (
               <p className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600 sm:col-span-2">
                 {spotsLabel(selectedRemainingSpots)} for {selectedSlot.dateLabel} at {sessionTimeRange(selectedSlot)}. {groupSizeMessage}
+              </p>
+            ) : null}
+            {selectedPrivateSession ? (
+              <p className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600 sm:col-span-2">
+                Private Session for {selectedPrivateSession.dateLabel} at {privateSessionTimeRange(selectedPrivateSession)}.
               </p>
             ) : null}
             <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
@@ -2061,11 +2354,17 @@ export function BookingForm() {
               <ShieldIcon className="h-9 w-9 text-electric" />
               <p className="mt-4 text-sm font-black uppercase text-electric">Step 3</p>
               <h3 className="mt-2 text-2xl font-black text-navy">
-                {usesExistingPass ? "Parent waiver + Training credit" : "Parent waiver + secure payment"}
+                {usesExistingPass
+                  ? "Parent waiver + Training credit"
+                  : isPrivateSessionOption
+                    ? "Parent waiver + private session payment"
+                    : "Parent waiver + secure payment"}
               </h3>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 {usesExistingPass
                   ? "Your paid Training credit will reserve this session after the waiver."
+                  : isPrivateSessionOption
+                    ? "Choose card payment or submit the waiver and view Zelle instructions."
                   : "Secure online payment is completed after the waiver."}
               </p>
               {selectedSlot ? (
@@ -2082,9 +2381,34 @@ export function BookingForm() {
                   </p>
                 </div>
               ) : null}
+              {selectedPrivateSession ? (
+                <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
+                  <p className="font-black text-navy">
+                    {selectedPrivateSession.dateLabel} at {privateSessionTimeRange(selectedPrivateSession)}
+                  </p>
+                  <p>1 player attending</p>
+                  <p>Private Session</p>
+                  <p className="mt-2 text-xs font-bold uppercase text-slate-500">Private sessions do not count toward small group capacity.</p>
+                  <p className="mt-3 border-t border-slate-200 pt-3 font-black text-navy">
+                    Private Session = {paymentTotal}
+                  </p>
+                </div>
+              ) : null}
             </aside>
 
             <div className="grid gap-5 rounded-lg border border-slate-200 bg-white p-5" data-stripe-checkout-ready="true">
+              {privateBookingSuccess?.status === "zelle_pending" ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-5">
+                  <p className="text-sm font-black uppercase text-amber-800">Zelle Instructions</p>
+                  <h3 className="mt-2 text-2xl font-black text-navy">Private session pending payment.</h3>
+                  <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
+                    <p>Send payment through Zelle to: <span className="font-black text-navy">{privateBookingSuccess.zellePhone}</span></p>
+                    <p>Memo: <span className="font-black text-navy">{privateBookingSuccess.memo}</span></p>
+                    <p>Total due: <span className="font-black text-navy">{formatCurrencyFromCents(privateBookingSuccess.amountDue ?? 0)}</span></p>
+                    <p>Zelle payments must be confirmed manually.</p>
+                  </div>
+                </div>
+              ) : null}
               {creditBookingSuccess ? (
                 <div className="rounded-md border border-field/20 bg-field/10 p-5">
                   <p className="text-sm font-black uppercase text-field">Session Confirmed</p>
@@ -2112,8 +2436,14 @@ export function BookingForm() {
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span>Players attending</span>
-                    <span className="font-black text-navy">{usesExistingPass ? "1" : fields.players}</span>
+                    <span className="font-black text-navy">{usesExistingPass || isPrivateSessionOption ? "1" : fields.players}</span>
                   </div>
+                  {isPrivateSessionOption ? (
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Payment method</span>
+                      <span className="font-black text-navy">{privatePaymentMethod === "zelle" ? "Zelle" : "Card"}</span>
+                    </div>
+                  ) : null}
                   <div className="flex items-center justify-between gap-4 border-t border-slate-300 pt-3 text-base">
                     <span className="font-black text-navy">{usesExistingPass ? "Payment" : "Total Due"}</span>
                     <span className="font-black text-navy">{paymentTotal}</span>
@@ -2124,6 +2454,45 @@ export function BookingForm() {
                 <p className="text-sm leading-6 text-slate-600">
                   No card payment is collected for this booking because one Training credit will be used.
                 </p>
+              ) : isPrivateSessionOption ? (
+                <div className="grid gap-3">
+                  <p className="text-sm leading-6 text-slate-600">
+                    Private session payment is completed after the waiver.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      ["card", "Pay by Card", "Continue to secure card payment."],
+                      ["zelle", "Pay by Zelle", "Submit waiver and view Zelle instructions."]
+                    ].map(([value, title, description]) => {
+                      const isSelected = privatePaymentMethod === value;
+
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setPrivatePaymentMethod(value as "card" | "zelle")}
+                          className={`rounded-lg border p-4 text-left transition ${
+                            isSelected
+                              ? "border-navy bg-navy text-white shadow-lg shadow-navy/15"
+                              : "border-slate-200 bg-mist text-navy hover:border-electric"
+                          }`}
+                        >
+                          <span className="block text-sm font-black">{title}</span>
+                          <span className="mt-2 block text-sm leading-6 opacity-80">{description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {privatePaymentMethod === "zelle" ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">
+                      Zelle instructions will show after the waiver is submitted. Send payment to 3236848024.
+                    </p>
+                  ) : (
+                    <p className="text-sm font-semibold leading-6 text-slate-600">
+                      Have a promo code? You'll be able to enter it securely during checkout.
+                    </p>
+                  )}
+                </div>
               ) : (
                 <>
                   <p className="text-sm leading-6 text-slate-600">
@@ -2147,8 +2516,14 @@ export function BookingForm() {
                 </button>
                 <button
                   type="button"
-                  onClick={usesExistingPass ? confirmWithLaunchPassCredit : startStripeCheckout}
-                  disabled={isSubmitting || Boolean(creditBookingSuccess)}
+                  onClick={
+                    usesExistingPass
+                      ? confirmWithLaunchPassCredit
+                      : isPrivateSessionOption
+                        ? startPrivateSessionCheckout
+                        : startStripeCheckout
+                  }
+                  disabled={isSubmitting || Boolean(creditBookingSuccess) || Boolean(privateBookingSuccess)}
                   className="rounded-md bg-electric px-6 py-3 text-sm font-black uppercase text-white shadow-lg shadow-electric/25 disabled:cursor-wait disabled:opacity-70"
                 >
                   {usesExistingPass
@@ -2157,6 +2532,16 @@ export function BookingForm() {
                       : creditBookingSuccess
                         ? "Confirmed"
                         : "Confirm Booking"
+                    : isPrivateSessionOption
+                      ? isSubmitting
+                        ? privatePaymentMethod === "zelle"
+                          ? "Submitting..."
+                          : "Opening Secure Payment..."
+                        : privateBookingSuccess
+                          ? "Submitted"
+                          : privatePaymentMethod === "zelle"
+                            ? "Submit Waiver + View Zelle Instructions"
+                            : "Confirm & Pay"
                     : isSubmitting
                       ? "Opening Secure Payment..."
                       : "Confirm & Pay"}

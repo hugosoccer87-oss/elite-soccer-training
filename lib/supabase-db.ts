@@ -16,7 +16,12 @@ import {
 } from "@/lib/pricing";
 import { normalizeTrainingFocusForStorage } from "@/lib/session-focus";
 import { business } from "@/lib/site-data";
-import type { PublicAvailableSession, PublicAvailabilityDebugResponse, PublicAvailabilityResponse } from "@/lib/public-availability";
+import type {
+  PublicAvailablePrivateSession,
+  PublicAvailableSession,
+  PublicAvailabilityDebugResponse,
+  PublicAvailabilityResponse
+} from "@/lib/public-availability";
 
 type SupabaseConfig = {
   url: string;
@@ -405,6 +410,7 @@ export type PrivateSessionRequestRow = {
 };
 
 export type PrivateSessionAvailabilityStatus = "available" | "booked" | "closed" | "cancelled";
+export type PrivateSessionVisibility = "public" | "private_link" | "hidden";
 export type PrivateSessionPaymentMethod = "card" | "zelle";
 export type PrivateSessionPaymentStatus =
   | "not_started"
@@ -422,6 +428,7 @@ export type PrivateSessionAvailabilityRow = {
   session_focus: string;
   notes?: string | null;
   status: PrivateSessionAvailabilityStatus;
+  visibility?: PrivateSessionVisibility | null;
   player_name?: string | null;
   player_age?: string | null;
   parent_name?: string | null;
@@ -462,6 +469,7 @@ export type PrivateSessionAvailabilityInput = {
   sessionFocus?: string;
   notes?: string;
   status?: PrivateSessionAvailabilityStatus;
+  visibility?: PrivateSessionVisibility;
 };
 
 export type PrivateSessionRequestInput = {
@@ -773,6 +781,26 @@ function toPublicSession(session: TrainingSessionRow, paidPlayers: number): Publ
   };
 }
 
+function toPublicPrivateSession(session: PrivateSessionAvailabilityRow): PublicAvailablePrivateSession {
+  const start = displayParts(session.start_datetime, session.timezone || defaultTimeZone);
+  const end = displayParts(session.end_datetime, session.timezone || defaultTimeZone);
+
+  return {
+    id: session.id,
+    date: start.date,
+    dateLabel: start.dateLabel,
+    dayLabel: start.dayLabel,
+    startTime: start.time,
+    endTime: end.time,
+    isoDateTime: session.start_datetime,
+    timeZone: session.timezone || defaultTimeZone,
+    title: "Private Session",
+    location: session.location || business.location,
+    duration: "60 min",
+    status: "available"
+  };
+}
+
 function publicSessionProgramName(publicSession: PublicAvailableSession) {
   return getTrainingGroupSessionLabel(publicSession.trainingGroupId);
 }
@@ -836,6 +864,7 @@ export async function getSupabaseAvailability(): Promise<PublicAvailabilityRespo
     return {
       status: "Failed",
       sessions: [],
+      privateSessions: [],
       generatedAt: new Date().toISOString(),
       timeZone: defaultTimeZone,
       message: "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel."
@@ -847,6 +876,7 @@ export async function getSupabaseAvailability(): Promise<PublicAvailabilityRespo
     `training_sessions?select=*&status=eq.open&start_datetime=gt.${encodeFilter(now.toISOString())}&order=start_datetime.asc`
   );
   const paidBookings = await listPaidBookings();
+  const publicPrivateSessions = await listPublicBookingPrivateSessionAvailability();
   const counts = paidPlayerCounts(paidBookings);
   const publicSessions = sessions
     .map((session) => toPublicSession(session, counts[session.id] ?? 0))
@@ -855,6 +885,7 @@ export async function getSupabaseAvailability(): Promise<PublicAvailabilityRespo
   return {
     status: "Synced" as CalendarSyncStatus,
     sessions: publicSessions,
+    privateSessions: publicPrivateSessions.map(toPublicPrivateSession),
     generatedAt: now.toISOString(),
     timeZone: defaultTimeZone
   };
@@ -868,6 +899,7 @@ export async function getSupabaseAvailabilityDebug(): Promise<PublicAvailability
       supabaseConfigured: false,
       status: "Failed",
       sessions: [],
+      privateSessions: [],
       generatedAt: now.toISOString(),
       timeZone: defaultTimeZone,
       message: "Supabase is not configured. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Vercel.",
@@ -1728,6 +1760,20 @@ export async function listPublicPrivateSessionAvailability() {
   ).catch(() => []);
 }
 
+export async function listPublicBookingPrivateSessionAvailability() {
+  const now = new Date().toISOString();
+
+  return supabaseRequest<PrivateSessionAvailabilityRow[]>(
+    [
+      "private_session_availability?select=*",
+      "status=eq.available",
+      "visibility=eq.public",
+      `start_datetime=gt.${encodeFilter(now)}`,
+      "order=start_datetime.asc"
+    ].join("&")
+  ).catch(() => []);
+}
+
 export async function createPrivateSessionAvailability(input: PrivateSessionAvailabilityInput) {
   const start = zonedDateTimeToUtc(input.date, input.startTime, defaultTimeZone);
   const explicitEnd = input.endTime ? zonedDateTimeToUtc(input.date, input.endTime, defaultTimeZone) : null;
@@ -1741,7 +1787,8 @@ export async function createPrivateSessionAvailability(input: PrivateSessionAvai
       location: input.location?.trim() || business.location,
       session_focus: input.sessionFocus?.trim() || "Private Session",
       notes: input.notes?.trim() || null,
-      status: input.status || "available"
+      status: input.status || "available",
+      visibility: input.visibility || "private_link"
     })
   });
 
@@ -1757,6 +1804,7 @@ export async function updatePrivateSessionAvailability(
       | "session_focus"
       | "notes"
       | "status"
+      | "visibility"
       | "payment_method"
       | "payment_status"
       | "waiver_signed"
@@ -1797,6 +1845,7 @@ export async function updatePrivateSessionAvailability(
   if (typeof updates.session_focus === "string") payload.session_focus = updates.session_focus.trim() || "Private Session";
   if (typeof updates.notes === "string" || updates.notes === null) payload.notes = updates.notes?.trim() || null;
   if (updates.status) payload.status = updates.status;
+  if (updates.visibility) payload.visibility = updates.visibility;
   if (updates.payment_method) payload.payment_method = updates.payment_method;
   if (updates.payment_status) payload.payment_status = updates.payment_status;
   if (updates.waiver_signed !== undefined) payload.waiver_signed = updates.waiver_signed;
@@ -1835,7 +1884,7 @@ export async function deletePrivateSessionAvailability(id: string) {
 
 export async function bookPrivateSessionAvailability(input: {
   privateSessionId: string;
-  customPaymentLinkId: string;
+  customPaymentLinkId?: string | null;
   playerName: string;
   playerAge: string;
   parentName: string;
@@ -1872,7 +1921,7 @@ export async function bookPrivateSessionAvailability(input: {
         parent_phone: input.parentPhone,
         payment_method: input.paymentMethod || "card",
         payment_status: input.paymentStatus || "paid",
-        custom_payment_link_id: input.customPaymentLinkId,
+        custom_payment_link_id: input.customPaymentLinkId || null,
         stripe_checkout_session_id: input.checkoutSessionId || null,
         stripe_payment_intent_id: input.paymentIntentId || null,
         amount_paid: input.amountPaid ?? 0,
@@ -1896,6 +1945,38 @@ export async function bookPrivateSessionAvailability(input: {
   }
 
   return booked;
+}
+
+export async function confirmPrivateSessionAvailabilityPayment(input: {
+  privateSessionId: string;
+  checkoutSessionId: string;
+  paymentIntentId?: string;
+  amountPaid?: number;
+}) {
+  const rows = await supabaseRequest<PrivateSessionAvailabilityRow[]>(
+    [
+      `private_session_availability?id=eq.${encodeFilter(input.privateSessionId)}`,
+      "status=eq.booked",
+      "payment_status=eq.pending_card_payment",
+      `stripe_checkout_session_id=eq.${encodeFilter(input.checkoutSessionId)}`
+    ].join("&"),
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        payment_status: "paid",
+        stripe_payment_intent_id: input.paymentIntentId || null,
+        amount_paid: input.amountPaid ?? 0,
+        booked_at: new Date().toISOString()
+      })
+    }
+  );
+  const confirmed = rows[0];
+
+  if (!confirmed) {
+    throw new Error("That private session payment could not be matched to a pending private booking.");
+  }
+
+  return confirmed;
 }
 
 export async function schedulePrivateSessionRequest(input: {

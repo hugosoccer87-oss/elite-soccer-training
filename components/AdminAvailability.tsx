@@ -19,6 +19,7 @@ import type {
   PrivateSessionRequestStatus,
   PrivateSessionAvailabilityRow,
   PrivateSessionAvailabilityStatus,
+  PrivateSessionVisibility,
   ScheduleApprovalPaymentMethod
 } from "@/lib/supabase-db";
 import { waiverRecordFooter, waiverSections } from "@/lib/waiver-content";
@@ -687,14 +688,46 @@ function adminCalendarBlockClass(session: AdminTrainingSession) {
 }
 
 function privateCalendarStatusLabel(session: PrivateSessionAvailabilityRow) {
-  if (session.status === "booked") {
-    return "booked";
+  if (session.status === "booked" && session.payment_status === "zelle_pending") {
+    return `Pending Zelle${session.player_name ? ` — ${session.player_name}` : ""}`;
   }
 
-  return session.status;
+  if (session.status === "booked") {
+    return `Private Session${session.player_name ? ` — ${session.player_name}` : ""}`;
+  }
+
+  if (session.status === "available") {
+    return "Private Session Available";
+  }
+
+  if (session.status === "closed") {
+    return "Private Session Closed";
+  }
+
+  if (session.status === "cancelled") {
+    return "Private Session Cancelled";
+  }
+
+  return "Private Session";
+}
+
+function privateVisibilityLabel(value?: string | null) {
+  if (value === "public") {
+    return "Public booking calendar";
+  }
+
+  if (value === "hidden") {
+    return "Hidden/admin only";
+  }
+
+  return "Private link only";
 }
 
 function privateCalendarBlockClass(session: PrivateSessionAvailabilityRow) {
+  if (session.status === "booked" && session.payment_status === "zelle_pending") {
+    return "border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100";
+  }
+
   if (session.status === "booked") {
     return "border-blue-300 bg-blue-50 text-blue-950 hover:bg-blue-100";
   }
@@ -1353,6 +1386,7 @@ export function AdminAvailability() {
   const [privateAvailabilityLocation, setPrivateAvailabilityLocation] = useState(business.location);
   const [privateAvailabilityNotes, setPrivateAvailabilityNotes] = useState("");
   const [privateAvailabilityStatus, setPrivateAvailabilityStatus] = useState<PrivateSessionAvailabilityStatus>("available");
+  const [privateAvailabilityVisibility, setPrivateAvailabilityVisibility] = useState<PrivateSessionVisibility>("private_link");
   const [privateRequestScheduleInputs, setPrivateRequestScheduleInputs] = useState<
     Record<string, { date: string; startTime: string; endTime: string; location: string }>
   >({});
@@ -2087,6 +2121,32 @@ export function AdminAvailability() {
     );
   }
 
+  function privateAvailabilityConflictLabels(date: string, startTime: string, endTime: string) {
+    const labels: string[] = [];
+
+    for (const session of sessions) {
+      const sessionDate = formatDateOnly(session.start_datetime, session.timezone);
+      const sessionStart = formatTimeInput(session.start_datetime, session.timezone);
+      const sessionEnd = formatTimeInput(session.end_datetime, session.timezone);
+
+      if (session.status !== "cancelled" && sessionDate === date && startTime < sessionEnd && endTime > sessionStart) {
+        labels.push(`Small group ${formatTimeRange(session)} (${session.status})`);
+      }
+    }
+
+    for (const session of privateSessionAvailability) {
+      const sessionDate = formatDateOnly(session.start_datetime, session.timezone);
+      const sessionStart = formatTimeInput(session.start_datetime, session.timezone);
+      const sessionEnd = formatTimeInput(session.end_datetime, session.timezone);
+
+      if (session.status !== "cancelled" && sessionDate === date && startTime < sessionEnd && endTime > sessionStart) {
+        labels.push(`${privateCalendarStatusLabel(session)} ${formatTimeRange(session)}`);
+      }
+    }
+
+    return labels;
+  }
+
   async function createPrivateAvailability() {
     if (!privateAvailabilityDate || !privateAvailabilityStartTime) {
       setError("Choose a private session date and start time.");
@@ -2095,6 +2155,16 @@ export function AdminAvailability() {
 
     if (privateAvailabilityEndTime && privateAvailabilityEndTime <= privateAvailabilityStartTime) {
       setError("Private session end time must be after the start time.");
+      return;
+    }
+
+    const proposedEndTime = privateAvailabilityEndTime || endTimeFromStartInput(privateAvailabilityStartTime);
+    const conflicts = privateAvailabilityConflictLabels(privateAvailabilityDate, privateAvailabilityStartTime, proposedEndTime);
+
+    if (
+      conflicts.length > 0 &&
+      !window.confirm(`This overlaps with another session. Are you sure?\n\n${conflicts.slice(0, 5).join("\n")}`)
+    ) {
       return;
     }
 
@@ -2115,7 +2185,8 @@ export function AdminAvailability() {
           location: privateAvailabilityLocation,
           sessionFocus: privateSessionTrainingFocusValue,
           notes: privateAvailabilityNotes,
-          status: privateAvailabilityStatus
+          status: privateAvailabilityStatus,
+          visibility: privateAvailabilityVisibility
         })
       });
       const result = (await response.json().catch(() => ({}))) as PrivateSessionAvailabilityResponse;
@@ -2127,6 +2198,7 @@ export function AdminAvailability() {
       setPrivateAvailabilityDate("");
       setPrivateAvailabilityNotes("");
       setPrivateAvailabilityStatus("available");
+      setPrivateAvailabilityVisibility("private_link");
       await refreshAdminData("Private session availability created.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Private session availability could not be created.");
@@ -2138,7 +2210,11 @@ export function AdminAvailability() {
   async function updatePrivateAvailability(
     id: string,
     updates: Partial<{
+      date: string;
+      startTime: string;
+      endTime: string;
       status: PrivateSessionAvailabilityStatus;
+      visibility: PrivateSessionVisibility;
       location: string;
       sessionFocus: string;
       notes: string | null;
@@ -2168,6 +2244,45 @@ export function AdminAvailability() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function editPrivateAvailabilityDetails(session: PrivateSessionAvailabilityRow) {
+    const currentDate = formatDateOnly(session.start_datetime, session.timezone);
+    const currentStart = formatTimeInput(session.start_datetime, session.timezone);
+    const currentEnd = formatTimeInput(session.end_datetime, session.timezone);
+    const nextDate = window.prompt("Private session date (YYYY-MM-DD)", currentDate)?.trim();
+
+    if (!nextDate) {
+      return;
+    }
+
+    const nextStart = window.prompt("Start time (24-hour HH:MM)", currentStart)?.trim();
+
+    if (!nextStart) {
+      return;
+    }
+
+    const nextEnd = window.prompt("End time (24-hour HH:MM)", currentEnd)?.trim() || endTimeFromStartInput(nextStart);
+    const nextLocation = window.prompt("Location", session.location || business.location)?.trim() || business.location;
+    const nextNotes = window.prompt("Internal note", session.notes || "")?.trim() || null;
+    const conflicts = privateAvailabilityConflictLabels(nextDate, nextStart, nextEnd).filter(
+      (label) => !label.includes(formatTimeRange(session))
+    );
+
+    if (
+      conflicts.length > 0 &&
+      !window.confirm(`This overlaps with another session. Are you sure?\n\n${conflicts.slice(0, 5).join("\n")}`)
+    ) {
+      return;
+    }
+
+    await updatePrivateAvailability(session.id, {
+      date: nextDate,
+      startTime: nextStart,
+      endTime: nextEnd,
+      location: nextLocation,
+      notes: nextNotes
+    });
   }
 
   async function deletePrivateAvailability(id: string) {
@@ -4252,6 +4367,7 @@ export function AdminAvailability() {
 
                 <div className="rounded-lg border border-slate-200 bg-mist p-4 text-sm leading-6 text-slate-600">
                   <p><span className="font-black text-navy">Session type:</span> Private Session</p>
+                  <p><span className="font-black text-navy">Visibility:</span> {privateVisibilityLabel(selectedCalendarPrivateSession.visibility)}</p>
                   <p><span className="font-black text-navy">Location:</span> {selectedCalendarPrivateSession.location || business.location}</p>
                   <p><span className="font-black text-navy">Notes:</span> {selectedCalendarPrivateSession.notes || "None"}</p>
                   <p>
@@ -4285,12 +4401,20 @@ export function AdminAvailability() {
                   </div>
                 ) : (
                   <div className="grid gap-2">
-                    <button
-                      type="button"
-                      disabled={isSaving}
-                      onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { status: "closed" })}
-                      className={secondaryButtonClass}
-                    >
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => void editPrivateAvailabilityDetails(selectedCalendarPrivateSession)}
+                    className={secondaryButtonClass}
+                  >
+                    Edit Details
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { status: "closed" })}
+                    className={secondaryButtonClass}
+                  >
                       Close Private Time
                     </button>
                     <button
@@ -4301,6 +4425,32 @@ export function AdminAvailability() {
                     >
                       Cancel Private Time
                     </button>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { visibility: "public" })}
+                        className={secondaryButtonClass}
+                      >
+                        Make Public
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { visibility: "private_link" })}
+                        className={secondaryButtonClass}
+                      >
+                        Private Link Only
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSaving}
+                        onClick={() => void updatePrivateAvailability(selectedCalendarPrivateSession.id, { visibility: "hidden" })}
+                        className={secondaryButtonClass}
+                      >
+                        Hide
+                      </button>
+                    </div>
                     <button
                       type="button"
                       disabled={isSaving}
@@ -6107,6 +6257,14 @@ export function AdminAvailability() {
                     ))}
                   </select>
                 </label>
+                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                  Visibility
+                  <select className={inputClass} value={privateAvailabilityVisibility} onChange={(event) => setPrivateAvailabilityVisibility(event.target.value as PrivateSessionVisibility)}>
+                    <option value="private_link">Private link only</option>
+                    <option value="public">Public booking calendar</option>
+                    <option value="hidden">Hidden/admin only</option>
+                  </select>
+                </label>
                 <label className="grid gap-2 text-xs font-black uppercase text-slate-500 lg:col-span-2">
                   Location
                   <input className={inputClass} value={privateAvailabilityLocation} onChange={(event) => setPrivateAvailabilityLocation(event.target.value)} />
@@ -6140,6 +6298,9 @@ export function AdminAvailability() {
                             <span className={`rounded-full border px-3 py-1 text-[11px] font-black uppercase ${statusBadgeClass(session.status === "available" ? "open" : session.status)}`}>
                               {session.status}
                             </span>
+                            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-black uppercase text-slate-600">
+                              {privateVisibilityLabel(session.visibility)}
+                            </span>
                           </div>
                           <p className="mt-3 text-base font-black text-navy">{formatDateTime(session.start_datetime, session.timezone)} - {formatTime(session.end_datetime, session.timezone)}</p>
                           <p className="mt-1 text-sm font-bold text-slate-600">Private Session</p>
@@ -6163,6 +6324,9 @@ export function AdminAvailability() {
                           {session.notes ? <p className="mt-2 text-sm text-slate-500">Notes: {session.notes}</p> : null}
                         </div>
                         <div className="flex flex-wrap gap-2 lg:justify-end">
+                          <button type="button" disabled={isSaving || session.status === "booked"} onClick={() => void editPrivateAvailabilityDetails(session)} className={secondaryButtonClass}>
+                            Edit Details
+                          </button>
                           <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { status: "available" })} className={secondaryButtonClass}>
                             Available
                           </button>
@@ -6171,6 +6335,15 @@ export function AdminAvailability() {
                           </button>
                           <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { status: "cancelled" })} className={secondaryButtonClass}>
                             Cancel
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { visibility: "public" })} className={secondaryButtonClass}>
+                            Make Public
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { visibility: "private_link" })} className={secondaryButtonClass}>
+                            Private Link Only
+                          </button>
+                          <button type="button" disabled={isSaving} onClick={() => void updatePrivateAvailability(session.id, { visibility: "hidden" })} className={secondaryButtonClass}>
+                            Hide
                           </button>
                           <button type="button" disabled={isSaving || session.status === "booked"} onClick={() => void deletePrivateAvailability(session.id)} className={dangerButtonClass}>
                             Delete
