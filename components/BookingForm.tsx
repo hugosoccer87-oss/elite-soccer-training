@@ -343,8 +343,11 @@ function spotsLabel(count: number) {
 }
 
 function sessionFocusTitle(slot: Pick<PublicAvailableSession, "trainingGroup"> & Partial<Pick<PublicAvailableSession, "trainingGroupAges">>) {
-  return slot.trainingGroupAges ? `${slot.trainingGroup} — ${slot.trainingGroupAges}` : slot.trainingGroup;
+  return "Small Group Training";
 }
+
+const smallGroupAgeRestrictionMessage =
+  "This small group session is currently recommended for older players. Please submit a private training request and Coach Hugo will follow up with availability.";
 
 function sessionTimeRange(slot: PublicAvailableSession) {
   return `${slot.startTime}-${slot.endTime}`;
@@ -816,7 +819,19 @@ export function BookingForm() {
       return;
     }
 
+    const passPlayerAge = Number(passPurchaseFields.playerAge);
+
+    if (!Number.isInteger(passPlayerAge)) {
+      setError("Enter a valid whole-number player age before continuing.");
+      return;
+    }
+
     if (needsSelectedSessions) {
+      if (passPlayerAge < 13) {
+        setError(smallGroupAgeRestrictionMessage);
+        return;
+      }
+
       if (selectedPassSessionIds.length === 0) {
         setError("Choose at least one session, or select choose dates later.");
         return;
@@ -980,7 +995,7 @@ export function BookingForm() {
       if (!Number.isInteger(playerAge)) {
         nextErrors.playerAge = "Enter a valid whole-number age.";
       } else if (!isPrivateSessionBooking && bookingGroup && !isAgeInGroup(playerAge, bookingGroup.id)) {
-        nextErrors.playerAge = `${bookingGroup.name} is for ${bookingGroup.ages}. Choose the correct training group.`;
+        nextErrors.playerAge = smallGroupAgeRestrictionMessage;
       }
     }
 
@@ -1306,10 +1321,6 @@ export function BookingForm() {
               </p>
             </div>
 
-            <div className="rounded-lg border border-electric/20 bg-blue-50 p-4 text-sm font-bold leading-6 text-navy">
-              Current sessions are focused on Elite Performance players ages 13–18.
-            </div>
-
             <div className="grid gap-3 lg:grid-cols-3">
               {[
                 ["single_session", "Single Session", "$55", "Book one training session"],
@@ -1394,8 +1405,8 @@ export function BookingForm() {
                     <input className={inputClass} inputMode="numeric" value={passPurchaseFields.playerAge} onChange={(event) => setPassPurchaseField("playerAge", event.target.value)} />
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
-                    Training Group
-                    <input className={inputClass} value={`${selectedGroup.name}: ${selectedGroup.ages}`} readOnly />
+                    Training Plan
+                    <input className={inputClass} value="EST CV Training Sessions" readOnly />
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold leading-6 text-slate-700 sm:col-span-2">
                     <input
@@ -1474,7 +1485,7 @@ export function BookingForm() {
                               </span>
                               <span className="mt-1 block text-2xl font-black">{sessionTimeRange(slot)}</span>
                               <span className="mt-2 block text-sm font-bold opacity-90">
-                                {slot.trainingGroup}: {slot.trainingGroupAges}
+                                Small Group Training
                               </span>
                               <span
                                 className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
@@ -1696,15 +1707,18 @@ export function BookingForm() {
             ) : (
               <>
                 <div className="rounded-lg border border-slate-200 bg-mist p-5">
-                  <p className="text-xs font-black uppercase text-electric">{selectedGroup.ages}</p>
-                  <h4 className="mt-2 text-2xl font-black text-navy">{selectedGroup.name}</h4>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{groupSizeMessage}</p>
+                  <p className="text-xs font-black uppercase text-electric">EST CV Training Sessions</p>
+                  <h4 className="mt-2 text-2xl font-black text-navy">Small Group and Private Training</h4>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    Small group and private training options are designed to help players improve through focused,
+                    competitive, and personal coaching.
+                  </p>
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-white p-5">
-                  <h4 className="text-xl font-black text-navy">Need a different time or date?</h4>
+                  <h4 className="text-xl font-black text-navy">Need a different time, date, or private training option?</h4>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Submit a special training request and Coach Hugo will do his best to make something work.
+                    Submit a training request and Coach Hugo will follow up with availability.
                   </p>
                   <button
                     type="button"
@@ -1715,7 +1729,7 @@ export function BookingForm() {
                     }}
                     className="mt-4 rounded-md border border-electric px-5 py-3 text-xs font-black uppercase text-electric transition hover:bg-electric hover:text-white"
                   >
-                    Request a Session
+                    Request Private Training
                   </button>
                 </div>
 
@@ -1739,7 +1753,7 @@ export function BookingForm() {
                 {isPrivateSessionOption ? "Choose your private session" : "Choose your training session"}
               </h3>
               <p className="mt-2 text-sm font-bold text-slate-600">
-                {isPrivateSessionOption ? "Private Session" : selectedGroup ? selectedGroup.ages : "All available training groups"}
+                {isPrivateSessionOption ? "Private Session" : "EST CV Training Sessions"}
               </p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
                 {isPrivateSessionOption
@@ -1758,7 +1772,7 @@ export function BookingForm() {
                   <p><span className="font-black text-navy">All sessions loaded:</span> {availabilityDebug?.summary?.allSessionsLoaded ?? "loading"}</p>
                   <p><span className="font-black text-navy">Open future sessions:</span> {availabilityDebug?.summary?.openFutureSessions ?? "loading"}</p>
                   <p><span className="font-black text-navy">Sessions with remaining spots:</span> {availabilityDebug?.summary?.sessionsWithRemainingSpots ?? "loading"}</p>
-                  <p><span className="font-black text-navy">Selected training group:</span> {selectedGroup ? selectedGroup.name : "All available training groups"}</p>
+                  <p><span className="font-black text-navy">Selected sessions:</span> EST CV Training Sessions</p>
                   <p><span className="font-black text-navy">Sessions after group/option filter:</span> {availableSessions.length}</p>
                   <p><span className="font-black text-navy">Final sessions rendered:</span> {sessionsForSelectedDate.length}</p>
                 </div>
@@ -1953,7 +1967,7 @@ export function BookingForm() {
                               </span>
                               <span className="mt-1 block text-2xl font-black">{sessionTimeRange(slot)}</span>
                               <span className="mt-2 block text-sm font-bold opacity-90">
-                                {slot.trainingGroup} — {slot.trainingGroupAges}
+                                Small Group Training
                               </span>
                               <span className="mt-1 block text-sm font-semibold opacity-80">
                                 {sessionLocationLines(slot.location).map((line) => (
@@ -2121,6 +2135,19 @@ export function BookingForm() {
                 aria-invalid={Boolean(fieldErrors.playerAge)}
               />
               {fieldErrorMessage("playerAge")}
+              {fieldErrors.playerAge === smallGroupAgeRestrictionMessage ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    selectBookingOption("private_request");
+                    setStep("program");
+                    setError("");
+                  }}
+                  className="w-fit rounded-md border border-electric px-4 py-2 text-xs font-black uppercase text-electric transition hover:bg-electric hover:text-white"
+                >
+                  Request Private Training
+                </button>
+              ) : null}
             </label>
             <label className={fieldLabelClass("phone")}>
               Phone Number
@@ -2435,7 +2462,7 @@ export function BookingForm() {
                 <div className="mt-5 rounded-md bg-white p-4 text-sm text-slate-700">
                   <p className="font-black text-navy">{selectedSlot.dateLabel} at {sessionTimeRange(selectedSlot)}</p>
                   <p>{usesExistingPass ? "1 player using Training credit" : `${fields.players} player(s) attending`}</p>
-                  <p>{bookingGroup?.name ?? "Selected training group"}</p>
+                  <p>Small Group Training</p>
                   <p className="mt-2 rounded-md border border-electric/20 bg-blue-50 px-3 py-2 text-xs font-black uppercase text-electric">
                     {sessionFocusTitle(selectedSlot)}
                   </p>

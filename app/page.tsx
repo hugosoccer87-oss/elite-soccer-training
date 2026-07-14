@@ -142,8 +142,8 @@ export default function HomePage() {
         <div className="section-shell">
           <SectionHeader
             eyebrow="Programs"
-            title="Age-based soccer development groups."
-            description="Current sessions are focused on Elite Performance players ages 13–18, with structured small group training built around confidence, speed of play, and game performance."
+            title="Focused soccer development sessions."
+            description="EST CV offers small group and private training options built around confidence, speed of play, technical detail, and game performance."
           />
           <div className="mt-10 grid max-w-3xl gap-6">
             {services.map((service, index) => (

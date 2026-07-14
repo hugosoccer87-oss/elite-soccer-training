@@ -18,8 +18,8 @@ export default function ServicesPage() {
     <>
       <PageHero
         eyebrow="Programs"
-        title="Age-based small group soccer development."
-        description={`Current small group training is focused on Elite Performance players ages 13–18. Every session is 60 minutes and $55 per player. ${groupSizeMessage}`}
+        title="Small group and private soccer development."
+        description={`EST CV training options are built around focused coaching, competitive repetition, confidence, and game performance. Every session is 60 minutes and starts at $55 per player. ${groupSizeMessage}`}
       />
 
       <section className="bg-mist py-16 sm:py-20">
@@ -94,8 +94,8 @@ export default function ServicesPage() {
               Special Training Request
             </h2>
             <p className="mt-4 leading-7 text-slate-600">
-              Have a player outside the standard 13–18 age range, a sibling group, team training request, or a custom
-              training need? Submit a special request and Coach Hugo will review the details.
+              Need a different time, private training option, sibling group, team session, or custom training need?
+              Submit a special request and Coach Hugo will review the details.
             </p>
             <a
               href="#special-request-form"
