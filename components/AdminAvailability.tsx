@@ -198,6 +198,7 @@ type AdminSection =
   | "private-requests"
   | "direct-payments"
   | "email-list";
+type NewSessionType = "small_group" | "private_session";
 type SessionFilter =
   | "all"
   | "open"
@@ -1300,12 +1301,16 @@ export function AdminAvailability() {
   const [privateSessionRequests, setPrivateSessionRequests] = useState<PrivateSessionRequestRow[]>([]);
   const [privateSessionAvailability, setPrivateSessionAvailability] = useState<PrivateSessionAvailabilityRow[]>([]);
   const [activeSection, setActiveSection] = useState<AdminSection>("dashboard");
+  const [newSessionType, setNewSessionType] = useState<NewSessionType>("small_group");
   const [newGroupId, setNewGroupId] = useState<TrainingGroupId>("elite-performance");
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("17:00");
+  const [newEndTime, setNewEndTime] = useState("18:00");
   const [newCapacity, setNewCapacity] = useState(String(slotCapacity));
   const [newLocation, setNewLocation] = useState(business.location);
   const [newStatus, setNewStatus] = useState<"open" | "closed" | "cancelled">("open");
+  const [newPrivateVisibility, setNewPrivateVisibility] = useState<PrivateSessionVisibility>("private_link");
+  const [newInternalNote, setNewInternalNote] = useState("");
   const [createAnother, setCreateAnother] = useState(true);
   const [showCreateSession, setShowCreateSession] = useState(false);
   const [showBulkCreate, setShowBulkCreate] = useState(false);
@@ -2318,37 +2323,69 @@ export function AdminAvailability() {
       return;
     }
 
+    const finalEndTime = newEndTime || endTimeFromStartInput(newTime);
+
+    if (finalEndTime <= newTime) {
+      setError("End time must be after the start time.");
+      return;
+    }
+
+    if (newSessionType === "private_session") {
+      const conflicts = privateAvailabilityConflictLabels(newDate, newTime, finalEndTime);
+
+      if (
+        conflicts.length > 0 &&
+        !window.confirm(`This overlaps with another session. Are you sure?\n\n${conflicts.slice(0, 5).join("\n")}`)
+      ) {
+        return;
+      }
+    }
+
     setIsSaving(true);
     setError("");
     setNotice("");
 
     try {
-      const response = await fetch("/api/admin/sessions", {
+      const response = await fetch(newSessionType === "private_session" ? "/api/admin/private-session-availability" : "/api/admin/sessions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          trainingGroup: newGroupId,
-          date: newDate,
-          time: newTime,
-          trainingFocus: null,
-          capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
-          location: newLocation,
-          status: newStatus
-        })
+        body: JSON.stringify(
+          newSessionType === "private_session"
+            ? {
+                date: newDate,
+                startTime: newTime,
+                endTime: finalEndTime,
+                location: newLocation,
+                sessionFocus: privateSessionTrainingFocusValue,
+                notes: newInternalNote,
+                status: newStatus === "open" ? "available" : newStatus,
+                visibility: newPrivateVisibility
+              }
+            : {
+                trainingGroup: newGroupId,
+                date: newDate,
+                time: newTime,
+                endTime: finalEndTime,
+                trainingFocus: null,
+                capacity: Math.min(slotCapacity, Math.max(1, Number(newCapacity) || slotCapacity)),
+                location: newLocation,
+                status: newStatus
+              }
+        )
       });
       const result = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
 
       if (!response.ok) {
-        throw new Error(result.error || "The session could not be added.");
+        throw new Error(result.error || (newSessionType === "private_session" ? "The private session could not be added." : "The session could not be added."));
       }
 
       if (!createAnother) {
         setShowCreateSession(false);
       }
 
-      await refreshAdminData("Training session added to Supabase availability.");
+      await refreshAdminData(newSessionType === "private_session" ? "Private session added to availability." : "Training session added to Supabase availability.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "The session could not be added.");
     } finally {
@@ -3459,9 +3496,11 @@ export function AdminAvailability() {
   }
 
   function duplicateSession(session: AdminTrainingSession) {
+    setNewSessionType("small_group");
     setNewGroupId(session.training_group);
     setNewDate(formatDateOnly(session.start_datetime, session.timezone));
     setNewTime(formatTimeInput(session.start_datetime, session.timezone));
+    setNewEndTime(formatTimeInput(session.end_datetime, session.timezone));
     setNewCapacity(String(session.capacity || slotCapacity));
     setNewLocation(session.location || business.location);
     setNewStatus(session.status);
@@ -4517,26 +4556,52 @@ export function AdminAvailability() {
               <div className="mt-6 rounded-xl border border-slate-200 bg-mist p-4 sm:p-5">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
-                    Training Group
-                    <select className={inputClass} value={newGroupId} onChange={(event) => setNewGroupId(event.target.value as TrainingGroupId)}>
-                      {trainingGroups.map((group) => (
-                        <option key={group.id} value={group.id}>
-                          {group.name} ({group.ages})
-                        </option>
-                      ))}
+                    Session Type
+                    <select
+                      className={inputClass}
+                      value={newSessionType}
+                      onChange={(event) => {
+                        const nextType = event.target.value as NewSessionType;
+
+                        setNewSessionType(nextType);
+                        setNewCapacity(nextType === "private_session" ? "1" : String(slotCapacity));
+                        setNewStatus("open");
+                      }}
+                    >
+                      <option value="small_group">Small Group</option>
+                      <option value="private_session">Private Session</option>
                     </select>
                   </label>
+                  {newSessionType === "small_group" ? (
+                    <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                      Training Group
+                      <select className={inputClass} value={newGroupId} onChange={(event) => setNewGroupId(event.target.value as TrainingGroupId)}>
+                        {trainingGroups.map((group) => (
+                          <option key={group.id} value={group.id}>
+                            {group.name} ({group.ages})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm font-bold leading-6 text-navy sm:col-span-2">
+                      Private Session availability is separate from small group capacity. Public visibility controls whether parents can book it on the normal booking page.
+                    </div>
+                  )}
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     Date
                     <input className={inputClass} type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} />
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     Start Time
-                    <input className={inputClass} type="time" value={newTime} onChange={(event) => setNewTime(event.target.value)} />
+                    <input className={inputClass} type="time" value={newTime} onChange={(event) => {
+                      setNewTime(event.target.value);
+                      setNewEndTime(endTimeFromStartInput(event.target.value));
+                    }} />
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     End Time
-                    <input className={inputClass} type="time" value={endTimeFromStartInput(newTime)} readOnly />
+                    <input className={inputClass} type="time" value={newEndTime} onChange={(event) => setNewEndTime(event.target.value)} />
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     Capacity
@@ -4545,22 +4610,44 @@ export function AdminAvailability() {
                       type="number"
                       min="1"
                       max="6"
-                      value={newCapacity}
+                      value={newSessionType === "private_session" ? "1" : newCapacity}
+                      disabled={newSessionType === "private_session"}
                       onChange={(event) => setNewCapacity(event.target.value)}
                     />
                   </label>
                   <label className="grid gap-2 text-sm font-bold text-navy">
                     Status
                     <select className={inputClass} value={newStatus} onChange={(event) => setNewStatus(event.target.value as "open" | "closed" | "cancelled")}>
-                      <option value="open">Open</option>
+                      <option value="open">{newSessionType === "private_session" ? "Available" : "Open"}</option>
                       <option value="closed">Closed</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
                   </label>
+                  {newSessionType === "private_session" ? (
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Visibility
+                      <select className={inputClass} value={newPrivateVisibility} onChange={(event) => setNewPrivateVisibility(event.target.value as PrivateSessionVisibility)}>
+                        <option value="private_link">Private link only</option>
+                        <option value="public">Public booking calendar</option>
+                        <option value="hidden">Hidden/admin only</option>
+                      </select>
+                    </label>
+                  ) : null}
                   <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
                     Location
                     <input className={inputClass} value={newLocation} onChange={(event) => setNewLocation(event.target.value)} />
                   </label>
+                  {newSessionType === "private_session" ? (
+                    <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2">
+                      Internal Note
+                      <textarea
+                        className={`${inputClass} min-h-20 resize-y`}
+                        value={newInternalNote}
+                        onChange={(event) => setNewInternalNote(event.target.value)}
+                        placeholder="Optional admin note"
+                      />
+                    </label>
+                  ) : null}
                 </div>
                 <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <label className="flex items-center gap-2 text-sm font-bold text-slate-600">

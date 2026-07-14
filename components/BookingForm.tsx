@@ -435,7 +435,7 @@ function bookingOptionFromTypeParam(value: string | null): BookingOption | null 
   }
 
   if (normalized === "private-session" || normalized === "private-booking") {
-    return "private_session";
+    return "single_session";
   }
 
   return null;
@@ -639,21 +639,22 @@ export function BookingForm() {
   const bookingGroup = selectedSlot ? getTrainingGroup(selectedSlot.trainingGroupId) : selectedGroup;
   const displaySlot = selectedSlot;
   const isPrivateSessionOption = bookingOption === "private_session";
+  const isPrivateSessionBooking = isPrivateSessionOption || Boolean(selectedPrivateSession);
   const publicStepNumber = step === "program" || step === "session" ? 1 : step === "details" ? 2 : 3;
   const publicStepLabel = publicStepLabels[publicStepNumber - 1];
   const progressWidth = `${(publicStepNumber / publicStepLabels.length) * 100}%`;
   const selectedRemainingSpots = selectedSlot ? selectedSlot.remainingSpots : slotCapacity;
   const playerOptions = usesExistingPass
     ? [1]
-    : isPrivateSessionOption
+    : isPrivateSessionBooking
       ? [1]
     : Array.from({ length: Math.max(1, Math.min(slotCapacity, selectedRemainingSpots)) }, (_, index) => index + 1);
   const paymentTotal = usesExistingPass
     ? "Training credit"
-    : isPrivateSessionOption
+    : isPrivateSessionBooking
       ? formatCurrencyFromCents(getSessionTotalCents("1"))
       : formatCurrencyFromCents(getSessionTotalCents(fields.players));
-  const paidSessionSummaryLabel = isPrivateSessionOption
+  const paidSessionSummaryLabel = isPrivateSessionBooking
     ? "Elite Soccer Training CV - Private Session"
     : "Elite Soccer Training CV - Single Session";
 
@@ -932,7 +933,7 @@ export function BookingForm() {
   }
 
   function requireSchedule() {
-    if (isPrivateSessionOption) {
+    if (isPrivateSessionBooking) {
       if (!selectedPrivateSession) {
         applyFieldErrors(
           { session: "Select an available private session time before continuing." },
@@ -978,7 +979,7 @@ export function BookingForm() {
 
       if (!Number.isInteger(playerAge)) {
         nextErrors.playerAge = "Enter a valid whole-number age.";
-      } else if (!isPrivateSessionOption && bookingGroup && !isAgeInGroup(playerAge, bookingGroup.id)) {
+      } else if (!isPrivateSessionBooking && bookingGroup && !isAgeInGroup(playerAge, bookingGroup.id)) {
         nextErrors.playerAge = `${bookingGroup.name} is for ${bookingGroup.ages}. Choose the correct training group.`;
       }
     }
@@ -1003,9 +1004,9 @@ export function BookingForm() {
 
     if (!fields.players.trim()) {
       nextErrors.players = "Select the number of players attending.";
-    } else if (isPrivateSessionOption && playerCount !== 1) {
+    } else if (isPrivateSessionBooking && playerCount !== 1) {
       nextErrors.players = "Private sessions are booked for one player at a time.";
-    } else if (!isPrivateSessionOption && (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > selectedSlot.remainingSpots)) {
+    } else if (!isPrivateSessionBooking && (!selectedSlot || !Number.isInteger(playerCount) || playerCount < 1 || playerCount > selectedSlot.remainingSpots)) {
       nextErrors.players = `This session has ${spotsLabel(selectedRemainingSpots)}. Adjust the player count before continuing.`;
     }
 
@@ -1252,7 +1253,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Booking</p>
               <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">{publicStepLabel}</h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                {isPrivateSessionOption
+                {isPrivateSessionBooking
                   ? "Private session booking with parent waiver and secure payment."
                   : `60-minute small group soccer training for 1-6 players. ${groupSizeMessage}`}
               </p>
@@ -1301,7 +1302,7 @@ export function BookingForm() {
               <p className="text-sm font-black uppercase text-electric">Step 1</p>
               <h3 className="mt-2 text-2xl font-black text-navy">Choose your training session</h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Choose a single session, purchase a Training Package, book with existing Training credits, or request private 1-on-1 training.
+                Choose a booking option. Single Session can include available small group or public private session times.
               </p>
             </div>
 
@@ -1309,24 +1310,21 @@ export function BookingForm() {
               Current sessions are focused on Elite Performance players ages 13–18.
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <div className="grid gap-3 lg:grid-cols-3">
               {[
-                ["single_session", "Single Session", "$55", "Book online"],
-                ["private_session", "Private Session", "$55", "Choose available time"],
+                ["single_session", "Single Session", "$55", "Book one training session"],
                 [
                   "four_session_launch_pass",
                   "4-Session Training Package",
                   "$200",
-                  "Buy credits"
+                  "Buy 4 training credits"
                 ],
                 [
                   "six_session_launch_pass",
                   "6-Session Training Package",
                   "$285",
-                  "Buy credits"
-                ],
-                ["use_existing_pass", "Use Existing Credits", "Training Package", "Reserve with credits"],
-                ["private_request", "Private 1-on-1 Session Request", "Request", "Submit preferred times"]
+                  "Buy 6 training credits"
+                ]
               ].map(([value, title, price, description]) => {
                 const isSelected = bookingOption === value;
 
@@ -1335,16 +1333,30 @@ export function BookingForm() {
                     key={value}
                     type="button"
                     onClick={() => selectBookingOption(value as BookingOption)}
-                    className={`rounded-lg border p-4 text-left transition ${
+                    className={`rounded-lg border p-4 text-left transition sm:p-5 ${
                       isSelected ? "border-navy bg-navy text-white shadow-xl shadow-navy/15" : "border-slate-200 bg-white text-navy hover:border-electric"
                     }`}
                   >
                     <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>{price}</span>
                     <span className="mt-2 block text-lg font-black">{title}</span>
-                    <span className="mt-2 block text-sm leading-6 opacity-80">{description}</span>
+                    <span className="mt-1 block text-sm leading-6 opacity-80">{description}</span>
                   </button>
                 );
               })}
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => selectBookingOption("use_existing_pass")}
+                className={`rounded-md border px-4 py-3 text-left text-sm font-black transition ${
+                  usesExistingPass
+                    ? "border-navy bg-navy text-white"
+                    : "border-electric/40 bg-blue-50 text-electric hover:border-electric hover:bg-white"
+                }`}
+              >
+                Already have training credits? Reserve with existing credits.
+              </button>
             </div>
 
             {bookingOption === "private_request" ? (
@@ -1840,7 +1852,7 @@ export function BookingForm() {
                 )}
                 {fieldErrorMessage("session")}
               </div>
-            ) : availableSessions.length > 0 ? (
+            ) : availableSessions.length > 0 || availablePrivateSessions.length > 0 ? (
               <div
                 data-booking-field="session"
                 tabIndex={-1}
@@ -1848,7 +1860,7 @@ export function BookingForm() {
                   fieldErrors.session ? "border border-red-300 bg-red-50 p-3" : ""
                 }`}
               >
-                {visibleMonth ? (
+                {availableSessions.length > 0 && visibleMonth ? (
                   <div className="rounded-lg border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between gap-3">
                       <button
@@ -1905,74 +1917,126 @@ export function BookingForm() {
                   </div>
                 ) : null}
 
-                {selectedSessionDate ? (
+                {availableSessions.length > 0 && selectedSessionDate ? (
                   <p className="text-sm font-black text-navy">Available sessions for {readableDate(selectedSessionDate)}</p>
                 ) : null}
 
-                <div className="grid gap-3">
-                  {sessionsForSelectedDate.map((slot) => {
-                    const isSelected = selectedSlotId === slot.id;
+                {availableSessions.length > 0 ? (
+                  <div className="grid gap-3">
+                    {sessionsForSelectedDate.map((slot) => {
+                      const isSelected = selectedSlotId === slot.id;
 
-                    return (
-                      <button
-                        key={slot.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedSlotId(slot.id);
-                          clearFieldError("session");
-                          setFields((current) => ({
-                            ...current,
-                            players: String(Math.min(Number(current.players) || 1, slot.remainingSpots))
-                          }));
-                        }}
-                        className={`rounded-lg border p-4 text-left transition ${
-                          isSelected
-                            ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
-                            : "border-slate-200 bg-white text-navy hover:border-electric"
-                        }`}
-                      >
-                        <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
-                          <div>
-                            <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
-                              {slot.dayLabel}, {slot.dateLabel}
-                            </span>
-                            <span className="mt-1 block text-2xl font-black">{sessionTimeRange(slot)}</span>
-                            <span className="mt-2 block text-sm font-bold opacity-90">
-                              {slot.trainingGroup}: {slot.trainingGroupAges}
-                            </span>
+                      return (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSlotId(slot.id);
+                            setSelectedPrivateSessionId("");
+                            setPrivateBookingSuccess(null);
+                            clearFieldError("session");
+                            setFields((current) => ({
+                              ...current,
+                              players: String(Math.min(Number(current.players) || 1, slot.remainingSpots))
+                            }));
+                          }}
+                          className={`rounded-lg border p-4 text-left transition ${
+                            isSelected
+                              ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
+                              : "border-slate-200 bg-white text-navy hover:border-electric"
+                          }`}
+                        >
+                          <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                            <div>
+                              <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
+                                {slot.dayLabel}, {slot.dateLabel}
+                              </span>
+                              <span className="mt-1 block text-2xl font-black">{sessionTimeRange(slot)}</span>
+                              <span className="mt-2 block text-sm font-bold opacity-90">
+                                {slot.trainingGroup} — {slot.trainingGroupAges}
+                              </span>
+                              <span className="mt-1 block text-sm font-semibold opacity-80">
+                                {sessionLocationLines(slot.location).map((line) => (
+                                  <span key={line} className="block">{line}</span>
+                                ))}
+                              </span>
+                              <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
+                              <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(slot.remainingSpots)}</span>
+                            </div>
                             <span
-                              className={`mt-3 block rounded-md border px-3 py-2 text-xs font-black uppercase ${
-                                isSelected
-                                  ? "border-white/20 bg-white/10 text-white"
-                                  : "border-electric/20 bg-blue-50 text-electric"
+                              className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
+                                isSelected ? "bg-electric text-white" : "bg-mist text-navy"
                               }`}
                             >
-                              {sessionFocusTitle(slot)}
+                              {isSelected ? "Selected" : "Book Session"}
                             </span>
-                            <span className="mt-1 block text-sm font-semibold opacity-80">
-                              {sessionLocationLines(slot.location).map((line) => (
-                                <span key={line} className="block">{line}</span>
-                              ))}
-                            </span>
-                            <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
-                            <span className="mt-3 block text-xs font-black uppercase text-electric">{spotsLabel(slot.remainingSpots)}</span>
                           </div>
-                          <span
-                            className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
-                              isSelected ? "bg-electric text-white" : "bg-mist text-navy"
-                            }`}
-                          >
-                            {isSelected ? "Selected" : "Book Session"}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                {sessionsForSelectedDate.length === 0 ? (
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {availableSessions.length > 0 && sessionsForSelectedDate.length === 0 ? (
                   <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
                     No open sessions are available for this date. Choose another highlighted date.
                   </p>
+                ) : null}
+                {availablePrivateSessions.length > 0 ? (
+                  <div className="grid gap-3 border-t border-slate-200 pt-5">
+                    <div>
+                      <p className="text-sm font-black text-navy">Available private sessions</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">
+                        Private sessions are booked for one player and do not count toward small group capacity.
+                      </p>
+                    </div>
+                    {availablePrivateSessions.map((slot) => {
+                      const isSelected = selectedPrivateSessionId === slot.id;
+
+                      return (
+                        <button
+                          key={slot.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedPrivateSessionId(slot.id);
+                            setSelectedSlotId("");
+                            setSelectedSessionDate("");
+                            setPrivateBookingSuccess(null);
+                            clearFieldError("session");
+                            setFields((current) => ({ ...current, players: "1" }));
+                          }}
+                          className={`rounded-lg border p-4 text-left transition ${
+                            isSelected
+                              ? "border-navy bg-navy text-white shadow-xl shadow-navy/20"
+                              : "border-slate-200 bg-white text-navy hover:border-electric"
+                          }`}
+                        >
+                          <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+                            <div>
+                              <span className={`block text-xs font-black uppercase ${isSelected ? "text-electric" : "text-slate-500"}`}>
+                                {slot.dayLabel}, {slot.dateLabel}
+                              </span>
+                              <span className="mt-1 block text-2xl font-black">{privateSessionTimeRange(slot)}</span>
+                              <span className="mt-2 block text-sm font-bold opacity-90">Private Session</span>
+                              <span className="mt-1 block text-sm font-semibold opacity-80">
+                                {sessionLocationLines(slot.location).map((line) => (
+                                  <span key={line} className="block">{line}</span>
+                                ))}
+                              </span>
+                              <span className="mt-1 block text-sm font-semibold opacity-80">{slot.duration} session</span>
+                              <span className="mt-3 block text-xs font-black uppercase text-electric">Available</span>
+                            </div>
+                            <span
+                              className={`inline-flex w-full justify-center rounded-md px-4 py-3 text-xs font-black uppercase sm:w-auto ${
+                                isSelected ? "bg-electric text-white" : "bg-mist text-navy"
+                              }`}
+                            >
+                              {isSelected ? "Selected" : "Book Private Session"}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : null}
                 {fieldErrorMessage("session")}
               </div>
@@ -2118,7 +2182,7 @@ export function BookingForm() {
               <div className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600">
                 Training Package booking uses 1 credit for {fields.playerName || "this player"}.
               </div>
-            ) : isPrivateSessionOption ? (
+            ) : isPrivateSessionBooking ? (
               <div className="rounded-md bg-mist px-4 py-3 text-sm font-bold text-slate-600">
                 Private sessions are booked for one player at a time.
               </div>
@@ -2356,14 +2420,14 @@ export function BookingForm() {
               <h3 className="mt-2 text-2xl font-black text-navy">
                 {usesExistingPass
                   ? "Parent waiver + Training credit"
-                  : isPrivateSessionOption
+                  : isPrivateSessionBooking
                     ? "Parent waiver + private session payment"
                     : "Parent waiver + secure payment"}
               </h3>
               <p className="mt-3 text-sm leading-6 text-slate-600">
                 {usesExistingPass
                   ? "Your paid Training credit will reserve this session after the waiver."
-                  : isPrivateSessionOption
+                  : isPrivateSessionBooking
                     ? "Choose card payment or submit the waiver and view Zelle instructions."
                   : "Secure online payment is completed after the waiver."}
               </p>
@@ -2436,9 +2500,9 @@ export function BookingForm() {
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span>Players attending</span>
-                    <span className="font-black text-navy">{usesExistingPass || isPrivateSessionOption ? "1" : fields.players}</span>
+                    <span className="font-black text-navy">{usesExistingPass || isPrivateSessionBooking ? "1" : fields.players}</span>
                   </div>
-                  {isPrivateSessionOption ? (
+                  {isPrivateSessionBooking ? (
                     <div className="flex items-center justify-between gap-4">
                       <span>Payment method</span>
                       <span className="font-black text-navy">{privatePaymentMethod === "zelle" ? "Zelle" : "Card"}</span>
@@ -2454,7 +2518,7 @@ export function BookingForm() {
                 <p className="text-sm leading-6 text-slate-600">
                   No card payment is collected for this booking because one Training credit will be used.
                 </p>
-              ) : isPrivateSessionOption ? (
+              ) : isPrivateSessionBooking ? (
                 <div className="grid gap-3">
                   <p className="text-sm leading-6 text-slate-600">
                     Private session payment is completed after the waiver.
@@ -2519,7 +2583,7 @@ export function BookingForm() {
                   onClick={
                     usesExistingPass
                       ? confirmWithLaunchPassCredit
-                      : isPrivateSessionOption
+                      : isPrivateSessionBooking
                         ? startPrivateSessionCheckout
                         : startStripeCheckout
                   }
@@ -2532,7 +2596,7 @@ export function BookingForm() {
                       : creditBookingSuccess
                         ? "Confirmed"
                         : "Confirm Booking"
-                    : isPrivateSessionOption
+                    : isPrivateSessionBooking
                       ? isSubmitting
                         ? privatePaymentMethod === "zelle"
                           ? "Submitting..."
