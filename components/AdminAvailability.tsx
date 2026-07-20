@@ -694,10 +694,68 @@ function parsePastedWeekStart(text: string, fallbackDate: string) {
   return startOfWeekDateInput(fallbackDate || todayDateInput());
 }
 
+function parsePastedDateText(value: string, fallbackDate: string) {
+  const cleanValue = value.trim().replace(/^,\s*/, "").replace(/:$/, "").trim();
+
+  if (!cleanValue) {
+    return null;
+  }
+
+  const isoMatch = cleanValue.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+
+  if (isoMatch) {
+    return dateInputFromParts(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]));
+  }
+
+  const slashMatch = cleanValue.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+
+  if (slashMatch) {
+    const month = Number(slashMatch[1]);
+    const day = Number(slashMatch[2]);
+    const rawYear = slashMatch[3] ? Number(slashMatch[3]) : inferPastedScheduleYear(month, day, fallbackDate);
+    const year = rawYear < 100 ? rawYear + 2000 : rawYear;
+
+    return dateInputFromParts(year, month, day);
+  }
+
+  const monthMatch = cleanValue.match(
+    /(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?/i
+  );
+
+  if (monthMatch) {
+    const month = monthNameToIndex[monthMatch[1].toLowerCase()];
+    const day = Number(monthMatch[2]);
+    const year = monthMatch[3] ? Number(monthMatch[3]) : inferPastedScheduleYear(month, day, fallbackDate);
+
+    return dateInputFromParts(year, month, day);
+  }
+
+  return null;
+}
+
 function dateForWeekday(weekStartDate: string, dayOfWeek: number) {
   const mondayBasedOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
 
   return addDaysToDateInput(weekStartDate, mondayBasedOffset);
+}
+
+function parsePastedDayHeading(line: string, fallbackDate: string) {
+  const match = line.match(/^(sunday|sun|monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thu|friday|fri|saturday|sat)\b\s*[:,]?\s*(.*)$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const dayOfWeek = weekdayNameToIndex[match[1].toLowerCase()];
+
+  if (typeof dayOfWeek !== "number") {
+    return null;
+  }
+
+  return {
+    dayOfWeek,
+    date: parsePastedDateText(match[2], fallbackDate)
+  };
 }
 
 function timeInputFromPastedParts(
@@ -785,6 +843,7 @@ function parsePastedWeeklySchedule(input: {
   const rows: PastedScheduleRow[] = [];
   const errors: string[] = [];
   let currentDayOfWeek: number | null = null;
+  let currentDate = "";
 
   input.text.split(/\r?\n/).forEach((rawLine, index) => {
     const line = rawLine.trim();
@@ -793,11 +852,11 @@ function parsePastedWeeklySchedule(input: {
       return;
     }
 
-    const dayHeading = line.match(/^([a-z]+)\s*:?\s*$/i);
-    const dayIndex = dayHeading ? weekdayNameToIndex[dayHeading[1].toLowerCase()] : undefined;
+    const dayHeading = parsePastedDayHeading(line, input.fallbackWeekStartDate);
 
-    if (typeof dayIndex === "number") {
-      currentDayOfWeek = dayIndex;
+    if (dayHeading) {
+      currentDayOfWeek = dayHeading.dayOfWeek;
+      currentDate = dayHeading.date || dateForWeekday(weekStartDate, dayHeading.dayOfWeek);
       return;
     }
 
@@ -834,7 +893,7 @@ function parsePastedWeeklySchedule(input: {
     rows.push(
       emptyPastedScheduleRow({
         id: `pasted-${index}-${Date.now()}`,
-        date: dateForWeekday(weekStartDate, currentDayOfWeek),
+        date: currentDate || dateForWeekday(weekStartDate, currentDayOfWeek),
         startTime: start.value,
         endTime: end.value,
         sessionType,
