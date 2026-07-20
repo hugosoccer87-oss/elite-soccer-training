@@ -216,6 +216,11 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
   const needsWaiver = true;
   const planLabel = selectedPlanLabel;
   const isClosed = ["paid", "partially_scheduled", "fully_scheduled", "cancelled"].includes(link.status);
+  const isTrainingPackageSelection =
+    selectedPlanType === "four_session_training_package" || selectedPlanType === "six_session_training_package";
+  const unusedCreditsAfterSelection = Math.max(0, Number(selectedOption.credits || 0) - selectedCount);
+  const unusedCreditLabel = unusedCreditsAfterSelection === 1 ? "1 training credit" : `${unusedCreditsAfterSelection} training credits`;
+  const selectedSessionLabel = selectedCount === 1 ? "1 selected session" : `${selectedCount} selected sessions`;
 
   function choosePlan(planType: CustomPaymentLinkPlanType) {
     setSelectedPlanType(planType);
@@ -406,6 +411,19 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
               <p className="mt-2">{link.notesToParent}</p>
             </div>
           ) : null}
+          {isTrainingPackageSelection ? (
+            <div className="mt-5 rounded-[8px] border border-blue-100 bg-blue-50 p-4 text-sm font-bold leading-6 text-slate-700">
+              <p className="font-black text-slate-950">You do not need to choose every session today.</p>
+              <p className="mt-1">
+                Choose from the available times now. Any unused training credits can be booked later.
+              </p>
+              {selectedCount > 0 && unusedCreditsAfterSelection > 0 ? (
+                <p className="mt-2 text-electric">
+                  With {selectedSessionLabel}, {unusedCreditLabel} will remain after payment.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {link.suggestedAvailability ? (
             <div className="mt-4 rounded-[8px] bg-blue-50 p-4 text-sm leading-6 text-slate-700">
               <p className="font-black text-slate-950">Suggested Availability</p>
@@ -523,9 +541,18 @@ export function CustomPaymentLinkForm({ link, sessions, privateSessions }: Props
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 {privateSelectionMode
-                  ? "Choose from the private session openings Coach Hugo made available for this link."
-                  : "Parents can only book the number of sessions included with this private link."}
+                  ? isTrainingPackageSelection
+                    ? "Choose any available private session time now. Any unused training credits can be booked later."
+                    : "Choose from the private session openings Coach Hugo made available for this link."
+                  : isTrainingPackageSelection
+                    ? "Choose available sessions now. Any unused training credits can be booked later."
+                    : "Parents can only book the number of sessions included with this private link."}
               </p>
+              {isTrainingPackageSelection && selectedCount > 0 && unusedCreditsAfterSelection > 0 ? (
+                <div className="mt-4 rounded-[8px] border border-blue-100 bg-blue-50 p-4 text-sm font-bold leading-6 text-slate-700">
+                  {selectedSessionLabel} now. {unusedCreditLabel} will stay available for later booking after payment.
+                </div>
+              ) : null}
 
               <div className="mt-5 grid gap-3">
                 {privateSelectionMode ? (
