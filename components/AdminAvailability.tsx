@@ -241,6 +241,26 @@ type BulkPreviewSession = {
   duplicateInPreview: boolean;
 };
 
+type PastedScheduleSessionType = "small_group" | "private_session";
+type PastedScheduleMeridiem = "AM" | "PM";
+type PastedScheduleRow = {
+  id: string;
+  date: string;
+  dayLabel: string;
+  startTime: string;
+  endTime: string;
+  sessionType: PastedScheduleSessionType;
+  trainingGroup: TrainingGroupId;
+  capacity: number;
+  visibility: PrivateSessionVisibility;
+  location: string;
+  sourceLine: string;
+  warnings: string[];
+  errors: string[];
+  alreadyExists: boolean;
+  duplicateInPreview: boolean;
+};
+
 type ManualBookingPaymentStatus = "paid" | "pending_payment" | "comped" | "training_credit_used";
 type ManualBookingPaymentMethod =
   | "Zelle"
@@ -389,6 +409,66 @@ const defaultBulkPatterns: BulkSessionPattern[] = [
   { id: "friday-6", dayOfWeek: 5, startTime: "06:00", endTime: "07:00", trainingFocus: "General Training" },
   { id: "friday-7", dayOfWeek: 5, startTime: "07:00", endTime: "08:00", trainingFocus: "General Training" }
 ];
+const defaultTrainingLocation = "Desert Christian Academy, 40700 Yucca Lane, Bermuda Dunes, CA 92203";
+const pastedScheduleExample = `Week of July 15
+
+Monday:
+6:00-7:00 Small Group
+7:00-8:00 Small Group
+
+Tuesday:
+7:30-8:30 Private Session
+8:30-9:30 Private Session
+
+Wednesday:
+6:00-7:00 Small Group
+
+Thursday:
+8:30-9:30 Private Session`;
+const monthNameToIndex: Record<string, number> = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  sept: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12
+};
+const weekdayNameToIndex: Record<string, number> = {
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  thurs: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6
+};
 
 function escapeHtml(value: string) {
   return value
@@ -552,6 +632,222 @@ function dayLabelFromDateInput(value: string) {
   const day = dateFromDateInput(value).getUTCDay();
 
   return dayOptions.find((option) => option.value === day)?.label ?? "Session";
+}
+
+function dateInputFromParts(year: number, month: number, day: number) {
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return "";
+  }
+
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function inferPastedScheduleYear(month: number, day: number, fallbackDate: string) {
+  const fallbackYear = Number(fallbackDate.split("-")[0]) || new Date().getFullYear();
+  const candidate = dateFromDateInput(dateInputFromParts(fallbackYear, month, day));
+  const today = dateFromDateInput(todayDateInput());
+  const thirtyDaysAgo = new Date(today);
+
+  thirtyDaysAgo.setUTCDate(today.getUTCDate() - 30);
+
+  return candidate.getTime() < thirtyDaysAgo.getTime() ? fallbackYear + 1 : fallbackYear;
+}
+
+function parsePastedWeekStart(text: string, fallbackDate: string) {
+  const weekLine = text.match(/week\s+of\s+([^\n\r]+)/i)?.[1]?.trim();
+
+  if (!weekLine) {
+    return startOfWeekDateInput(fallbackDate || todayDateInput());
+  }
+
+  const isoMatch = weekLine.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+
+  if (isoMatch) {
+    return startOfWeekDateInput(
+      dateInputFromParts(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]))
+    );
+  }
+
+  const slashMatch = weekLine.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+
+  if (slashMatch) {
+    const month = Number(slashMatch[1]);
+    const day = Number(slashMatch[2]);
+    const rawYear = slashMatch[3] ? Number(slashMatch[3]) : inferPastedScheduleYear(month, day, fallbackDate);
+    const year = rawYear < 100 ? rawYear + 2000 : rawYear;
+
+    return startOfWeekDateInput(dateInputFromParts(year, month, day));
+  }
+
+  const monthMatch = weekLine.match(
+    /(january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?/i
+  );
+
+  if (monthMatch) {
+    const month = monthNameToIndex[monthMatch[1].toLowerCase()];
+    const day = Number(monthMatch[2]);
+    const year = monthMatch[3] ? Number(monthMatch[3]) : inferPastedScheduleYear(month, day, fallbackDate);
+
+    return startOfWeekDateInput(dateInputFromParts(year, month, day));
+  }
+
+  return startOfWeekDateInput(fallbackDate || todayDateInput());
+}
+
+function dateForWeekday(weekStartDate: string, dayOfWeek: number) {
+  const mondayBasedOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+  return addDaysToDateInput(weekStartDate, mondayBasedOffset);
+}
+
+function timeInputFromPastedParts(
+  hourText: string,
+  minuteText: string | undefined,
+  suffix: string | undefined,
+  defaultMeridiem: PastedScheduleMeridiem
+) {
+  const rawHour = Number(hourText);
+  const minute = minuteText ? Number(minuteText) : 0;
+  const normalizedSuffix = suffix?.toUpperCase() as PastedScheduleMeridiem | undefined;
+
+  if (!Number.isFinite(rawHour) || !Number.isFinite(minute) || minute < 0 || minute > 59) {
+    return { value: "", error: "Time could not be read." };
+  }
+
+  if (normalizedSuffix) {
+    if (rawHour < 1 || rawHour > 12) {
+      return { value: "", error: "Use 1-12 when AM or PM is included." };
+    }
+
+    const hour =
+      normalizedSuffix === "PM" && rawHour !== 12
+        ? rawHour + 12
+        : normalizedSuffix === "AM" && rawHour === 12
+          ? 0
+          : rawHour;
+
+    return { value: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, error: "" };
+  }
+
+  if (rawHour > 23) {
+    return { value: "", error: "Hour must be 23 or lower." };
+  }
+
+  if (rawHour > 12 || rawHour === 0) {
+    return { value: `${String(rawHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, error: "" };
+  }
+
+  const hour = defaultMeridiem === "PM" && rawHour !== 12 ? rawHour + 12 : defaultMeridiem === "AM" && rawHour === 12 ? 0 : rawHour;
+
+  return { value: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, error: "" };
+}
+
+function emptyPastedScheduleRow(input: {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  sessionType: PastedScheduleSessionType;
+  trainingGroup: TrainingGroupId;
+  visibility: PrivateSessionVisibility;
+  location: string;
+  sourceLine: string;
+  errors?: string[];
+}): PastedScheduleRow {
+  return {
+    id: input.id,
+    date: input.date,
+    dayLabel: dayLabelFromDateInput(input.date),
+    startTime: input.startTime,
+    endTime: input.endTime,
+    sessionType: input.sessionType,
+    trainingGroup: input.trainingGroup,
+    capacity: input.sessionType === "private_session" ? 1 : slotCapacity,
+    visibility: input.visibility,
+    location: input.location,
+    sourceLine: input.sourceLine,
+    warnings: [],
+    errors: input.errors ?? [],
+    alreadyExists: false,
+    duplicateInPreview: false
+  };
+}
+
+function parsePastedWeeklySchedule(input: {
+  text: string;
+  fallbackWeekStartDate: string;
+  defaultMeridiem: PastedScheduleMeridiem;
+  privateVisibility: PrivateSessionVisibility;
+  location: string;
+  trainingGroup: TrainingGroupId;
+}) {
+  const weekStartDate = parsePastedWeekStart(input.text, input.fallbackWeekStartDate);
+  const rows: PastedScheduleRow[] = [];
+  const errors: string[] = [];
+  let currentDayOfWeek: number | null = null;
+
+  input.text.split(/\r?\n/).forEach((rawLine, index) => {
+    const line = rawLine.trim();
+
+    if (!line || /^week\s+of\b/i.test(line)) {
+      return;
+    }
+
+    const dayHeading = line.match(/^([a-z]+)\s*:?\s*$/i);
+    const dayIndex = dayHeading ? weekdayNameToIndex[dayHeading[1].toLowerCase()] : undefined;
+
+    if (typeof dayIndex === "number") {
+      currentDayOfWeek = dayIndex;
+      return;
+    }
+
+    if (currentDayOfWeek === null) {
+      errors.push(`Line ${index + 1}: Add a day heading before "${line}".`);
+      return;
+    }
+
+    const timeMatch = line.match(
+      /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|\bto\b)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+(.+)$/i
+    );
+
+    if (!timeMatch) {
+      errors.push(`Line ${index + 1}: Could not read "${line}". Use a format like 6:00-7:00 Small Group.`);
+      return;
+    }
+
+    const description = timeMatch[7].trim();
+    const sessionType: PastedScheduleSessionType | null = /private/i.test(description)
+      ? "private_session"
+      : /small|group/i.test(description)
+        ? "small_group"
+        : null;
+
+    if (!sessionType) {
+      errors.push(`Line ${index + 1}: Use "Small Group" or "Private Session" after the time.`);
+      return;
+    }
+
+    const start = timeInputFromPastedParts(timeMatch[1], timeMatch[2], timeMatch[3], input.defaultMeridiem);
+    const end = timeInputFromPastedParts(timeMatch[4], timeMatch[5], timeMatch[6] || timeMatch[3], input.defaultMeridiem);
+    const rowErrors = [start.error, end.error].filter(Boolean);
+
+    rows.push(
+      emptyPastedScheduleRow({
+        id: `pasted-${index}-${Date.now()}`,
+        date: dateForWeekday(weekStartDate, currentDayOfWeek),
+        startTime: start.value,
+        endTime: end.value,
+        sessionType,
+        trainingGroup: input.trainingGroup,
+        visibility: input.privateVisibility,
+        location: input.location,
+        sourceLine: line,
+        errors: rowErrors
+      })
+    );
+  });
+
+  return { weekStartDate, rows, errors };
 }
 
 function bulkSessionKey(input: {
@@ -1321,6 +1617,16 @@ export function AdminAvailability() {
   const [bulkLocation, setBulkLocation] = useState("Desert Christian Academy, 40700 Yucca Lane, Bermuda Dunes, CA 92203");
   const [bulkPatterns, setBulkPatterns] = useState<BulkSessionPattern[]>(defaultBulkPatterns);
   const [bulkPreviewVisible, setBulkPreviewVisible] = useState(false);
+  const [pastedScheduleText, setPastedScheduleText] = useState(pastedScheduleExample);
+  const [pastedWeekStartDate, setPastedWeekStartDate] = useState(startOfWeekDateInput(todayDateInput()));
+  const [pastedDefaultMeridiem, setPastedDefaultMeridiem] = useState<PastedScheduleMeridiem>("AM");
+  const [pastedPrivateVisibility, setPastedPrivateVisibility] = useState<PrivateSessionVisibility>("private_link");
+  const [pastedLocation, setPastedLocation] = useState(defaultTrainingLocation);
+  const [pastedTrainingGroup, setPastedTrainingGroup] = useState<TrainingGroupId>("elite-performance");
+  const [pastedPreviewRows, setPastedPreviewRows] = useState<PastedScheduleRow[]>([]);
+  const [pastedParseErrors, setPastedParseErrors] = useState<string[]>([]);
+  const [pastedPreviewVisible, setPastedPreviewVisible] = useState(false);
+  const [pastedAllowWarnings, setPastedAllowWarnings] = useState(false);
   const [blockDate, setBlockDate] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -1833,6 +2139,10 @@ export function AdminAvailability() {
   }, [bulkCapacity, bulkEndDate, bulkGroupId, bulkLocation, bulkPatterns, bulkStartDate, sessions]);
   const bulkNewSessionsCount = bulkPreviewSessions.filter((session) => !session.alreadyExists && !session.duplicateInPreview).length;
   const bulkSkippedSessionsCount = bulkPreviewSessions.length - bulkNewSessionsCount;
+  const pastedReadyCount = pastedPreviewRows.filter((row) => row.errors.length === 0 && row.warnings.length === 0).length;
+  const pastedWarningCount = pastedPreviewRows.filter((row) => row.errors.length === 0 && row.warnings.length > 0).length;
+  const pastedErrorCount = pastedPreviewRows.filter((row) => row.errors.length > 0).length;
+  const pastedCreatableCount = pastedReadyCount + (pastedAllowWarnings ? pastedWarningCount : 0);
   const confirmedBookings = useMemo(() => bookings.filter(isBookingConfirmedForAdmin), [bookings]);
   const incompleteBookings = useMemo(() => bookings.filter((booking) => !isBookingConfirmedForAdmin(booking)), [bookings]);
   const filteredBookings = useMemo(
@@ -2152,6 +2462,241 @@ export function AdminAvailability() {
     return labels;
   }
 
+  function pastedScheduleKey(row: Pick<PastedScheduleRow, "sessionType" | "trainingGroup" | "date" | "startTime" | "endTime">) {
+    return [row.sessionType, row.trainingGroup, row.date, row.startTime, row.endTime].join("|");
+  }
+
+  function exactPastedScheduleMatches(row: PastedScheduleRow) {
+    const labels: string[] = [];
+
+    if (!row.date || !row.startTime || !row.endTime) {
+      return labels;
+    }
+
+    if (row.sessionType === "small_group") {
+      for (const session of sessions) {
+        const sessionDate = formatDateOnly(session.start_datetime, session.timezone);
+        const sessionStart = formatTimeInput(session.start_datetime, session.timezone);
+        const sessionEnd = formatTimeInput(session.end_datetime, session.timezone);
+
+        if (
+          session.status !== "cancelled" &&
+          session.training_group === row.trainingGroup &&
+          sessionDate === row.date &&
+          sessionStart === row.startTime &&
+          sessionEnd === row.endTime
+        ) {
+          labels.push(`Small Group Training ${formatTimeRange(session)} (${session.status})`);
+        }
+      }
+
+      return labels;
+    }
+
+    for (const session of privateSessionAvailability) {
+      const sessionDate = formatDateOnly(session.start_datetime, session.timezone);
+      const sessionStart = formatTimeInput(session.start_datetime, session.timezone);
+      const sessionEnd = formatTimeInput(session.end_datetime, session.timezone);
+
+      if (
+        session.status !== "cancelled" &&
+        sessionDate === row.date &&
+        sessionStart === row.startTime &&
+        sessionEnd === row.endTime
+      ) {
+        labels.push(`${privateCalendarStatusLabel(session)} ${formatTimeRange(session)}`);
+      }
+    }
+
+    return labels;
+  }
+
+  function addPastedScheduleWarnings(rows: PastedScheduleRow[]) {
+    const keys = new Map<string, number>();
+
+    return rows.map((row) => {
+      const errors = [...row.errors];
+      const warnings: string[] = [];
+      const missingFields = !row.date || !row.startTime || !row.endTime;
+
+      if (missingFields) {
+        errors.push("Date, start time, and end time are required.");
+      }
+
+      if (!missingFields && row.endTime <= row.startTime) {
+        errors.push("End time must be after start time.");
+      }
+
+      const key = pastedScheduleKey(row);
+      const duplicateInPreview = (keys.get(key) ?? 0) > 0;
+
+      keys.set(key, (keys.get(key) ?? 0) + 1);
+
+      const exactMatches = exactPastedScheduleMatches(row);
+      const conflictLabels = !missingFields && row.endTime > row.startTime ? privateAvailabilityConflictLabels(row.date, row.startTime, row.endTime) : [];
+
+      if (exactMatches.length > 0) {
+        warnings.push(`Already exists: ${exactMatches.slice(0, 2).join(", ")}`);
+      }
+
+      if (duplicateInPreview) {
+        warnings.push("Duplicate in pasted schedule.");
+      }
+
+      if (conflictLabels.length > 0) {
+        warnings.push(`Overlaps with: ${conflictLabels.slice(0, 3).join(", ")}`);
+      }
+
+      return {
+        ...row,
+        dayLabel: row.date ? dayLabelFromDateInput(row.date) : row.dayLabel,
+        capacity: row.sessionType === "private_session" ? 1 : Math.min(slotCapacity, Math.max(1, Number(row.capacity) || slotCapacity)),
+        visibility: row.sessionType === "private_session" ? row.visibility : "public",
+        warnings: Array.from(new Set(warnings)),
+        errors: Array.from(new Set(errors)),
+        alreadyExists: exactMatches.length > 0,
+        duplicateInPreview
+      };
+    });
+  }
+
+  function previewPastedWeeklySchedule() {
+    setError("");
+    setNotice("");
+    setPastedAllowWarnings(false);
+
+    if (!pastedScheduleText.trim()) {
+      setError("Paste a weekly schedule before previewing.");
+      return;
+    }
+
+    const parsed = parsePastedWeeklySchedule({
+      text: pastedScheduleText,
+      fallbackWeekStartDate: pastedWeekStartDate,
+      defaultMeridiem: pastedDefaultMeridiem,
+      privateVisibility: pastedPrivateVisibility,
+      location: pastedLocation.trim() || business.location,
+      trainingGroup: pastedTrainingGroup
+    });
+    const rowsWithWarnings = addPastedScheduleWarnings(parsed.rows);
+
+    setPastedWeekStartDate(parsed.weekStartDate);
+    setPastedParseErrors(parsed.errors);
+    setPastedPreviewRows(rowsWithWarnings);
+    setPastedPreviewVisible(true);
+
+    if (rowsWithWarnings.length === 0) {
+      setError("No schedule rows were found. Use day headings like Monday: and rows like 6:00-7:00 Small Group.");
+    }
+  }
+
+  function updatePastedPreviewRow(id: string, updates: Partial<PastedScheduleRow>) {
+    setPastedPreviewRows((current) =>
+      addPastedScheduleWarnings(
+        current.map((row) => {
+          if (row.id !== id) {
+            return row;
+          }
+
+          const nextSessionType = updates.sessionType ?? row.sessionType;
+          const shouldClearErrors =
+            "date" in updates || "startTime" in updates || "endTime" in updates || "sessionType" in updates;
+
+          return {
+            ...row,
+            ...updates,
+            errors: shouldClearErrors ? [] : updates.errors ?? row.errors,
+            capacity: nextSessionType === "private_session" ? 1 : updates.capacity ?? row.capacity,
+            visibility: nextSessionType === "private_session" ? updates.visibility ?? row.visibility : "public"
+          };
+        })
+      )
+    );
+  }
+
+  function removePastedPreviewRow(id: string) {
+    setPastedPreviewRows((current) => addPastedScheduleWarnings(current.filter((row) => row.id !== id)));
+  }
+
+  async function createPastedWeeklySchedule() {
+    if (!pastedPreviewVisible || pastedPreviewRows.length === 0) {
+      previewPastedWeeklySchedule();
+      return;
+    }
+
+    const blockedRows = pastedPreviewRows.filter((row) => row.errors.length > 0 || (!pastedAllowWarnings && row.warnings.length > 0));
+    const rowsToCreate = pastedPreviewRows.filter((row) => row.errors.length === 0 && (pastedAllowWarnings || row.warnings.length === 0));
+
+    if (rowsToCreate.length === 0) {
+      setError("No rows are ready to create. Fix the warnings/errors or choose the override checkbox.");
+      return;
+    }
+
+    if (
+      pastedAllowWarnings &&
+      !window.confirm("Some rows have warnings. Create the selected schedule anyway?")
+    ) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+    setNotice("");
+
+    try {
+      let createdCount = 0;
+
+      for (const row of rowsToCreate) {
+        const response = await fetch(row.sessionType === "private_session" ? "/api/admin/private-session-availability" : "/api/admin/sessions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(
+            row.sessionType === "private_session"
+              ? {
+                  date: row.date,
+                  startTime: row.startTime,
+                  endTime: row.endTime,
+                  location: row.location,
+                  sessionFocus: privateSessionTrainingFocusValue,
+                  notes: "Created from Paste Weekly Schedule",
+                  status: "available",
+                  visibility: row.visibility
+                }
+              : {
+                  trainingGroup: row.trainingGroup,
+                  date: row.date,
+                  time: row.startTime,
+                  endTime: row.endTime,
+                  trainingFocus: null,
+                  capacity: row.capacity,
+                  location: row.location,
+                  status: "open"
+                }
+          )
+        });
+        const result = (await response.json().catch(() => ({}))) as { error?: string };
+
+        if (!response.ok) {
+          throw new Error(result.error || `Could not create ${row.dayLabel} ${row.startTime}-${row.endTime}.`);
+        }
+
+        createdCount += 1;
+      }
+
+      setPastedPreviewVisible(false);
+      setPastedPreviewRows([]);
+      await refreshAdminData(
+        `Created ${createdCount} schedule opening${createdCount === 1 ? "" : "s"}. Skipped ${blockedRows.length} row${blockedRows.length === 1 ? "" : "s"} with warnings or errors.`
+      );
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Pasted schedule could not be created.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function createPrivateAvailability() {
     if (!privateAvailabilityDate || !privateAvailabilityStartTime) {
       setError("Choose a private session date and start time.");
@@ -2330,15 +2875,13 @@ export function AdminAvailability() {
       return;
     }
 
-    if (newSessionType === "private_session") {
-      const conflicts = privateAvailabilityConflictLabels(newDate, newTime, finalEndTime);
+    const conflicts = privateAvailabilityConflictLabels(newDate, newTime, finalEndTime);
 
-      if (
-        conflicts.length > 0 &&
-        !window.confirm(`This overlaps with another session. Are you sure?\n\n${conflicts.slice(0, 5).join("\n")}`)
-      ) {
-        return;
-      }
+    if (
+      conflicts.length > 0 &&
+      !window.confirm(`This overlaps with another session. Are you sure?\n\n${conflicts.slice(0, 5).join("\n")}`)
+    ) {
+      return;
     }
 
     setIsSaving(true);
@@ -4670,54 +5213,71 @@ export function AdminAvailability() {
           <div className="panel p-5 sm:p-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-xs font-black uppercase text-electric">Bulk Create Sessions</p>
-                <h3 className="mt-2 text-2xl font-black text-navy">Create a month of openings.</h3>
+                <p className="text-xs font-black uppercase text-electric">Paste Weekly Schedule</p>
+                <h3 className="mt-2 text-2xl font-black text-navy">Paste next week&apos;s openings.</h3>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                  Add weekly patterns, preview every session first, then create only the new sessions. Existing matching
-                  sessions are skipped.
+                  Paste a simple schedule, preview the small group and private openings, edit anything that needs fixing,
+                  then create the schedule when it looks right.
                 </p>
               </div>
               <button type="button" onClick={() => setShowBulkCreate((value) => !value)} className={secondaryButtonClass}>
-                {showBulkCreate ? "Close Bulk Tool" : "Bulk Create Sessions"}
+                {showBulkCreate ? "Close Paste Tool" : "Paste Weekly Schedule"}
               </button>
             </div>
 
             {showBulkCreate ? (
               <div className="mt-6 grid gap-5">
                 <div className="rounded-xl border border-slate-200 bg-mist p-4 sm:p-5">
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid gap-4 lg:grid-cols-4">
                     <label className="grid gap-2 text-sm font-bold text-navy">
-                      Start Date
+                      Week Start
                       <input
                         className={inputClass}
                         type="date"
-                        value={bulkStartDate}
+                        value={pastedWeekStartDate}
                         onChange={(event) => {
-                          setBulkStartDate(event.target.value);
-                          setBulkPreviewVisible(false);
+                          setPastedWeekStartDate(event.target.value);
+                          setPastedPreviewVisible(false);
                         }}
                       />
                     </label>
                     <label className="grid gap-2 text-sm font-bold text-navy">
-                      End Date
-                      <input
-                        className={inputClass}
-                        type="date"
-                        value={bulkEndDate}
-                        onChange={(event) => {
-                          setBulkEndDate(event.target.value);
-                          setBulkPreviewVisible(false);
-                        }}
-                      />
-                    </label>
-                    <label className="grid gap-2 text-sm font-bold text-navy lg:col-span-2">
-                      Training Group
+                      Missing AM/PM Means
                       <select
                         className={inputClass}
-                        value={bulkGroupId}
+                        value={pastedDefaultMeridiem}
                         onChange={(event) => {
-                          setBulkGroupId(event.target.value as TrainingGroupId);
-                          setBulkPreviewVisible(false);
+                          setPastedDefaultMeridiem(event.target.value as PastedScheduleMeridiem);
+                          setPastedPreviewVisible(false);
+                        }}
+                      >
+                        <option value="AM">AM</option>
+                        <option value="PM">PM</option>
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Private Visibility
+                      <select
+                        className={inputClass}
+                        value={pastedPrivateVisibility}
+                        onChange={(event) => {
+                          setPastedPrivateVisibility(event.target.value as PrivateSessionVisibility);
+                          setPastedPreviewVisible(false);
+                        }}
+                      >
+                        <option value="private_link">Private link only</option>
+                        <option value="public">Public booking calendar</option>
+                        <option value="hidden">Hidden/admin only</option>
+                      </select>
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy">
+                      Small Group
+                      <select
+                        className={inputClass}
+                        value={pastedTrainingGroup}
+                        onChange={(event) => {
+                          setPastedTrainingGroup(event.target.value as TrainingGroupId);
+                          setPastedPreviewVisible(false);
                         }}
                       >
                         {trainingGroups.map((group) => (
@@ -4727,169 +5287,224 @@ export function AdminAvailability() {
                         ))}
                       </select>
                     </label>
-                    <label className="grid gap-2 text-sm font-bold text-navy">
-                      Capacity
-                      <input
-                        className={inputClass}
-                        type="number"
-                        min="1"
-                        max="6"
-                        value={bulkCapacity}
-                        onChange={(event) => {
-                          setBulkCapacity(event.target.value);
-                          setBulkPreviewVisible(false);
-                        }}
-                      />
-                    </label>
-                    <label className="grid gap-2 text-sm font-bold text-navy sm:col-span-2 lg:col-span-3">
+                    <label className="grid gap-2 text-sm font-bold text-navy lg:col-span-4">
                       Location
                       <input
                         className={inputClass}
-                        value={bulkLocation}
+                        value={pastedLocation}
                         onChange={(event) => {
-                          setBulkLocation(event.target.value);
-                          setBulkPreviewVisible(false);
+                          setPastedLocation(event.target.value);
+                          setPastedPreviewVisible(false);
+                        }}
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-navy lg:col-span-4">
+                      Paste Schedule
+                      <textarea
+                        className={`${inputClass} min-h-72 resize-y font-mono text-sm leading-6`}
+                        value={pastedScheduleText}
+                        onChange={(event) => {
+                          setPastedScheduleText(event.target.value);
+                          setPastedPreviewVisible(false);
                         }}
                       />
                     </label>
                   </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h4 className="text-lg font-black text-navy">Weekly session patterns</h4>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">
-                        Add one row for each weekly time block and focus.
-                      </p>
-                    </div>
-                    <button type="button" onClick={addBulkPattern} className={secondaryButtonClass}>
-                      Add Pattern
+                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm font-semibold leading-6 text-slate-600">
+                      Use day headings like Monday: and rows like 6:00-7:00 Small Group or 8:30-9:30 Private Session.
+                    </p>
+                    <button type="button" onClick={previewPastedWeeklySchedule} className={navyButtonClass}>
+                      Preview Pasted Schedule
                     </button>
                   </div>
+                </div>
 
-                  <div className="mt-5 grid gap-3">
-                    {bulkPatterns.map((pattern, index) => (
-                      <div key={pattern.id} className="grid gap-3 rounded-lg border border-slate-200 bg-mist p-3 lg:grid-cols-[1fr_1fr_1fr_2fr_auto] lg:items-end">
-                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                          Day of Week
-                          <select
-                            className={inputClass}
-                            value={pattern.dayOfWeek}
-                            onChange={(event) => updateBulkPattern(pattern.id, { dayOfWeek: Number(event.target.value) })}
-                          >
-                            {dayOptions.map((day) => (
-                              <option key={day.value} value={day.value}>
-                                {day.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                          Start Time
+                {pastedParseErrors.length > 0 ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-900">
+                    {pastedParseErrors.map((parseError) => (
+                      <p key={parseError}>{parseError}</p>
+                    ))}
+                  </div>
+                ) : null}
+
+                {pastedPreviewVisible ? (
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                    <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <h4 className="text-lg font-black text-navy">Preview Pasted Schedule</h4>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          Review and edit these openings first. Rows with warnings are held back unless you choose the override.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-black uppercase text-emerald-700">
+                            {pastedReadyCount} ready
+                          </span>
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-black uppercase text-amber-800">
+                            {pastedWarningCount} warning
+                          </span>
+                          <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-[11px] font-black uppercase text-red-700">
+                            {pastedErrorCount} error
+                          </span>
+                        </div>
+                      </div>
+                      <div className="grid gap-3">
+                        <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-bold leading-5 text-amber-900">
                           <input
-                            className={inputClass}
-                            type="time"
-                            value={pattern.startTime}
-                            onChange={(event) => updateBulkPattern(pattern.id, { startTime: event.target.value })}
+                            type="checkbox"
+                            checked={pastedAllowWarnings}
+                            onChange={(event) => setPastedAllowWarnings(event.target.checked)}
+                            className="mt-1 h-4 w-4 rounded border-amber-300"
                           />
-                        </label>
-                        <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
-                          End Time
-                          <input
-                            className={inputClass}
-                            type="time"
-                            value={pattern.endTime}
-                            onChange={(event) => updateBulkPattern(pattern.id, { endTime: event.target.value })}
-                          />
+                          Create rows with warnings anyway
                         </label>
                         <button
                           type="button"
-                          onClick={() => removeBulkPattern(pattern.id)}
-                          disabled={bulkPatterns.length === 1}
-                          className={bulkPatterns.length === 1 ? secondaryButtonClass : dangerButtonClass}
+                          disabled={isSaving || pastedCreatableCount === 0}
+                          onClick={() => void createPastedWeeklySchedule()}
+                          className={primaryButtonClass}
                         >
-                          Remove
-                          <span className="sr-only"> pattern {index + 1}</span>
+                          Create Sessions
                         </button>
                       </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <button type="button" onClick={previewBulkSchedule} className={navyButtonClass}>
-                    Preview Schedule
-                  </button>
-                  {bulkPreviewVisible ? (
-                    <p className="text-sm font-bold text-slate-600">
-                      Preview: {bulkNewSessionsCount} new / {bulkSkippedSessionsCount} skipped
-                    </p>
-                  ) : null}
-                </div>
-
-                {bulkPreviewVisible ? (
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-                    <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <h4 className="text-lg font-black text-navy">Preview Schedule</h4>
-                        <p className="mt-1 text-sm leading-6 text-slate-600">
-                          Review every session before creating. Matching existing sessions are marked and skipped.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={isSaving || bulkNewSessionsCount === 0}
-                        onClick={() => void createBulkSessions()}
-                        className={primaryButtonClass}
-                      >
-                        Create Sessions
-                      </button>
                     </div>
 
                     <div className="mt-4 grid gap-3">
-                      {bulkPreviewSessions.map((session) => {
-                        const skipped = session.alreadyExists || session.duplicateInPreview;
+                      {pastedPreviewRows.length > 0 ? (
+                        pastedPreviewRows.map((row) => {
+                          const hasErrors = row.errors.length > 0;
+                          const hasWarnings = row.warnings.length > 0;
 
-                        return (
-                          <div
-                            key={session.key}
-                            className={`grid gap-3 rounded-lg border p-4 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-center ${
-                              skipped ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-mist"
-                            }`}
-                          >
-                            <div>
-                              <p className="text-xs font-black uppercase text-slate-500">{session.dayLabel}</p>
-                              <p className="mt-1 text-lg font-black text-navy">{session.date}</p>
-                              <p className="mt-1 text-sm font-semibold text-slate-600">
-                                {session.startTime}-{session.endTime}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs font-black uppercase text-slate-500">Training Group</p>
-                              <p className="mt-1 font-black text-navy">{session.trainingGroupLabel}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs font-black uppercase text-slate-500">Details</p>
-                              <p className="mt-1 text-sm font-semibold text-slate-600">Capacity {session.capacity}</p>
-                              <p className="mt-1 text-sm text-slate-600">{session.location}</p>
-                            </div>
-                            <span
-                              className={`rounded-full border px-3 py-1 text-center text-[11px] font-black uppercase ${
-                                skipped
-                                  ? "border-amber-300 bg-white text-amber-700"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          return (
+                            <div
+                              key={row.id}
+                              className={`grid gap-3 rounded-lg border p-4 ${
+                                hasErrors
+                                  ? "border-red-200 bg-red-50"
+                                  : hasWarnings
+                                    ? "border-amber-200 bg-amber-50"
+                                    : "border-slate-200 bg-mist"
                               }`}
                             >
-                              {session.alreadyExists
-                                ? "Already exists"
-                                : session.duplicateInPreview
-                                  ? "Duplicate in preview"
-                                  : "New"}
-                            </span>
-                          </div>
-                        );
-                      })}
+                              <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] lg:items-end">
+                                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                                  Date
+                                  <input
+                                    className={inputClass}
+                                    type="date"
+                                    value={row.date}
+                                    onChange={(event) => updatePastedPreviewRow(row.id, { date: event.target.value })}
+                                  />
+                                </label>
+                                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                                  Type
+                                  <select
+                                    className={inputClass}
+                                    value={row.sessionType}
+                                    onChange={(event) =>
+                                      updatePastedPreviewRow(row.id, {
+                                        sessionType: event.target.value as PastedScheduleSessionType,
+                                        visibility: event.target.value === "private_session" ? pastedPrivateVisibility : "public"
+                                      })
+                                    }
+                                  >
+                                    <option value="small_group">Small Group Training</option>
+                                    <option value="private_session">Private Session</option>
+                                  </select>
+                                </label>
+                                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                                  Start
+                                  <input
+                                    className={inputClass}
+                                    type="time"
+                                    value={row.startTime}
+                                    onChange={(event) => updatePastedPreviewRow(row.id, { startTime: event.target.value })}
+                                  />
+                                </label>
+                                <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                                  End
+                                  <input
+                                    className={inputClass}
+                                    type="time"
+                                    value={row.endTime}
+                                    onChange={(event) => updatePastedPreviewRow(row.id, { endTime: event.target.value })}
+                                  />
+                                </label>
+                                {row.sessionType === "private_session" ? (
+                                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                                    Visibility
+                                    <select
+                                      className={inputClass}
+                                      value={row.visibility}
+                                      onChange={(event) => updatePastedPreviewRow(row.id, { visibility: event.target.value as PrivateSessionVisibility })}
+                                    >
+                                      <option value="private_link">Private link only</option>
+                                      <option value="public">Public booking calendar</option>
+                                      <option value="hidden">Hidden/admin only</option>
+                                    </select>
+                                  </label>
+                                ) : (
+                                  <label className="grid gap-2 text-xs font-black uppercase text-slate-500">
+                                    Capacity
+                                    <input
+                                      className={inputClass}
+                                      type="number"
+                                      min="1"
+                                      max="6"
+                                      value={row.capacity}
+                                      onChange={(event) => updatePastedPreviewRow(row.id, { capacity: Number(event.target.value) })}
+                                    />
+                                  </label>
+                                )}
+                                <button type="button" onClick={() => removePastedPreviewRow(row.id)} className={dangerButtonClass}>
+                                  Remove
+                                </button>
+                              </div>
+
+                              <div className="grid gap-2 text-sm leading-6 text-slate-600 lg:grid-cols-[1fr_auto] lg:items-start">
+                                <div>
+                                  <p className="font-black text-navy">
+                                    {row.dayLabel} · {row.sessionType === "private_session" ? "Private Session" : "Small Group Training"} · {row.startTime}-{row.endTime}
+                                  </p>
+                                  <p className="mt-1">Location: {row.location}</p>
+                                  <p className="mt-1 text-xs font-bold text-slate-500">From: {row.sourceLine}</p>
+                                </div>
+                                <span
+                                  className={`rounded-full border px-3 py-1 text-center text-[11px] font-black uppercase ${
+                                    hasErrors
+                                      ? "border-red-300 bg-white text-red-700"
+                                      : hasWarnings
+                                        ? "border-amber-300 bg-white text-amber-800"
+                                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  }`}
+                                >
+                                  {hasErrors ? "Fix needed" : hasWarnings ? "Warning" : "Ready"}
+                                </span>
+                              </div>
+
+                              {row.errors.length > 0 ? (
+                                <div className="rounded-md border border-red-200 bg-white p-3 text-sm font-bold leading-6 text-red-700">
+                                  {row.errors.map((rowError) => (
+                                    <p key={rowError}>{rowError}</p>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              {row.warnings.length > 0 ? (
+                                <div className="rounded-md border border-amber-200 bg-white p-3 text-sm font-bold leading-6 text-amber-900">
+                                  {row.warnings.map((warning) => (
+                                    <p key={warning}>{warning}</p>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p className="rounded-lg border border-slate-200 bg-mist p-4 text-sm font-bold text-slate-600">
+                          No rows found yet. Paste a schedule and preview it first.
+                        </p>
+                      )}
                     </div>
                   </div>
                 ) : null}
